@@ -236,11 +236,11 @@ sub vcl_recv {
             return (pass);
         }
 
-        # WooCommerce customer-specific routes and actions.
-        if (
-            req.url ~ "(?i)^/(cart|checkout|my-account|order-pay|order-received|customer-logout|lost-password)(?:/|\?|$)" ||
-            req.url ~ "(?i)(\?|&)(add-to-cart|wc-ajax|wc-api)="
-        ) {
+        # WooCommerce customer-specific actions are request-visible and can be
+        # passed here without assuming site-specific Cart/Checkout/Account paths.
+        # Dynamic WooCommerce page URLs are resolved by UltraCache itself and
+        # protected through the origin's standard private/no-store cache policy.
+        if (req.url ~ "(?i)(\?|&)(add-to-cart|wc-ajax|wc-api)=") {
             set req.http.X-Cache-Mode = "PASS";
             return (pass);
         }

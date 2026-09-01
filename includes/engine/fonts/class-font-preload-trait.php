@@ -19,7 +19,7 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
          * plugin maintenance requests. Keep the Google Fonts localization
          * workflow frontend-only so admin CSS is never rewritten or delayed.
          */
-        if (function_exists('is_admin') && is_admin()) {
+        if ((function_exists('is_admin') && is_admin()) || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return $src;
         }
 
@@ -52,7 +52,7 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
             return $urls;
         }
 
-        if (function_exists('is_admin') && is_admin()) {
+        if ((function_exists('is_admin') && is_admin()) || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return $urls;
         }
 
@@ -123,7 +123,7 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
 
     public function enqueue_runtime_font_helpers()
     {
-        if (is_admin()) {
+        if (is_admin() || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 
@@ -210,7 +210,7 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
 
     public function enqueue_local_font_display_patch_stylesheet()
     {
-        if (function_exists('is_admin') && is_admin()) {
+        if ((function_exists('is_admin') && is_admin()) || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 
@@ -245,6 +245,10 @@ trait Ultra_Cache_Engine_Font_Preload_Trait
 
     public function add_local_font_display_patch_style_attributes($html, $handle, $href, $media)
     {
+        if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+            return $html;
+        }
+
         if ('ultracache-font-display-patch' !== (string) $handle || '' === (string) $html) {
             return $html;
         }

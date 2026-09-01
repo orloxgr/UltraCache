@@ -11,7 +11,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 {
 
 		public function filter_attachment_image_attributes($attr, $attachment, $size) {
-			if (!$this->is_media_optimization_enabled()) {
+			if ((function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) || !$this->is_media_optimization_enabled()) {
 				return $attr;
 			}
 
@@ -29,7 +29,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 		}
 
 		public function filter_attachment_image_srcset($sources, $size_array, $image_src, $image_meta, $attachment_id) {
-			if (!$this->is_media_optimization_enabled()) {
+			if ((function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) || !$this->is_media_optimization_enabled()) {
 				return $sources;
 			}
 
@@ -128,7 +128,13 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			$previous_accept = $this->media_rewrite_accept_context;
 			$previous_generation_context = $this->media_generation_context;
 			$previous_page_url = $this->media_rewrite_page_url_context;
+			$previous_cache_storage_context = $this->media_rewrite_cache_storage_context;
 
+			// Warm workers can be authenticated administrators while finalizing
+			// anonymous public cache output. Only an explicit warm/storage caller may
+			// override the normal logged-in frontend bypass; regular frontend/store
+			// callbacks and runtime scans keep their existing authentication policy.
+			$this->media_rewrite_cache_storage_context = !empty($context['public_cache_storage']);
 			$this->media_rewrite_accept_context = isset($context['accept']) && is_string($context['accept'])
 				? (string) $context['accept']
 				: '';
@@ -146,6 +152,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 				$this->media_rewrite_accept_context = $previous_accept;
 				$this->media_generation_context = $previous_generation_context;
 				$this->media_rewrite_page_url_context = $previous_page_url;
+				$this->media_rewrite_cache_storage_context = $previous_cache_storage_context;
 			}
 
 			return is_string($rewritten) ? $rewritten : $html;
@@ -188,11 +195,15 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			if (0 === strpos($url, '/') && 0 !== strpos($url, '//')) {
 				$url = home_url($url);
 			}
-			$url = remove_query_arg(
-				array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust', 'ultracache_revalidate', 'ultracache_rt', 'ultracache_rv', 'ultracache_bucket'),
-				$url
-			);
-			$url = esc_url_raw($url);
+			if (method_exists($this, 'normalize_on_demand_affected_page_url')) {
+				$url = $this->normalize_on_demand_affected_page_url($url);
+			} else {
+				$url = remove_query_arg(
+					array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust', 'ultracache_revalidate', 'ultracache_rt', 'ultracache_rv', 'ultracache_bucket'),
+					$url
+				);
+				$url = esc_url_raw($url);
+			}
 			if ('' === $url) {
 				return '';
 			}
@@ -233,6 +244,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			// different semantics. Only explicitly supported media attributes and CSS
 			// background declarations inside real <style> blocks change.
 			$rewritten = $this->rewrite_html_image_urls_with_tag_processor($html);
+			$rewritten = $this->finalize_slider_revolution_image_lists_for_media_bucket($rewritten);
 			return $this->rewrite_inline_style_block_image_urls($rewritten);
 		}
 
@@ -247,7 +259,7 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 		 * @return string HTML fragment with context-escaped image URL replacements.
 		 */
 		public function rewrite_filtered_content_image_urls($html) {
-			if (!$this->is_media_optimization_enabled()) {
+			if ((function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) || !$this->is_media_optimization_enabled()) {
 				return $html;
 			}
 
@@ -299,6 +311,8 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			return false;
 		}
 
+
+
 		private function rewrite_html_image_urls_with_tag_processor($html) {
 			$processor = new WP_HTML_Tag_Processor($html);
 			$srcset_attributes = array('srcset', 'data-srcset', 'data-lazy-srcset', 'data-lazyload-srcset');
@@ -312,6 +326,10 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			while ($processor->next_tag()) {
 				$tag = strtoupper((string) $processor->get_tag());
 				$single_url_attributes = array();
+
+				if ('LINK' === $tag && $this->is_ultracache_lcp_image_preload_tag($processor)) {
+					$this->rewrite_ultracache_lcp_image_preload_tag($processor);
+				}
 
 				if (in_array($tag, $image_tags, true)) {
 					$single_url_attributes = array('src', 'data-src', 'data-lazy-src', 'data-lazyload', 'data-image', 'data-origin');
@@ -412,6 +430,64 @@ trait Ultra_Cache_Media_Html_Rewrite_Trait
 			);
 
 			return is_string($updated) && '' !== $updated ? $updated : $html;
+		}
+
+
+		private function is_ultracache_lcp_image_preload_tag($processor) {
+			if ('1' !== (string) $processor->get_attribute('data-ultracache-lcp-preload')) {
+				return false;
+			}
+
+			$rel = strtolower(trim((string) $processor->get_attribute('rel')));
+			$as = strtolower(trim((string) $processor->get_attribute('as')));
+			if ('image' !== $as || '' === $rel) {
+				return false;
+			}
+
+			return in_array('preload', preg_split('/\\s+/', $rel), true);
+		}
+
+		private function rewrite_ultracache_lcp_image_preload_tag($processor) {
+			$current = $processor->get_attribute('href');
+			if (!is_string($current) || '' === $current) {
+				return;
+			}
+
+			$replacement = $this->sanitize_rewritten_public_url_raw(
+				$this->get_best_url_from_public_url($current)
+			);
+			if ('' === $replacement || $replacement === $current) {
+				return;
+			}
+
+			$processor->set_attribute('href', $replacement);
+			$mime_type = $this->get_rewritten_image_mime_type_from_url($replacement);
+			if ('' !== $mime_type) {
+				$processor->set_attribute('type', $mime_type);
+			}
+		}
+
+		private function get_rewritten_image_mime_type_from_url($url) {
+			$path = strtolower((string) wp_parse_url((string) $url, PHP_URL_PATH));
+			$extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+			switch ($extension) {
+				case 'avif':
+					return 'image/avif';
+				case 'webp':
+					return 'image/webp';
+				case 'jpg':
+				case 'jpeg':
+					return 'image/jpeg';
+				case 'png':
+					return 'image/png';
+				case 'gif':
+					return 'image/gif';
+				case 'svg':
+					return 'image/svg+xml';
+			}
+
+			return '';
 		}
 
 		private function rewrite_tag_processor_single_url_attribute($processor, $attribute) {

@@ -55,11 +55,10 @@
 	const {
 		configure: configureSettingsModule,
 		CRITICAL_SETTING_KEYS,
-		PERFORMANCE_PROFILE_ORDER,
-		PERFORMANCE_PROFILE_CUSTOM,
-		PERFORMANCE_PROFILES,
-		getPerformanceProfilePatch,
-		splitProfileObjectCachePatch,
+		OPTIMAL_SETTINGS_RECIPE,
+		getOptimalSettingsPatch,
+		splitOptimalObjectCachePatch,
+		splitOptimalCompressionPatch,
 		normalizeJavascriptStrategy,
 		getJavascriptStrategyValue,
 		getJavascriptStrategyPatch,
@@ -74,11 +73,12 @@
 		getHtmlCompressionDeliveryDescription,
 		normalizeLineListItems,
 		mergeLineListAppendOnly,
-		getActivePerformanceProfile,
 		buildSettingsExportPayload,
 		getTransferableSettingsFromImport,
 		triggerFileDownload,
 		mergeUniqueSettingLines,
+		normalizeSettingListLines,
+		removeOverlappingSettingLines,
 	} = settingsModule;
 	const { createDashboardSettingsActions } = dashboardSettingsActionsModule;
 	const { createDashboardSections } = dashboardSectionsModule;
@@ -120,9 +120,8 @@
 		PerformanceProfilerCard,
 		sanitizeRuntimeJsScanDisplayUrl,
 		buildRuntimeJsScanUrl,
-		normalizeRuntimeJsScanResult,
-		readPopupRuntimeJsScanSnapshot,
-		readPopupRuntimeJsScanNavigationLossSnapshot,
+		requestRuntimeJsConsoleFixer,
+		runRuntimeSiteScanAction,
 	} = diagnosticsModule;
 	const {
 		configure: configureJobsModule,
@@ -153,6 +152,7 @@
 		fetchJobBatch: fetchMediaJobBatch,
 		beginManualSession: beginMediaManualSession,
 		endManualSession: endMediaManualSession,
+		runHomepageMediaPhase,
 		createController: createMediaController,
 	} = mediaModule;
 	const { useMediaReplacementState, useMediaReplacementWorkflow } = mediaReplacementModule;
@@ -167,6 +167,7 @@
 		LiteSpeedCard,
 		ExternalCacheFlushSettingsCard,
 		RedisCard,
+		getObjectCacheBackendChoices,
 	} = cacheModule;
 	const {
 		useDashboardState,
@@ -194,6 +195,7 @@
 	configureApi({
 		restBase: ultracache.restBase,
 		restNonce: ultracache.restNonce,
+		restNonceUrl: ultracache.restNonceUrl,
 		fetch: (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null,
 	});
 	const initialSettings = ultracache.settings || {};
@@ -229,7 +231,6 @@
 	const SYSTEM_NOTICE_COOLDOWN = 24 * 60 * 60 * 1000;
 	const STATS_REFRESH_INTERVAL = 60000;
 	const ACTION_QUEUE_POLL_DELAY = 750;
-	const ACTION_QUEUE_MAX_POLLS = 480;
 	const JOB_STORAGE_KEY = 'ultracache-dashboard-job-state-v3';
 	const DEFAULT_QUEUE_BATCH_SIZE = 100;
 	const MAX_WARM_ITEM_RETRIES = 2;
@@ -310,6 +311,8 @@
 			gzipAvailable: !!source.gzipAvailable,
 			brotliAvailable: !!source.brotliAvailable,
 			blocked: !!source.blocked,
+			probeComplete: !!source.probeComplete,
+			indeterminate: !!source.indeterminate,
 			brokenGzip: !!source.brokenGzip,
 			brokenBrotli: !!source.brokenBrotli,
 			message: source.message ? String(source.message) : '',
@@ -553,7 +556,6 @@
 		const options = [
 			{ key: 'delayedJsAutostartAfterLoadEnabled', label: __('After page load', 'ultracache') },
 			{ key: 'delayedJsAutostartMousemoveEnabled', label: __('Mouse move', 'ultracache') },
-			{ key: 'delayedJsAutostartScrollEnabled', label: __('Scroll', 'ultracache') },
 			{ key: 'delayedJsAutostartKeyboardEnabled', label: __('Keyboard', 'ultracache') },
 			{ key: 'delayedJsAutostartTouchPointerEnabled', label: __('Touch / pointer', 'ultracache') },
 			{ key: 'delayedJsAutostartClickEnabled', label: __('Click', 'ultracache') },
@@ -586,6 +588,297 @@
 
 
 
+	function FirstRunSetupWizard({ open, state, plan, loading, loadError, applying, applyComplete, progress, process, etaText, javascriptNotice, javascriptStrategyChoice, objectCacheBackend, objectCacheOptions, warmScope, menuLocation, menuDepth, fullSiteSources, menuOptions, menuDepthOptions, fullSiteSourceOptions, mediaStepActive, mediaSkipRequested, onJavascriptStrategyChoiceChange, onObjectCacheBackendChange, onWarmScopeChange, onMenuLocationChange, onMenuDepthChange, onFullSiteSourcesChange, onSkipMedia, onClose, onStart, onRetry, onApply, onFinish }) {
+		if (!open) {
+			return null;
+		}
+
+		const wizardState = state && typeof state === 'object' ? state : {};
+		const status = String(wizardState.status || 'pending');
+		const currentStep = String(wizardState.current_step || 'welcome');
+		const progressItems = Array.isArray(progress) ? progress : [];
+		const done = status === 'completed' || currentStep === 'done';
+		const verify = status === 'in_progress' && currentStep === 'verify' && !applying;
+		const welcome = status === 'pending' && currentStep === 'welcome' && !loading && !plan;
+		const normalizedWarmScope = ['homepage', 'homepage_menu', 'full_site'].indexOf(String(warmScope || '')) !== -1 ? String(warmScope) : 'homepage';
+		const menuChoiceReady = !!String(menuLocation || '').trim() && ['1', '2', '3', 'all'].indexOf(String(menuDepth || '').trim()) !== -1;
+		const warmChoiceReady = normalizedWarmScope === 'homepage'
+			|| (normalizedWarmScope === 'homepage_menu' && menuChoiceReady)
+			|| (normalizedWarmScope === 'full_site' && !!String(fullSiteSources || '').trim());
+		const normalizedJavascriptStrategyChoice = ['user_experience', 'speed'].indexOf(String(javascriptStrategyChoice || '')) !== -1 ? String(javascriptStrategyChoice) : 'user_experience';
+		const setupChoicesReady = !!normalizedJavascriptStrategyChoice && !!String(objectCacheBackend || '').trim() && warmChoiceReady;
+		const lastErrorPhase = String(wizardState.last_error_phase || '');
+		const errorPhaseTitles = {
+			settings: __('Configuration needs attention.', 'ultracache'),
+			page_delivery: __('Page delivery setup needs attention.', 'ultracache'),
+			nginx_integration: __('Nginx integration needs attention.', 'ultracache'),
+			varnish: __('Varnish integration needs attention.', 'ultracache'),
+			compression: __('HTML compression setup needs attention.', 'ultracache'),
+			object_cache: __('Object Cache setup needs attention.', 'ultracache'),
+			media: __('Media format setup needs attention.', 'ultracache'),
+			query_allowlist: __('Query-string setup needs attention.', 'ultracache'),
+			fonts: __('Font optimization needs attention.', 'ultracache'),
+			integrations: __('Integration setup needs attention.', 'ultracache'),
+			prepare_flush: __('Cache flush needs attention.', 'ultracache'),
+			prepare_homepage: __('Homepage warm-up needs attention.', 'ultracache'),
+			prepare_css_exclusions: __('CSS preparation needs attention.', 'ultracache'),
+			prepare_media: __('Media preparation needs attention.', 'ultracache'),
+			prepare_menu: __('Menu warm-up needs attention.', 'ultracache'),
+			prepare_full_site: __('Full-site warm-up needs attention.', 'ultracache'),
+			js_runtime_scan: __('JavaScript check needs attention.', 'ultracache'),
+		};
+		const persistedErrorTitle = errorPhaseTitles[lastErrorPhase] || __('Setup needs attention.', 'ultracache');
+
+		const close = () => {
+			if (!applying && typeof onClose === 'function') {
+				onClose();
+			}
+		};
+
+		return h('div', {
+			className: 'uc-media-test-modal uc-setup-modal uc-first-run-wizard',
+			role: 'presentation',
+			onClick: close,
+			key: 'first-run-setup-wizard',
+		}, [
+			h('div', {
+				className: 'uc-media-test-modal__dialog uc-setup-modal__dialog uc-first-run-wizard__dialog',
+				role: 'dialog',
+				'aria-modal': 'true',
+				'aria-labelledby': 'uc-first-run-wizard-title',
+				onClick: (event) => event.stopPropagation(),
+				key: 'dialog',
+			}, [
+				h('button', {
+					type: 'button',
+					className: 'uc-media-test-modal__close',
+					onClick: close,
+					disabled: applying,
+					'aria-label': __('Close setup wizard', 'ultracache'),
+					key: 'close',
+				}, '×'),
+				h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, __('Setup Wizard', 'ultracache')),
+				h('h3', { className: 'uc-support-modal__title', id: 'uc-first-run-wizard-title', key: 'title' }, done ? __('UltraCache is configured', 'ultracache') : (verify ? __('Verify the website', 'ultracache') : __('UltraCache Setup Wizard', 'ultracache'))),
+
+				welcome ? h('div', { className: 'uc-setup-modal__content', key: 'welcome' }, [
+					h('p', { className: 'uc-support-modal__text', key: 'intro' }, __('UltraCache can analyze this website and apply the recommended performance configuration automatically. The setup uses live capability checks where required instead of guessing.', 'ultracache')),
+					h('section', { className: 'uc-setup-modal__section', key: 'steps' }, [
+						h('h4', { className: 'uc-setup-modal__section-title', key: 'title' }, __('What setup will do', 'ultracache')),
+						h('div', { className: 'uc-setup-modal__progress-list', key: 'list' }, [
+							h('div', { className: 'uc-setup-modal__progress-row', key: 'analyze' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '1'), h('span', { key: 'text' }, __('Analyze the server, WordPress site, integrations, media encoders, and warm-up scope.', 'ultracache'))]),
+							h('div', { className: 'uc-setup-modal__progress-row', key: 'configure' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '2'), h('span', { key: 'text' }, __('Apply and verify the recommended cache, frontend, media, font, and integration settings.', 'ultracache'))]),
+						h('div', { className: 'uc-setup-modal__progress-row', key: 'prepare' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '3'), h('span', { key: 'text' }, __('Flush cache, warm the site, and convert homepage images live before continuing setup.', 'ultracache'))]),
+							h('div', { className: 'uc-setup-modal__progress-row', key: 'javascript' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '4'), h('span', { key: 'text' }, __('Run hidden browser runtime checks and repair only JavaScript problems that produce real runtime errors.', 'ultracache'))]),
+						]),
+					]),
+				]) : null,
+
+				loading ? h('div', { className: 'uc-setup-modal__loading', key: 'loading' }, [
+					h('span', { className: 'uc-setup-modal__spinner', 'aria-hidden': 'true', key: 'spinner' }),
+					h('span', { key: 'text' }, __('Analyzing this website…', 'ultracache')),
+				]) : null,
+
+				!loading && loadError ? h('div', { className: 'uc-setup-modal__notice uc-setup-modal__notice--error', key: 'load-error' }, [
+					h('strong', { key: 'title' }, __('Website analysis failed.', 'ultracache')),
+					h('span', { key: 'message' }, loadError),
+					h(Button, { onClick: onRetry, disabled: applying, key: 'retry' }, __('Retry analysis', 'ultracache')),
+				]) : null,
+
+				!loading && !loadError && plan && !done && !verify && !applying ? h('div', { className: 'uc-setup-modal__content uc-setup-modal__content--review', key: 'review' }, [
+					h('p', { className: 'uc-support-modal__text', key: 'intro' }, __('Choose the JavaScript optimization profile, Object Cache backend, and how far UltraCache should warm the website. The Wizard uses the existing UltraCache settings and subsystems.', 'ultracache')),
+					h('section', { className: 'uc-setup-modal__section uc-setup-modal__section--choices', key: 'choices' }, [
+						h('h4', { className: 'uc-setup-modal__section-title', key: 'title' }, __('Setup choices', 'ultracache')),
+						h('div', { className: 'grid grid-cols-1 gap-4', key: 'fields' }, [
+							h(SelectField, {
+								label: __('JavaScript Strategy', 'ultracache'),
+								description: __('Choose whether the Wizard prioritizes a faster automatic release for user interaction or the most aggressive delayed-JavaScript strategy.', 'ultracache'),
+								value: normalizedJavascriptStrategyChoice,
+								onChange: onJavascriptStrategyChoiceChange,
+								disabled: applying,
+								options: [
+									{ value: 'user_experience', label: __('Optimize for User Experience', 'ultracache') },
+									{ value: 'speed', label: __('Optimize for Speed', 'ultracache') },
+								],
+								key: 'javascript-strategy-choice',
+							}),
+							h(SelectField, {
+								label: __('Object Cache', 'ultracache'),
+								description: __('Choose an UltraCache Object Cache backend, or leave Object Cache management to another plugin/integration.', 'ultracache'),
+								value: objectCacheBackend || '',
+								onChange: onObjectCacheBackendChange,
+								disabled: applying,
+								options: Array.isArray(objectCacheOptions) ? objectCacheOptions : [],
+								key: 'object-cache-choice',
+							}),
+							h(SelectField, {
+								label: __('Warm-up', 'ultracache'),
+								description: __('Choose how far the existing UltraCache warm-up flow should run after configuration.', 'ultracache'),
+								value: normalizedWarmScope,
+								onChange: onWarmScopeChange,
+								disabled: applying,
+								options: [
+									{ value: 'homepage', label: __('Homepage', 'ultracache') },
+									{ value: 'homepage_menu', label: __('Homepage + Menu', 'ultracache') },
+									{ value: 'full_site', label: __('Full Site', 'ultracache') },
+								],
+								key: 'warm-scope-choice',
+							}),
+							normalizedWarmScope !== 'homepage' ? h(SelectField, {
+								label: __('Menu warm-up', 'ultracache'),
+								description: __('Choose any saved WordPress menu. Assigned/frontend menus are listed first; other saved menus run only when selected.', 'ultracache'),
+								value: menuLocation || '',
+								onChange: onMenuLocationChange,
+								disabled: applying,
+								options: Array.isArray(menuOptions) ? menuOptions : [],
+								key: 'menu-location-choice',
+							}) : null,
+							normalizedWarmScope !== 'homepage' ? h(SelectField, {
+								label: __('Menu depth', 'ultracache'),
+								description: __('Depth 1 = top-level only. All = every child item in the selected menu.', 'ultracache'),
+								value: menuDepth || '',
+								onChange: onMenuDepthChange,
+								disabled: applying,
+								options: Array.isArray(menuDepthOptions) ? menuDepthOptions : [],
+								key: 'menu-depth-choice',
+							}) : null,
+							normalizedWarmScope === 'full_site' ? h(MultiSelectField, {
+								label: __('Full-site warm-up sources', 'ultracache'),
+								description: __('Choose the URL sources used by the existing full-site warm-up flow.', 'ultracache'),
+								value: fullSiteSources || '',
+								onChange: onFullSiteSourcesChange,
+								disabled: applying,
+								options: Array.isArray(fullSiteSourceOptions) ? fullSiteSourceOptions : [],
+								key: 'full-site-source-choice',
+							}) : null,
+						]),
+					]),
+				]) : null,
+
+				!applying && !done && wizardState.last_error ? h('div', { className: 'uc-setup-modal__notice uc-setup-modal__notice--error', key: 'persisted-error' }, [
+					h('strong', { key: 'title' }, persistedErrorTitle),
+					h('span', { key: 'message' }, String(wizardState.last_error || '')),
+				]) : null,
+
+				progressItems.length && !done ? h('section', { className: 'uc-setup-modal__section uc-setup-modal__progress', key: 'progress' }, [
+					h('h4', { className: 'uc-setup-modal__section-title', key: 'title' }, __('Configuring UltraCache', 'ultracache')),
+					h('div', { className: 'uc-setup-modal__progress-list', key: 'list' }, progressItems.map((item, index) => {
+						const rawItemState = String(item && item.state || 'running');
+						const itemState = rawItemState === 'done' ? 'complete' : rawItemState;
+						const symbol = itemState === 'complete' ? '✓' : (itemState === 'warning' ? '!' : '●');
+						return h('div', { className: classNames('uc-setup-modal__progress-row', 'is-' + itemState), key: String(item.phase || index) }, [
+							h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, symbol),
+							h('span', { key: 'message' }, String(item.message || '')),
+						]);
+					})),
+				]) : null,
+
+				applying && mediaStepActive ? h('div', { className: 'uc-setup-modal__actions', key: 'media-skip-actions' }, [
+					h(Button, { onClick: onSkipMedia, disabled: !!mediaSkipRequested, key: 'skip-media' }, mediaSkipRequested ? __('Skipping after current image…', 'ultracache') : __('Skip image conversion', 'ultracache')),
+				]) : null,
+
+				applying && process && process.active ? h(ProgressPanel, {
+					process,
+					etaText,
+					showWhenInactive: false,
+					inline: true,
+					key: 'live-operation-progress',
+				}) : null,
+
+				verify ? h('div', { className: 'uc-setup-modal__content', key: 'verify' }, [
+					h('div', { className: 'uc-setup-modal__notice', key: 'notice' }, [
+						h('strong', { key: 'title' }, javascriptNotice ? __('Automatic setup completed with a final browser check recommended.', 'ultracache') : __('Automated JavaScript checks are complete.', 'ultracache')),
+						h('span', { key: 'text' }, javascriptNotice ? String(javascriptNotice) : __('UltraCache compared an unoptimized Runtime Scan baseline with the optimized frontend, repaired the new deterministic JavaScript errors it found, and reached zero new runtime errors. One visual check remains because automated diagnostics cannot prove that every interactive component looks and behaves correctly.', 'ultracache')),
+					]),
+					h('section', { className: 'uc-setup-modal__section', key: 'manual-check' }, [
+						h('h4', { className: 'uc-setup-modal__section-title', key: 'title' }, __('Verify visible interactions', 'ultracache')),
+						h('div', { className: 'uc-setup-modal__progress-list', key: 'list' }, [
+							h('div', { className: 'uc-setup-modal__progress-row is-complete', key: 'menu' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '•'), h('span', { key: 'text' }, __('Menu and mobile navigation', 'ultracache'))]),
+							h('div', { className: 'uc-setup-modal__progress-row is-complete', key: 'slider' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '•'), h('span', { key: 'text' }, __('Sliders, popups, and other interactive widgets', 'ultracache'))]),
+							h('div', { className: 'uc-setup-modal__progress-row is-complete', key: 'forms' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '•'), h('span', { key: 'text' }, __('Forms and search', 'ultracache'))]),
+							h('div', { className: 'uc-setup-modal__progress-row is-complete', key: 'commerce' }, [h('span', { className: 'uc-setup-modal__progress-symbol', key: 'symbol' }, '•'), h('span', { key: 'text' }, __('Cart, checkout, and account flows when applicable', 'ultracache'))]),
+						]),
+					]),
+				]) : null,
+
+				done ? h('div', { className: 'uc-setup-modal__content', key: 'done' }, [
+					h('div', { className: 'uc-setup-modal__notice', key: 'notice' }, [
+						h('strong', { key: 'title' }, __('Recommended configuration applied.', 'ultracache')),
+						h('span', { key: 'text' }, __('UltraCache has completed the Setup Wizard. You can change any individual setting from the dashboard at any time.', 'ultracache')),
+					]),
+				]) : null,
+
+				h('div', { className: 'uc-setup-modal__actions', key: 'actions' }, [
+					welcome ? h(Button, { onClick: onStart, disabled: applying, variant: 'primary', key: 'start' }, __('Next', 'ultracache')) : null,
+					!welcome && !done && !verify && plan ? h(Button, { onClick: onApply, disabled: loading || applying || !setupChoicesReady, variant: 'primary', key: 'apply' }, applying ? (currentStep === 'prepare' ? __('Preparing website…', 'ultracache') : (currentStep === 'javascript' ? __('Checking JavaScript…', 'ultracache') : __('Configuring…', 'ultracache'))) : __('Next', 'ultracache')) : null,
+					verify ? h(Button, { onClick: () => window.open(frontendProbeUrl, '_blank', 'noopener,noreferrer'), key: 'open-site' }, __('Open website', 'ultracache')) : null,
+					verify ? h(Button, { onClick: onFinish, variant: 'primary', key: 'verify-finish' }, __('Finish setup', 'ultracache')) : null,
+					done ? h(Button, { onClick: onFinish, variant: 'primary', key: 'finish' }, __('Finish', 'ultracache')) : null,
+				]),
+			]),
+		]);
+	}
+
+
+	function TabGate({ visible, children, className, style }) {
+		return h('div', { className: classNames('uc-tab-gate', className || ''), hidden: !visible, style: style || undefined }, children);
+	}
+
+
+	function getEffectiveQueryAllowlistCount(value) {
+		const unique = Object.create(null);
+		const reserved = { '__proto__': true, constructor: true, prototype: true };
+		const lines = String(value || '').split(/\r?\n/);
+		let count = 0;
+		for (let i = 0; i < lines.length; i += 1) {
+			const key = String(lines[i] || '').trim().toLowerCase();
+			if (!/^[a-z0-9_-]{1,64}$/.test(key) || reserved[key]) {
+				continue;
+			}
+			if (!unique[key]) {
+				unique[key] = true;
+				count += 1;
+			}
+			if (count >= 200) {
+				break;
+			}
+		}
+		return count;
+	}
+
+	function getQueryCombinationDisplay(level, allowlistCount) {
+		const normalizedLevel = ['1', '2', '3', '4', 'all'].indexOf(String(level || '3')) !== -1 ? String(level || '3') : '3';
+		const fixed = { '1': 8, '2': 64, '3': 512, '4': 4096 };
+		if ('all' !== normalizedLevel) {
+			return { level: normalizedLevel, limitText: Number(fixed[normalizedLevel]).toLocaleString(), warning: '' };
+		}
+
+		const depth = Math.max(0, Number(allowlistCount || 0));
+		if (depth < 1) {
+			return {
+				level: 'all',
+				limitText: '0',
+				warning: __('No effective query-string args are currently allowlisted, so query-string variants bypass cache.', 'ultracache'),
+			};
+		}
+
+		if (depth <= 20 && typeof BigInt === 'function') {
+			const exact = BigInt(8) ** BigInt(depth);
+			return {
+				level: 'all',
+				limitText: exact.toLocaleString(),
+				warning: __('ALL is not recommended on faceted or filter-heavy sites.', 'ultracache'),
+			};
+		}
+
+		const log10 = depth * Math.log10(8);
+		const exponent = Math.floor(log10);
+		const mantissa = Math.pow(10, log10 - exponent);
+		return {
+			level: 'all',
+			limitText: '~' + mantissa.toFixed(2) + ' × 10^' + String(exponent),
+			warning: __('ALL is not recommended. The estimate is shown in bounded scientific notation to avoid large-number allocation.', 'ultracache'),
+		};
+	}
 
 	function App() {
 		const {
@@ -603,8 +896,6 @@
 			isMobile, setIsMobile,
 			supportModalOpen, setSupportModalOpen,
 			infoAccordionsOpen, setInfoAccordionsOpen,
-			safeDelayAppendRequest, setSafeDelayAppendRequest,
-			scannerAppendSequenceRef,
 			advancedForm, setAdvancedForm,
 			varnishForm, setVarnishForm,
 			redisForm, setRedisForm,
@@ -683,6 +974,86 @@
 		const [lcpDiagnosticsBusyKey, setLcpDiagnosticsBusyKey] = useState('');
 		const [lcpDiagnosticsQueryBusy, setLcpDiagnosticsQueryBusy] = useState(false);
 		const [versionHelpModalOpen, setVersionHelpModalOpen] = useState(false);
+		const [setupMediaStepActive, setSetupMediaStepActive] = useState(false);
+		const [setupMediaSkipRequested, setSetupMediaSkipRequested] = useState(false);
+		const setupMediaSkipRequestedRef = useRef(false);
+		const [wizardJavascriptStrategyChoice, setWizardJavascriptStrategyChoice] = useState('user_experience');
+		const [wizardObjectCacheBackend, setWizardObjectCacheBackend] = useState('');
+		const [wizardWarmScope, setWizardWarmScope] = useState('homepage');
+		const [wizardMenuLocation, setWizardMenuLocation] = useState('');
+		const [wizardMenuDepth, setWizardMenuDepth] = useState('1');
+		const [wizardFullSiteSources, setWizardFullSiteSources] = useState('');
+		const [firstRunWizardOpen, setFirstRunWizardOpen] = useState(false);
+		const [firstRunWizardState, setFirstRunWizardState] = useState(null);
+		const [firstRunWizardPlan, setFirstRunWizardPlan] = useState(null);
+		const [firstRunWizardPlanBusy, setFirstRunWizardPlanBusy] = useState(false);
+		const [firstRunWizardPlanError, setFirstRunWizardPlanError] = useState('');
+		const [firstRunWizardApplying, setFirstRunWizardApplying] = useState(false);
+		const [firstRunWizardApplyComplete, setFirstRunWizardApplyComplete] = useState(false);
+		const [firstRunWizardProgress, setFirstRunWizardProgress] = useState([]);
+		const [firstRunWizardJavascriptNotice, setFirstRunWizardJavascriptNotice] = useState('');
+		const setupWizardStatus = String(firstRunWizardState && firstRunWizardState.status || 'not_required');
+		const setupWizardCurrentStep = String(firstRunWizardState && firstRunWizardState.current_step || '');
+		const setupWizardHasState = !!firstRunWizardState && setupWizardStatus !== 'not_required';
+		const setupWizardCanResume = setupWizardHasState
+			&& ['pending', 'in_progress'].indexOf(setupWizardStatus) !== -1
+			&& setupWizardCurrentStep !== 'done';
+		const dashboardTabs = [
+			{ key: 'overview', label: __('Overview', 'ultracache') },
+			{ key: 'cache', label: __('Cache', 'ultracache') },
+			{ key: 'javascript', label: __('Javascript', 'ultracache') },
+			{ key: 'fonts-css', label: __('Fonts & CSS', 'ultracache') },
+			{ key: 'media', label: __('Media', 'ultracache') },
+			{ key: 'multilingual', label: __('Multilingual', 'ultracache') },
+			{ key: 'server', label: __('Server', 'ultracache') },
+			{ key: 'automation', label: __('Automation', 'ultracache') },
+			{ key: 'advanced', label: __('Advanced', 'ultracache') },
+		];
+		const dashboardTabKeys = dashboardTabs.map((tab) => tab.key);
+		const readDashboardTabFromLocation = () => {
+			try {
+				const requested = String(new URL(window.location.href).searchParams.get('tab') || 'overview').toLowerCase();
+				return dashboardTabKeys.indexOf(requested) !== -1 ? requested : 'overview';
+			} catch (error) {
+				return 'overview';
+			}
+		};
+		const [activeTab, setActiveTab] = useState(readDashboardTabFromLocation);
+
+		function selectDashboardTab(nextTab) {
+			const normalized = dashboardTabKeys.indexOf(String(nextTab || '')) !== -1 ? String(nextTab) : 'overview';
+			setActiveTab(normalized);
+			try {
+				const url = new URL(window.location.href);
+				url.searchParams.set('tab', normalized);
+				window.history.pushState({ ultracacheTab: normalized }, '', url.toString());
+			} catch (error) {
+				// URL synchronization is optional; the in-page tab still changes.
+			}
+		}
+
+		useEffect(() => {
+			const handlePopState = () => setActiveTab(readDashboardTabFromLocation());
+			window.addEventListener('popstate', handlePopState);
+			return () => window.removeEventListener('popstate', handlePopState);
+		}, []);
+
+		useEffect(() => {
+			let active = true;
+			apiRequest('setup_wizard_status').then((response) => {
+				if (!active || !response || response.success !== true || !response.state) {
+					return;
+				}
+				// Load persisted state only so Overview can offer explicit Resume and Restart actions when appropriate.
+				// Never auto-open or auto-resume the Wizard on dashboard load.
+				setFirstRunWizardState(response.state);
+			}).catch(() => {
+				// Wizard state discovery is intentionally silent.
+			});
+			return () => {
+				active = false;
+			};
+		}, []);
 
 		useEffect(() => {
 			const trigger = document.getElementById('ultracache-version-help-trigger');
@@ -738,9 +1109,10 @@
 
 		const dashboardSettingsActions = createDashboardSettingsActions({
 			CRITICAL_SETTING_KEYS,
-			PERFORMANCE_PROFILES,
-			getPerformanceProfilePatch,
-			splitProfileObjectCachePatch,
+			OPTIMAL_SETTINGS_RECIPE,
+			getOptimalSettingsPatch,
+			splitOptimalObjectCachePatch,
+			splitOptimalCompressionPatch,
 			buildSettingsExportPayload,
 			getTransferableSettingsFromImport,
 			triggerFileDownload,
@@ -757,9 +1129,11 @@
 			pushToast,
 			sleep,
 			enqueueUiOperation,
-			getProfileQueryAllowlistPatch,
-			getProfileObjectCachePatch,
+			getOptimalObjectCachePatch,
 			populateDeferDelayExclusionDefaults,
+			populateQueryStringAllowlist,
+			runGoogleFontsLocalOptimizationEnableEffects,
+			runDelayIconFontsEnableEffects,
 			advancedForm,
 			settings,
 			ultracache,
@@ -777,7 +1151,7 @@
 			waitForSettingsSaveToSettle,
 			syncQueuedSettingsBeforeAction,
 			queueSettingsPatch,
-			applyPerformanceProfile,
+			applyOptimalSettings,
 			updateAdvancedField,
 			saveAdvancedSettings,
 			exportSettingsFile,
@@ -785,6 +1159,1007 @@
 			importSettingsFile,
 			resetSettingsToDefaults,
 		} = dashboardSettingsActions;
+
+
+
+		async function persistFirstRunWizard(action, payload) {
+			const body = Object.assign({ action: action }, payload || {});
+			const response = await apiRequest('setup_wizard_update', body);
+			if (!response || response.success !== true || !response.state) {
+				throw new Error(__('UltraCache could not save the setup wizard state.', 'ultracache'));
+			}
+			setFirstRunWizardState(response.state);
+			return response.state;
+		}
+
+		async function loadFirstRunWizardPlan(resumeState = null) {
+			setFirstRunWizardPlanBusy(true);
+			setFirstRunWizardPlanError('');
+			try {
+				let externalCacheDetection = null;
+				let externalCacheDetectionWarning = '';
+				try {
+					externalCacheDetection = await apiRequest('external_caches_redetect', {});
+					if (externalCacheDetection && externalCacheDetection.success === false) {
+						externalCacheDetectionWarning = String(externalCacheDetection.message || __('Cache detection failed.', 'ultracache'));
+					}
+				} catch (detectionError) {
+					externalCacheDetectionWarning = detectionError && detectionError.message
+						? String(detectionError.message)
+						: __('Cache detection failed.', 'ultracache');
+				}
+
+				const response = await apiRequest('setup_plan');
+				if (!response || response.success !== true || response.readOnly !== true) {
+					throw new Error(__('UltraCache returned an invalid setup plan.', 'ultracache'));
+				}
+				response.analysis = Object.assign({}, response.analysis || {}, {
+					externalCaches: externalCacheDetection,
+					warnings: externalCacheDetectionWarning ? [externalCacheDetectionWarning] : [],
+				});
+				setFirstRunWizardPlan(response);
+				const currentSettings = settingsRef.current || {};
+				if (resumeState) {
+					const resumeUsesSpeedStrategy = String(currentSettings.javascriptStrategy || '').toLowerCase() === 'delay'
+						&& String(currentSettings.delayedLocalJsAutoStart || '').toLowerCase() === 'infinite';
+					setWizardJavascriptStrategyChoice(resumeUsesSpeedStrategy ? 'speed' : 'user_experience');
+				}
+				const recommendations = response.recommendations && typeof response.recommendations === 'object' ? response.recommendations : {};
+				const objectCacheRecommendation = recommendations.objectCache && typeof recommendations.objectCache === 'object' ? recommendations.objectCache : {};
+				const warmupRecommendation = recommendations.warmup && typeof recommendations.warmup === 'object' ? recommendations.warmup : {};
+				const validBackends = (typeof getObjectCacheBackendChoices === 'function' ? getObjectCacheBackendChoices() : []).map((choice) => String(choice.value || ''));
+				validBackends.push('external');
+				const currentBackend = String(currentSettings.objectCacheBackend || '').toLowerCase();
+				const recommendedBackend = String(objectCacheRecommendation.backend || '').toLowerCase();
+				const selectedBackend = validBackends.indexOf(currentBackend) !== -1 && !!currentSettings.objectCacheEnabled
+					? currentBackend
+					: (validBackends.indexOf(recommendedBackend) !== -1 ? recommendedBackend : (validBackends[0] || ''));
+				setWizardObjectCacheBackend(selectedBackend);
+				setWizardMenuLocation(String(currentSettings.warmMenuLocation || warmupRecommendation.menuLocation || ''));
+				setWizardMenuDepth(String(currentSettings.warmMenuDepth || warmupRecommendation.menuDepth || '1'));
+				setWizardFullSiteSources(String(currentSettings.warmFullSiteSources || (Array.isArray(warmupRecommendation.fullSiteSources) ? warmupRecommendation.fullSiteSources.join(',') : '')));
+				try {
+					const resumeStep = resumeState ? String(resumeState.current_step || '') : '';
+					const staleJavascriptFailure = resumeStep === 'javascript' && !!String(resumeState && (resumeState.last_error || resumeState.last_error_phase) || '').trim();
+					const resumableStep = staleJavascriptFailure
+						? 'verify'
+						: (['prepare', 'javascript', 'verify'].indexOf(resumeStep) !== -1 ? resumeStep : 'configure');
+					const completedSteps = resumableStep === 'prepare'
+						? ['analyze', 'configure']
+						: (resumableStep === 'javascript' ? ['analyze', 'configure', 'prepare'] : (resumableStep === 'verify' ? ['analyze', 'configure', 'prepare', 'javascript'] : ['analyze']));
+					if (staleJavascriptFailure) {
+						const staleReason = String(resumeState && resumeState.last_error || '').trim();
+						setFirstRunWizardJavascriptNotice(
+							__('Previous automatic JavaScript verification did not complete. Setup advanced to Verify instead of retrying the JavaScript step.', 'ultracache') + (staleReason ? (' ' + staleReason) : '')
+						);
+					}
+					await persistFirstRunWizard('progress', {
+						currentStep: resumableStep,
+						completedSteps: completedSteps,
+						lastError: '',
+					});
+				} catch (stateError) {
+					// The plan remains usable; state persistence failure is surfaced only if Apply is attempted.
+				}
+				return response;
+			} catch (error) {
+				const message = error && error.message ? error.message : __('The website could not be analyzed.', 'ultracache');
+				setFirstRunWizardPlan(null);
+				setFirstRunWizardPlanError(message);
+				return null;
+			} finally {
+				setFirstRunWizardPlanBusy(false);
+			}
+		}
+
+		function resetFirstRunWizardTransientUi() {
+			setFirstRunWizardApplyComplete(false);
+			setFirstRunWizardProgress([]);
+			setFirstRunWizardJavascriptNotice('');
+			setupMediaSkipRequestedRef.current = false;
+			setSetupMediaSkipRequested(false);
+			setSetupMediaStepActive(false);
+			setWizardJavascriptStrategyChoice('user_experience');
+			setWizardObjectCacheBackend('');
+			setWizardWarmScope('homepage');
+			setWizardMenuLocation('');
+			setWizardMenuDepth('1');
+			setWizardFullSiteSources('');
+			setFirstRunWizardPlan(null);
+			setFirstRunWizardPlanError('');
+		}
+
+		async function startFirstRunWizard() {
+			if (firstRunWizardPlanBusy || firstRunWizardApplying) {
+				return;
+			}
+			resetFirstRunWizardTransientUi();
+			try {
+				await persistFirstRunWizard('start', {});
+				await loadFirstRunWizardPlan();
+			} catch (error) {
+				setFirstRunWizardPlanError(error && error.message ? error.message : __('The setup wizard could not be started.', 'ultracache'));
+			}
+		}
+
+		async function resumeFirstRunWizard() {
+			if (firstRunWizardPlanBusy || firstRunWizardApplying || !setupWizardCanResume) {
+				return;
+			}
+			const resumeState = Object.assign({}, firstRunWizardState || {});
+			resetFirstRunWizardTransientUi();
+			try {
+				await loadFirstRunWizardPlan(resumeState);
+			} catch (error) {
+				setFirstRunWizardPlanError(error && error.message ? error.message : __('The setup wizard could not be resumed.', 'ultracache'));
+			}
+		}
+
+		function closeFirstRunWizard() {
+			if (firstRunWizardApplying) {
+				return;
+			}
+			setFirstRunWizardOpen(false);
+		}
+
+		function updateSetupProgress(setter, item) {
+			if (!item || !item.phase) {
+				return;
+			}
+			setter((current) => {
+				const next = Array.isArray(current) ? current.slice() : [];
+				const index = next.findIndex((entry) => entry && entry.phase === item.phase);
+				if (index === -1) {
+					next.push(item);
+				} else {
+					next[index] = item;
+				}
+				return next;
+			});
+		}
+
+		function cssBundleExclusionLineCovers(existingLine, targetLine) {
+			const existing = String(existingLine || '').trim().toLowerCase();
+			const target = String(targetLine || '').trim().toLowerCase();
+			if (!existing || !target) {
+				return false;
+			}
+			return existing === target || target.indexOf(existing) !== -1 || existing.indexOf(target) !== -1;
+		}
+
+		function selectAutomaticCssBundleExclusions(profile, currentValue, limit = 2) {
+			const cssBundle = profile && profile.cssBundle && typeof profile.cssBundle === 'object' ? profile.cssBundle : {};
+			const sourceTop = Array.isArray(cssBundle.sourceTop) ? cssBundle.sourceTop : [];
+			const existingLines = normalizeSettingListLines(currentValue);
+			const maxItems = Math.max(0, Math.min(2, Number(limit || 0)));
+			const eligible = sourceTop
+				.filter((item) => {
+					if (!item || item.generatedOutputOnly) {
+						return false;
+					}
+					const bytes = Math.max(0, Number(item.bytes || 0));
+					const suggestion = String(item.suggestedExclusion || '').trim();
+					if (bytes <= 51200 || !suggestion) {
+						return false;
+					}
+					return !existingLines.some((existing) => cssBundleExclusionLineCovers(existing, suggestion));
+				})
+				.map((item) => Object.assign({}, item, {
+					bytes: Math.max(0, Number(item.bytes || 0)),
+					type: String(item.type || '').toLowerCase(),
+					suggestedExclusion: String(item.suggestedExclusion || '').trim(),
+				}))
+				.sort((left, right) => {
+					if (right.bytes !== left.bytes) {
+						return right.bytes - left.bytes;
+					}
+					return String(left.suggestedExclusion).localeCompare(String(right.suggestedExclusion));
+				});
+
+			if (!maxItems || !eligible.length) {
+				return [];
+			}
+
+			const selected = eligible.slice(0, maxItems);
+			const largestTheme = eligible.find((item) => item.type === 'theme');
+			if (largestTheme && !selected.some((item) => item.type === 'theme')) {
+				if (selected.length < maxItems) {
+					selected.push(largestTheme);
+				} else if (selected.length) {
+					selected[selected.length - 1] = largestTheme;
+				}
+			}
+
+			const deduped = [];
+			selected.forEach((item) => {
+				if (!deduped.some((existing) => cssBundleExclusionLineCovers(existing.suggestedExclusion, item.suggestedExclusion))) {
+					deduped.push(item);
+				}
+			});
+			return deduped.slice(0, maxItems);
+		}
+
+		async function applyAutomaticCssBundleExclusionsAfterInitialWarm(onProgress) {
+			const report = (phase, state, message) => {
+				if (typeof onProgress === 'function') {
+					onProgress({ phase, state, message });
+				}
+			};
+			const current = settingsRef.current || {};
+			if (!current.warmCssBundlesEnabled || !current.homepageCssBundleEnabled) {
+				report('prepare_css_exclusions', 'done', __('Automatic CSS Bundle Exclusions skipped because CSS bundle warm-up is disabled.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+
+			const targetUrl = (typeof ultracache !== 'undefined' && ultracache && ultracache.frontendProbeUrl) ? String(ultracache.frontendProbeUrl || '').trim() : '';
+			if (!targetUrl) {
+				report('prepare_css_exclusions', 'done', __('Automatic CSS Bundle Exclusions skipped because no homepage diagnostics URL was available.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+
+			report('prepare_css_exclusions', 'running', __('Analyzing the generated homepage CSS bundle for large source stylesheets…', 'ultracache'));
+			let diagnosticsJob = null;
+			try {
+				diagnosticsJob = await queueDashboardAction('performance_profile', { mode: 'compact', url: targetUrl }, {
+					queued: __('CSS bundle source analysis processing via dashboard…', 'ultracache'),
+					success: __('CSS bundle source analysis completed.', 'ultracache'),
+					failed: __('CSS bundle source analysis failed.', 'ultracache'),
+					runningLabel: __('Analyzing CSS bundle sources…', 'ultracache'),
+				}, 'setup_auto_css_exclusions');
+			} catch (error) {
+				report('prepare_css_exclusions', 'warning', __('CSS bundle source analysis was unavailable; existing CSS Bundle Exclusions were preserved.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+			const result = diagnosticsJob && diagnosticsJob.result ? diagnosticsJob.result : {};
+			const profile = result && result.performanceProfile ? result.performanceProfile : null;
+			const cssBundle = profile && profile.cssBundle ? profile.cssBundle : null;
+			if (!profile || !cssBundle || !cssBundle.fileExists || !Array.isArray(cssBundle.sourceTop) || !cssBundle.sourceTop.length) {
+				report('prepare_css_exclusions', 'done', __('No usable generated CSS bundle source data was available; existing CSS Bundle Exclusions were preserved.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+
+			const before = String((settingsRef.current || {}).homepageCssBundleExcludeList || '');
+			const existingCount = normalizeSettingListLines(before).length;
+			const remainingSlots = Math.max(0, 2 - existingCount);
+			if (!remainingSlots) {
+				report('prepare_css_exclusions', 'done', __('CSS Bundle Exclusions already contains two or more entries; automatic setup preserved the existing list without adding more.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+			const selected = selectAutomaticCssBundleExclusions(profile, before, remainingSlots);
+			if (!selected.length) {
+				report('prepare_css_exclusions', 'done', __('No additional CSS source larger than 50 KB qualified for automatic bundle exclusion.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+
+			const additions = selected.map((item) => item.suggestedExclusion);
+			const lines = normalizeSettingListLines(before);
+			additions.forEach((line) => {
+				if (!lines.some((existing) => cssBundleExclusionLineCovers(existing, line))) {
+					lines.push(line);
+				}
+			});
+			const nextValue = lines.join('\n');
+			if (nextValue === normalizeSettingListLines(before).join('\n')) {
+				report('prepare_css_exclusions', 'done', __('The selected large CSS sources were already covered by existing CSS Bundle Exclusions.', 'ultracache'));
+				return { added: 0, selected: [] };
+			}
+
+			report('prepare_css_exclusions', 'running', sprintfSetupMessage(__('Appending %d large CSS Bundle Exclusion(s) and rebuilding the homepage bundle…', 'ultracache'), additions.length));
+			const saved = await queueSettingsPatch({ homepageCssBundleExcludeList: nextValue }, { preserveConfiguredInfrastructure: true });
+			if (!saved || saved.success === false) {
+				throw new Error(saved && saved.message ? String(saved.message) : __('Automatic CSS Bundle Exclusions could not be saved.', 'ultracache'));
+			}
+
+			const purgeJob = await queueDashboardAction('purge_all', {}, {
+				queued: __('CSS exclusion cache purge processing via dashboard…', 'ultracache'),
+				success: __('Cache cleared for CSS bundle rebuild.', 'ultracache'),
+				failed: __('Failed to clear cache for CSS bundle rebuild.', 'ultracache'),
+			}, 'setup_auto_css_exclusions_purge');
+			if (!purgeJob || purgeJob.status !== 'done') {
+				throw new Error(__('Automatic CSS exclusion cache purge did not complete.', 'ultracache'));
+			}
+
+			const rewarmCompleted = await warmupController.warmFrontpageHtmlCss();
+			if (!rewarmCompleted) {
+				throw new Error(__('Homepage CSS bundle rebuild did not complete after automatic exclusions.', 'ultracache'));
+			}
+
+			report('prepare_css_exclusions', 'done', sprintfSetupMessage(__('Added %d automatic CSS Bundle Exclusion(s) and rebuilt the homepage CSS bundle.', 'ultracache'), additions.length));
+			return { added: additions.length, selected };
+		}
+
+		function tagSetupWizardPhaseError(error, phase) {
+			const tagged = error instanceof Error ? error : new Error(String(error || __('Setup Wizard phase failed.', 'ultracache')));
+			if (!tagged.ultracacheWizardPhase) {
+				tagged.ultracacheWizardPhase = String(phase || '');
+			}
+			return tagged;
+		}
+
+		async function runSetupWizardPhase(phase, callback) {
+			try {
+				return await callback();
+			} catch (error) {
+				throw tagSetupWizardPhaseError(error, phase);
+			}
+		}
+
+		function isExplicitMediaBackgroundPauseError(error) {
+			const data = error && error.data && typeof error.data === 'object' ? error.data : {};
+			return String(data.reason || data.pauseReason || '') === 'background_paused';
+		}
+
+		async function prepareWebsiteAfterOptimalSettings(onProgress, options = {}) {
+			const report = (phase, state, message) => {
+				if (typeof onProgress === 'function') {
+					onProgress({ phase, state, message });
+				}
+			};
+
+			report('prepare_flush', 'running', __('Flushing all cache layers…', 'ultracache'));
+			await runSetupWizardPhase('prepare_flush', async function () {
+				const purgeJob = await queueDashboardAction('purge_all', {}, {
+					queued: __('Full cache purge processing via dashboard…', 'ultracache'),
+					success: __('All cache layers cleared.', 'ultracache'),
+					failed: __('Failed to flush all cache layers.', 'ultracache'),
+				}, 'setup_prepare_purge_all');
+				if (!purgeJob || purgeJob.status !== 'done') {
+					throw new Error(__('Automatic cache flush did not complete.', 'ultracache'));
+				}
+			});
+			report('prepare_flush', 'done', __('All cache layers cleared.', 'ultracache'));
+
+			let mediaSessionToken = '';
+			let mediaPausedByAdministrator = false;
+			try {
+				try {
+					mediaSessionToken = await beginManualMediaSession('');
+				} catch (error) {
+					if (isExplicitMediaBackgroundPauseError(error)) {
+						mediaPausedByAdministrator = true;
+					} else {
+						throw tagSetupWizardPhaseError(error, 'prepare_media');
+					}
+				}
+
+				report('prepare_homepage', 'running', __('Warming the homepage…', 'ultracache'));
+				await runSetupWizardPhase('prepare_homepage', async function () {
+					const useCssWarm = !!(settingsRef.current && settingsRef.current.warmCssBundlesEnabled && settingsRef.current.homepageCssBundleEnabled);
+					const completed = useCssWarm
+						? await warmupController.warmFrontpageHtmlCss()
+						: await warmupController.warmFrontpageHtml();
+					if (!completed) {
+						throw new Error(__('Automatic homepage warm did not complete.', 'ultracache'));
+					}
+				});
+				report('prepare_homepage', 'done', __('Homepage warmed.', 'ultracache'));
+
+				await runSetupWizardPhase('prepare_css_exclusions', async function () {
+					await applyAutomaticCssBundleExclusionsAfterInitialWarm(onProgress);
+				});
+
+				if (mediaPausedByAdministrator) {
+					report('prepare_media', 'warning', __('Homepage image conversion skipped because media background work is paused by an administrator.', 'ultracache'));
+				} else {
+					report('prepare_media', 'running', __('Converting homepage images live…', 'ultracache'));
+					if (typeof options.onMediaStepState === 'function') {
+						options.onMediaStepState(true);
+					}
+					const homepageMedia = await runSetupWizardPhase('prepare_media', async function () {
+						return runHomepageMediaPhase({
+							manualSessionToken: mediaSessionToken,
+							shouldSkip: typeof options.shouldSkipMedia === 'function' ? options.shouldSkipMedia : function () { return false; },
+							onProgress: function (homepage) {
+								const total = Math.max(0, Number(homepage.total || 0));
+								const completed = Math.max(0, Number(homepage.completed || 0));
+								report('prepare_media', 'running', total > 0
+									? sprintfSetupMessage(__('Converting homepage images live… %1$d/%2$d', 'ultracache'), completed, total)
+									: __('Checking homepage images…', 'ultracache'));
+							},
+						});
+					});
+					if (homepageMedia && homepageMedia.skipped) {
+						report('prepare_media', 'done', __('Homepage image conversion skipped. Remaining media was left untouched.', 'ultracache'));
+					} else {
+						report('prepare_media', 'done', __('Homepage images converted. Homepage media checkpoint reached.', 'ultracache'));
+					}
+				}
+			} finally {
+				if (mediaSessionToken) {
+					await endManualMediaSession(mediaSessionToken, false);
+				}
+				if (typeof options.onMediaStepState === 'function') {
+					options.onMediaStepState(false);
+				}
+			}
+
+			const warmScope = ['homepage', 'homepage_menu', 'full_site'].indexOf(String(options.warmScope || 'homepage')) !== -1
+				? String(options.warmScope || 'homepage')
+				: 'homepage';
+
+			if (warmScope === 'homepage_menu') {
+				if (hasMenuWarmScope(settingsRef.current || {})) {
+					report('prepare_menu', 'running', __('Warming the configured menu…', 'ultracache'));
+					await runSetupWizardPhase('prepare_menu', async function () {
+						if (settingsRef.current && settingsRef.current.warmCssBundlesEnabled && settingsRef.current.homepageCssBundleEnabled) {
+							await warmupController.startMenuWarmingWithFrontpageCss(false);
+						} else {
+							await warmupController.startMenuWarming(false);
+						}
+					});
+					report('prepare_menu', 'done', __('Configured menu warm completed.', 'ultracache'));
+				} else {
+					report('prepare_menu', 'done', __('No configured menu scope was available; menu warm was skipped.', 'ultracache'));
+				}
+			} else {
+				report('prepare_menu', 'done', warmScope === 'homepage'
+					? __('Menu warm skipped by Wizard selection.', 'ultracache')
+					: __('Full Site selected; the existing full-site warm-up flow will use its configured sources.', 'ultracache'));
+			}
+
+			if (warmScope === 'full_site') {
+				report('prepare_full_site', 'running', __('Starting or resuming the existing full-site warm-up…', 'ultracache'));
+				await runSetupWizardPhase('prepare_full_site', async function () {
+					if (settingsRef.current && settingsRef.current.warmCssBundlesEnabled && settingsRef.current.homepageCssBundleEnabled) {
+						await warmupController.startWarmingAllWithFrontpageCss(false);
+					} else {
+						await warmupController.startWarming(false);
+					}
+				});
+				report('prepare_full_site', 'done', __('Full-site warm-up completed.', 'ultracache'));
+			} else {
+				report('prepare_full_site', 'done', __('Full-site warm-up skipped by Wizard selection.', 'ultracache'));
+			}
+
+			return true;
+		}
+
+
+		const RUNTIME_SCAN_JS_BASELINE_KEYS = [
+			'javascriptStrategy',
+			'deferJsEnabled',
+			'delayAllJsEnabled',
+			'firstPartyJsParallelExecutionEnabled',
+			'thirdPartyJsParallelExecutionEnabled',
+			'delaySafeThirdPartyJsEnabled',
+			'delayFunctionalThirdPartyJsEnabled',
+			'delayAllThirdPartyJsEnabled',
+			'lazyMailerliteNonceEnabled',
+			'asyncExternalScriptsEnabled',
+			'delayNonCriticalJsEnabled',
+			'lcpFrontendDiscoveryEnabled',
+			'lcpBoundaryDeferEnabled',
+			'mainThreadReliefEnabled',
+			'assetChainCleanupEnabled',
+			'assetCleanupWooProductAssetsEnabled',
+			'assetCleanupProductFilterAssetsEnabled',
+			'woocommerceCartFragmentsDelayEnabled',
+		];
+
+		function captureRuntimeScanJavascriptState() {
+			const current = settingsRef.current || {};
+			const snapshot = {};
+			RUNTIME_SCAN_JS_BASELINE_KEYS.forEach((key) => {
+				if (key === 'javascriptStrategy') {
+					snapshot[key] = String(current[key] || 'off');
+				} else {
+					snapshot[key] = !!current[key];
+				}
+			});
+			return snapshot;
+		}
+
+		async function beginRuntimeScanJavascriptBaseline() {
+			await syncQueuedSettingsBeforeAction();
+			const snapshot = captureRuntimeScanJavascriptState();
+			const disabledPatch = {
+				javascriptStrategy: 'off',
+				deferJsEnabled: false,
+				delayAllJsEnabled: false,
+				firstPartyJsParallelExecutionEnabled: false,
+				thirdPartyJsParallelExecutionEnabled: false,
+				delaySafeThirdPartyJsEnabled: false,
+				delayFunctionalThirdPartyJsEnabled: false,
+				delayAllThirdPartyJsEnabled: false,
+				lazyMailerliteNonceEnabled: false,
+				asyncExternalScriptsEnabled: false,
+				delayNonCriticalJsEnabled: false,
+				lcpFrontendDiscoveryEnabled: false,
+				lcpBoundaryDeferEnabled: false,
+				mainThreadReliefEnabled: false,
+				assetChainCleanupEnabled: false,
+				assetCleanupWooProductAssetsEnabled: false,
+				assetCleanupProductFilterAssetsEnabled: false,
+				woocommerceCartFragmentsDelayEnabled: false,
+			};
+			const response = await queueSettingsPatch(disabledPatch, { preserveConfiguredInfrastructure: true });
+			if (response && response.success === false) {
+				throw new Error(response.message ? String(response.message) : __('Could not disable JavaScript optimizations for the Runtime Scan baseline.', 'ultracache'));
+			}
+			await syncQueuedSettingsBeforeAction();
+			return snapshot;
+		}
+
+		async function restoreRuntimeScanJavascriptState(snapshot) {
+			if (!snapshot || typeof snapshot !== 'object') {
+				return null;
+			}
+			const response = await queueSettingsPatch(Object.assign({}, snapshot), { preserveConfiguredInfrastructure: true });
+			if (response && response.success === false) {
+				throw new Error(response.message ? String(response.message) : __('Could not restore JavaScript settings after the Runtime Scan baseline.', 'ultracache'));
+			}
+			await syncQueuedSettingsBeforeAction();
+			return response;
+		}
+
+		function sprintfSetupMessage(template, ...values) {
+			let sequentialIndex = 0;
+			return String(template || '').replace(/%(?:(\d+)\$)?[ds]/g, (match, position) => {
+				const valueIndex = position ? Math.max(0, Number(position) - 1) : sequentialIndex++;
+				return typeof values[valueIndex] === 'undefined' ? match : String(values[valueIndex]);
+			});
+		}
+
+		async function refreshRuntimeScanTargetUrl(targetUrl, onProgress, options) {
+			const scanTarget = String(targetUrl || '').trim();
+			if (!scanTarget) {
+				throw new Error(__('Page URL to scan is empty.', 'ultracache'));
+			}
+			const report = (phase, state, message) => {
+				if (typeof onProgress === 'function') {
+					onProgress({ phase, state, message });
+				}
+			};
+			const label = __('Preparing the selected Runtime Scan URL…', 'ultracache');
+			const setRuntimeRefreshProcess = (current, stage, active = true) => {
+				setProcess({
+					type: 'runtime_scan_refresh',
+					active: !!active,
+					label,
+					current: Math.max(0, Math.min(2, Number(current || 0))),
+					total: 2,
+					queueBuilding: false,
+					logs: stage ? [String(stage)] : [],
+					startTime: Date.now(),
+					cancellable: false,
+					cancelRequested: false,
+					showWhenInactive: false,
+					complete: !active,
+					currentStageLabel: String(stage || ''),
+					currentItem: scanTarget,
+				});
+			};
+
+			report('runtime_scan_refresh', 'running', __('Invalidating and warming only the selected Runtime Scan URL…', 'ultracache'));
+			let runtimeWarmToken = '';
+			try {
+				// Runtime Scan must never Flush All. Acquire foreground ownership, then
+				// invalidate only the selected URL and run the ordinary page warm pipeline.
+				runtimeWarmToken = await beginManualWarmSession({ type: 'runtime_scan' }, '');
+
+				const warmMessage = __('Invalidating and warming only the selected Runtime Scan URL…', 'ultracache');
+				setRuntimeRefreshProcess(1, warmMessage);
+				report('runtime_scan_refresh', 'running', warmMessage);
+
+				const maxLockRetries = 3;
+				const maxOwnershipReacquireAttempts = 1;
+				let lockRetryCount = 0;
+				let ownershipReacquireCount = 0;
+				let warmResult = null;
+				do {
+					try {
+						warmResult = await apiRequest('crawl_page', {
+							url: scanTarget,
+							buildCssBundle: false,
+							manualToken: String(runtimeWarmToken || ''),
+							purgeTargetFirst: true,
+						});
+					} catch (warmError) {
+						const transientUrlLock = !!(
+							warmError
+							&& warmError.data
+							&& warmError.data.coalesced
+							&& warmError.data.retryable
+							&& !warmError.data.terminal
+							&& String(warmError.data.failureClass || '') === 'url-lock-busy'
+						);
+						if (transientUrlLock && lockRetryCount < maxLockRetries) {
+							lockRetryCount += 1;
+							const retryMessage = __('Another warm source owns this URL; waiting before retrying the same Runtime Scan target…', 'ultracache');
+							setRuntimeRefreshProcess(1, retryMessage);
+							report('runtime_scan_refresh', 'running', retryMessage);
+							await sleep(5000);
+							continue;
+						}
+
+						const ownershipLost = !!(
+							warmError
+							&& warmError.rest
+							&& Number(warmError.rest.status || 0) === 409
+							&& warmError.data
+							&& warmError.data.ownershipLost
+						);
+						if (!ownershipLost || ownershipReacquireCount >= maxOwnershipReacquireAttempts) {
+							throw warmError;
+						}
+
+						ownershipReacquireCount += 1;
+						const reacquireMessage = __('Runtime Scan warm-up ownership changed; reacquiring foreground ownership once…', 'ultracache');
+						setRuntimeRefreshProcess(1, reacquireMessage);
+						report('runtime_scan_refresh', 'running', reacquireMessage);
+						runtimeWarmToken = await beginManualWarmSession({ type: 'runtime_scan' }, runtimeWarmToken);
+						continue;
+					}
+
+					const transientUrlLock = !!(
+						warmResult
+						&& warmResult.coalesced
+						&& warmResult.retryable
+						&& !warmResult.terminal
+						&& String(warmResult.failureClass || '') === 'url-lock-busy'
+					);
+					if (!transientUrlLock || lockRetryCount >= maxLockRetries) {
+						break;
+					}
+
+					lockRetryCount += 1;
+					await sleep(5000);
+				} while (true);
+
+				if (!warmResult || (!warmResult.success && !warmResult.skipped)) {
+					throw new Error(warmResult && warmResult.message ? String(warmResult.message) : __('Selected Runtime Scan URL could not be warmed.', 'ultracache'));
+				}
+
+				const auxiliaryWarnings = warmResult && Array.isArray(warmResult.auxiliaryWarnings)
+					? warmResult.auxiliaryWarnings.filter((item) => item && typeof item === 'object')
+					: [];
+				if (auxiliaryWarnings.length > 0) {
+					const warningMessage = auxiliaryWarnings.map((item) => {
+						const stage = String(item.stage || 'refill');
+						const failureClass = String(item.failureClass || 'warning');
+						const message = String(item.message || '').trim();
+						return stage + ': ' + failureClass + (message ? ' — ' + message : '');
+					}).join(' | ');
+					report('runtime_scan_refresh', 'warning', warningMessage);
+				}
+
+				const readyMessage = __('Selected Runtime Scan URL is ready.', 'ultracache');
+				setRuntimeRefreshProcess(2, readyMessage, false);
+				report('runtime_scan_refresh', 'done', readyMessage);
+			} catch (error) {
+				setProcess((current) => Object.assign({}, current || {}, {
+					active: false,
+					cancellable: false,
+					showWhenInactive: false,
+					failed: true,
+				}));
+				throw error;
+			} finally {
+				if (runtimeWarmToken) {
+					try {
+						await endManualWarmSession(runtimeWarmToken);
+					} catch (warmSessionError) {
+						void warmSessionError;
+					}
+				}
+			}
+		}
+
+		async function prepareBrowserRuntimeScanStrategySafeguards() {
+			await syncQueuedSettingsBeforeAction();
+			const currentSettings = settingsRef.current || {};
+			const strategy = String(currentSettings.javascriptStrategy || 'off').trim().toLowerCase();
+			const state = await apiRequest('runtime_js_scan_strategy_state', {
+				javascriptStrategy: strategy,
+				commit: false,
+			});
+
+			let exclusionValue = String(currentSettings.deferJsExcludeList || '');
+			let forceValue = String(currentSettings.deferJsForceList || '');
+			let delayValue = String(currentSettings.delaySafeThirdPartyJsPatterns || '');
+			const changed = !!(state && state.changed);
+
+			if (changed) {
+				const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
+				exclusionValue = Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsExcludeList')
+					? String(defaultsPayload.deferJsExcludeList || '')
+					: '';
+				forceValue = Object.prototype.hasOwnProperty.call(defaultsPayload, 'deferJsForceList')
+					? String(defaultsPayload.deferJsForceList || '')
+					: '';
+				delayValue = Object.prototype.hasOwnProperty.call(defaultsPayload, 'delaySafeThirdPartyJsPatterns')
+					? String(defaultsPayload.delaySafeThirdPartyJsPatterns || '')
+					: '';
+
+				await queueSettingsPatch({
+					deferJsExcludeList: exclusionValue,
+					deferJsForceList: forceValue,
+					delaySafeThirdPartyJsPatterns: delayValue,
+				});
+			}
+
+			await apiRequest('runtime_js_scan_strategy_state', {
+				javascriptStrategy: strategy,
+				commit: true,
+			});
+
+			if (changed) {
+				pushToast({
+					type: 'info',
+					text: 'JavaScript Strategy changed from ' + String(state.previous || 'unknown') + ' to ' + strategy + '. Runtime Scan restored the three JavaScript safeguard lists to their defaults before scanning.',
+				});
+			}
+
+			return {
+				changed: changed,
+				previousStrategy: state && state.previous ? String(state.previous) : '',
+				javascriptStrategy: strategy,
+				exclusionValue: exclusionValue,
+				forceValue: forceValue,
+				delayValue: delayValue,
+			};
+		}
+
+		async function runJavascriptPostInstallAssistant(onProgress) {
+			const report = (phase, state, message) => {
+				if (typeof onProgress === 'function') {
+					onProgress({ phase, state, message });
+				}
+			};
+			const defaultScanUrl = sanitizeRuntimeJsScanDisplayUrl(String(frontendProbeUrl || '/')) || '/';
+			const currentSettings = settingsRef.current || {};
+			report('js_runtime_scan', 'running', __('Running automatic JavaScript compatibility repair…', 'ultracache'));
+
+			let siteOutcome = null;
+			try {
+				siteOutcome = await runRuntimeSiteScanAction({
+					manualScanUrl: '',
+					defaultScanUrl,
+					scanContext: 'anonymous',
+					maxScans: 10,
+					preferDeferForAmbiguous: true,
+					exclusionValue: String(currentSettings.deferJsExcludeList || ''),
+					forceValue: String(currentSettings.deferJsForceList || ''),
+					delayValue: String(currentSettings.delaySafeThirdPartyJsPatterns || ''),
+					delayEnabled: !!currentSettings.delaySafeThirdPartyJsEnabled,
+					prepareStrategySafeguards: prepareBrowserRuntimeScanStrategySafeguards,
+					prepare: refreshRuntimeScanTargetUrl,
+					beginBaselineState: beginRuntimeScanJavascriptBaseline,
+					restoreBaselineState: restoreRuntimeScanJavascriptState,
+					scan: runBrowserRuntimeJsScanForUrl,
+					runFixer: async function(consoleText, scanUrl, scanContext, statusPrefix, runtimeScripts) {
+						const response = await requestRuntimeJsConsoleFixer(consoleText, scanUrl, scanContext, runtimeScripts || []);
+						const job = response && response.jsDiagnosticQueue ? response.jsDiagnosticQueue : null;
+						return job && job.result && job.result.dashboardScan ? job.result.dashboardScan : null;
+					},
+					saveSafeguards: async function(nextState) {
+						const state = nextState && typeof nextState === 'object' ? nextState : {};
+						return queueSettingsPatch({
+							deferJsExcludeList: String(state.exclusionValue || ''),
+							deferJsForceList: String(state.forceValue || ''),
+							delaySafeThirdPartyJsPatterns: String(state.delayValue || ''),
+						}, { preserveConfiguredInfrastructure: true, runtimeJsScanDecision: state.decision || null });
+					},
+					onStatus: function(message) {
+						report('js_runtime_scan', 'running', String(message || ''));
+					},
+				});
+			} catch (error) {
+				const reason = error && error.message ? String(error.message) : __('Runtime Scanner was unavailable.', 'ultracache');
+				const notice = __('Runtime Scanner could not complete automatic verification. Setup continued.', 'ultracache') + ' ' + reason;
+				report('js_runtime_scan', 'warning', notice);
+				return {
+					available: false,
+					passes: 0,
+					totalAdded: 0,
+					residualRuntimeErrors: 0,
+					residualErrors: [],
+					runtime: null,
+					baseline: null,
+					targetCount: 0,
+					targetResults: [],
+					notice,
+					siteOutcome: null,
+				};
+			}
+
+			const residual = Math.max(0, Number(siteOutcome && siteOutcome.residualRuntimeErrors || 0));
+			const residualErrors = [];
+			(Array.isArray(siteOutcome && siteOutcome.targetOutcomes) ? siteOutcome.targetOutcomes : []).forEach((record) => {
+				const target = record && record.target && typeof record.target === 'object' ? record.target : {};
+				const outcome = record && record.outcome && typeof record.outcome === 'object' ? record.outcome : null;
+				const targetResidual = Math.max(0, Number(outcome && outcome.residualRuntimeErrors || 0));
+				const errors = outcome && outcome.result && Array.isArray(outcome.result.errors) ? outcome.result.errors : [];
+				errors.slice(0, targetResidual).forEach((item) => {
+					residualErrors.push({
+						message: String(item && item.message ? item.message : '').trim().slice(0, 320),
+						source: String(item && item.source ? item.source : '').trim().slice(0, 500),
+						target: String(target.label || 'Page'),
+					});
+				});
+			});
+			const notice = siteOutcome && siteOutcome.summaryState === 'warning'
+				? String(siteOutcome.summaryMessage || __('Runtime Scanner completed with warnings.', 'ultracache'))
+				: '';
+			const summaryMessage = siteOutcome && siteOutcome.summaryMessage
+				? String(siteOutcome.summaryMessage)
+				: __('Runtime Site Scan completed.', 'ultracache');
+			report('js_runtime_scan', notice ? 'warning' : 'done', summaryMessage);
+			return {
+				available: true,
+				passes: Math.max(0, Number(siteOutcome && siteOutcome.passes || 0)),
+				totalAdded: Math.max(0, Number(siteOutcome && siteOutcome.totalAdded || 0)),
+				residualRuntimeErrors: residual,
+				residualErrors,
+				runtime: siteOutcome && siteOutcome.mergedFixerScan ? siteOutcome.mergedFixerScan : null,
+				baseline: null,
+				targetCount: Array.isArray(siteOutcome && siteOutcome.targets) ? siteOutcome.targets.length : 0,
+				targetResults: Array.isArray(siteOutcome && siteOutcome.targetResults) ? siteOutcome.targetResults.slice() : [],
+				notice,
+				siteOutcome,
+			};
+		}
+
+
+		async function confirmFirstRunWizard() {
+			if (firstRunWizardApplying || firstRunWizardPlanBusy || !firstRunWizardPlan) {
+				return;
+			}
+			setFirstRunWizardApplying(true);
+			setFirstRunWizardApplyComplete(false);
+			setFirstRunWizardProgress([]);
+			setFirstRunWizardJavascriptNotice('');
+			setupMediaSkipRequestedRef.current = false;
+			setSetupMediaSkipRequested(false);
+			setSetupMediaStepActive(false);
+			const currentWizardStep = firstRunWizardState ? String(firstRunWizardState.current_step || '') : '';
+			const resumePreparation = currentWizardStep === 'prepare';
+			const resumeJavascript = currentWizardStep === 'javascript';
+			let wizardFailureStep = resumeJavascript ? 'verify' : (resumePreparation ? 'prepare' : 'configure');
+			let wizardFailurePhase = resumeJavascript ? 'js_runtime_scan' : (resumePreparation ? 'prepare_homepage' : 'settings');
+			const trackWizardProgress = (item) => {
+				if (item && item.phase && String(item.state || '') === 'running') {
+					wizardFailurePhase = String(item.phase);
+				}
+				updateSetupProgress(setFirstRunWizardProgress, item);
+			};
+			try {
+				if (!resumePreparation && !resumeJavascript) {
+					await persistFirstRunWizard('progress', {
+						currentStep: 'configure',
+						completedSteps: ['analyze'],
+						lastError: '',
+					});
+
+					const warmPatch = {};
+					if (wizardWarmScope !== 'homepage') {
+						warmPatch.warmMenuLocation = String(wizardMenuLocation || '');
+						warmPatch.warmMenuDepth = String(wizardMenuDepth || '1');
+					}
+					if (wizardWarmScope === 'full_site') {
+						warmPatch.warmFullSiteSources = String(wizardFullSiteSources || '');
+					}
+					if (Object.keys(warmPatch).length) {
+						await queueSettingsPatch(warmPatch, { preserveConfiguredInfrastructure: true });
+					}
+
+					const result = await applyOptimalSettings({
+						plan: firstRunWizardPlan,
+						javascriptStrategyChoice: wizardJavascriptStrategyChoice,
+						objectCacheBackend: wizardObjectCacheBackend,
+						preserveWarmScope: true,
+						onProgress: trackWizardProgress,
+					});
+					if (!result) {
+						throw new Error(__('Setup Wizard failed.', 'ultracache'));
+					}
+				}
+
+				if (!resumeJavascript) {
+					wizardFailureStep = 'prepare';
+					await persistFirstRunWizard('progress', {
+						currentStep: 'prepare',
+						completedSteps: ['analyze', 'configure'],
+						lastError: '',
+					});
+					await prepareWebsiteAfterOptimalSettings(trackWizardProgress, {
+						warmScope: wizardWarmScope,
+						shouldSkipMedia: () => !!setupMediaSkipRequestedRef.current,
+						onMediaStepState: (active) => setSetupMediaStepActive(!!active),
+					});
+				}
+
+				wizardFailureStep = 'verify';
+				await persistFirstRunWizard('progress', {
+					currentStep: 'javascript',
+					completedSteps: ['analyze', 'configure', 'prepare'],
+					lastError: '',
+				});
+				const javascriptAssistantResult = await runJavascriptPostInstallAssistant(trackWizardProgress);
+				setFirstRunWizardJavascriptNotice(javascriptAssistantResult && javascriptAssistantResult.notice ? String(javascriptAssistantResult.notice) : '');
+				await persistFirstRunWizard('progress', {
+					currentStep: 'verify',
+					completedSteps: ['analyze', 'configure', 'prepare', 'javascript'],
+					lastError: '',
+				});
+				wizardFailurePhase = 'settings';
+				await saveSettingsPatch({ warmUncachedUrlsOnFirstVisit: true }, { preserveConfiguredInfrastructure: true });
+				setFirstRunWizardApplyComplete(true);
+			} catch (error) {
+				const message = error && error.message ? error.message : __('Setup Wizard failed.', 'ultracache');
+				if (error && error.ultracacheWizardPhase) {
+					wizardFailurePhase = String(error.ultracacheWizardPhase);
+				}
+				setFirstRunWizardProgress((current) => (Array.isArray(current) ? current : []).concat([{
+					phase: 'failed',
+					state: 'warning',
+					message: message,
+				}]));
+				try {
+					await persistFirstRunWizard('fail', { currentStep: wizardFailureStep, lastError: message, lastErrorPhase: wizardFailurePhase });
+				} catch (stateError) {
+					// Preserve the original setup error in the UI.
+				}
+			} finally {
+				setSetupMediaStepActive(false);
+				setFirstRunWizardApplying(false);
+			}
+		}
+
+
+		async function finishFirstRunWizard() {
+			if (firstRunWizardState && firstRunWizardState.status === 'in_progress' && firstRunWizardState.current_step === 'verify') {
+				try {
+					await persistFirstRunWizard('complete', {});
+				} catch (error) {
+					setFirstRunWizardProgress((current) => (Array.isArray(current) ? current : []).concat([{
+						phase: 'failed',
+						state: 'warning',
+						message: error && error.message ? error.message : __('UltraCache could not mark setup as complete.', 'ultracache'),
+					}]));
+					return;
+				}
+			}
+			setFirstRunWizardOpen(false);
+		}
+
+		function startSetupWizardFromDashboard() {
+			if (busy || !!asyncActions.apply_optimal_settings || firstRunWizardApplying || firstRunWizardPlanBusy) {
+				return;
+			}
+			setFirstRunWizardOpen(true);
+			startFirstRunWizard();
+		}
+
+		function resumeSetupWizardFromDashboard() {
+			if (busy || !!asyncActions.apply_optimal_settings || firstRunWizardApplying || firstRunWizardPlanBusy || !setupWizardCanResume) {
+				return;
+			}
+			setFirstRunWizardOpen(true);
+			resumeFirstRunWizard();
+		}
+
+		function restartSetupWizardFromDashboard() {
+			if (busy || !!asyncActions.apply_optimal_settings || firstRunWizardApplying || firstRunWizardPlanBusy) {
+				return;
+			}
+			setFirstRunWizardOpen(true);
+			startFirstRunWizard();
+		}
+
+		function requestSetupMediaSkip() {
+			if (!firstRunWizardApplying || !setupMediaStepActive || setupMediaSkipRequestedRef.current) {
+				return;
+			}
+			setupMediaSkipRequestedRef.current = true;
+			setSetupMediaSkipRequested(true);
+			updateSetupProgress(setFirstRunWizardProgress, {
+				phase: 'prepare_media',
+				state: 'running',
+				message: __('Skipping homepage image conversion after the current image…', 'ultracache'),
+			});
+		}
+
 
 		const cacheController = cacheModule.createController({
 			redisForm,
@@ -828,7 +2203,6 @@
 			runVarnishFlushEntireHost,
 			flushOpcache,
 			flushApcu,
-			runLiteSpeedTest,
 			flushLiteSpeed,
 			flushNginx,
 			redetectExternalCaches,
@@ -1248,9 +2622,10 @@
 				try {
 					const result = await runner(toastId);
 					const successText = typeof opts.successText === 'function' ? opts.successText(result) : opts.successText;
+					const resultType = typeof opts.resultType === 'function' ? opts.resultType(result) : (opts.resultType || 'success');
 					pushToast({
 						id: toastId,
-						type: 'success',
+						type: resultType,
 						title: readableLabel,
 						text: successText || (readableLabel + ' completed.'),
 					});
@@ -1294,8 +2669,10 @@
 
 		async function pollQueuedAction(jobId, toastId, labels) {
 			let job = null;
-			for (let attempt = 0; attempt < ACTION_QUEUE_MAX_POLLS; attempt++) {
-				const response = await apiRequest('queue_status', { id: jobId });
+			let attempt = 0;
+			while (true) {
+				const shouldRun = !job || 'queued' === String(job.status || '');
+				const response = await apiRequest(shouldRun ? 'queue_run' : 'queue_status', { id: jobId });
 				job = response && response.job ? response.job : null;
 				if (job && ['done', 'failed'].indexOf(job.status) !== -1) {
 					return job;
@@ -1313,9 +2690,9 @@
 					});
 				}
 
+				attempt += 1;
 				await sleep(ACTION_QUEUE_POLL_DELAY);
 			}
-			throw new Error('Dashboard processing action is still running. This notice will stay open; try the action again after it finishes or the safety timeout clears it.');
 		}
 
 		async function queueDashboardAction(action, params, labels, key, afterResult) {
@@ -1330,17 +2707,6 @@
 				}
 
 				const isDirectTerminal = !!(job && job.direct && ['done', 'failed'].indexOf(job.status) !== -1);
-				if (!isDirectTerminal) {
-					apiRequest('queue_run', { id: job.id }).catch((error) => {
-						pushToast({
-							id: toastId,
-							type: 'error',
-							title: readable,
-							text: error && error.message ? error.message : 'Dashboard action runner failed to start.',
-						});
-					});
-				}
-
 				const completed = isDirectTerminal ? job : await pollQueuedAction(job.id, toastId, labels);
 				const result = completed && completed.result ? completed.result : {};
 				applyDashboardPayload(result);
@@ -1558,14 +2924,6 @@
 		}
 
 
-		function appendScannerPatternToSafeDelayDraft(value) {
-			const pattern = String(value || '').trim();
-			if (!pattern) {
-				return;
-			}
-			scannerAppendSequenceRef.current += 1;
-			setSafeDelayAppendRequest({ id: scannerAppendSequenceRef.current, value: pattern });
-		}
 
 		function updateSetting(key, value) {
 			if (key === 'liteSpeedCacheEnabled') {
@@ -1611,6 +2969,47 @@
 			queueSettingsPatch({ [key]: value });
 		}
 
+		async function runGoogleFontsLocalOptimizationEnableEffects(options = {}) {
+			const background = !!(options && options.background);
+			const saveSettled = await waitForSettingsSaveToSettle();
+			if (!saveSettled) {
+				throw new Error('Settings are still saving. Google Fonts rebuild was not queued yet.');
+			}
+
+			const queued = await apiRequest('queue_action', {
+				action: 'google_fonts_rebuild_cache',
+				params: { clear: false },
+			});
+			const job = queued && queued.job ? queued.job : null;
+			if (!job || !job.id) {
+				throw new Error('Google Fonts rebuild job was not created.');
+			}
+
+			if (job.direct && ['done', 'failed'].indexOf(job.status) !== -1) {
+				if (job.result) {
+					applyDashboardPayload(job.result);
+				}
+				if (job.status !== 'done') {
+					throw new Error(job.message || 'Google Fonts rebuild failed.');
+				}
+				return { completed: true, background, direct: true, job };
+			}
+
+			if (background) {
+				const runPromise = apiRequest('queue_run', { id: job.id });
+				return { completed: false, background: true, direct: false, job, runPromise };
+			}
+
+			const completed = await pollQueuedAction(job.id, '', { failed: 'Google Fonts URL scan failed.' });
+			if (completed && completed.result) {
+				applyDashboardPayload(completed.result);
+			}
+			if (!completed || completed.status !== 'done') {
+				throw new Error(completed && completed.message ? String(completed.message) : 'Google Fonts rebuild did not complete.');
+			}
+			return { completed: true, background: false, direct: false, job: completed };
+		}
+
 		function scheduleGoogleFontsAutoRebuildAfterSave() {
 			if (googleFontsAutoRebuildQueuedRef.current) {
 				return;
@@ -1626,25 +3025,8 @@
 			});
 			window.setTimeout(async () => {
 				try {
-					const saveSettled = await waitForSettingsSaveToSettle();
-					if (!saveSettled) {
-						throw new Error('Settings are still saving. Google Fonts rebuild was not queued yet.');
-					}
-					const queued = await apiRequest('queue_action', {
-						action: 'google_fonts_rebuild_cache',
-						params: { clear: false },
-					});
-					const job = queued && queued.job ? queued.job : null;
-					if (!job || !job.id) {
-						throw new Error('Google Fonts rebuild job was not created.');
-					}
-					if (job.direct && ['done', 'failed'].indexOf(job.status) !== -1) {
-						if (job.result) {
-							applyDashboardPayload(job.result);
-						}
-						if (job.status !== 'done') {
-							throw new Error(job.message || 'Google Fonts rebuild failed.');
-						}
+					const outcome = await runGoogleFontsLocalOptimizationEnableEffects({ background: true });
+					if (outcome && outcome.direct) {
 						pushToast({
 							id: toastId,
 							type: 'success',
@@ -1653,19 +3035,21 @@
 						});
 						return;
 					}
-					apiRequest('queue_run', { id: job.id }).catch((error) => {
-						pushToast({
-							id: toastId,
-							type: 'error',
-							title: 'Local Google Fonts',
-							text: error && error.message ? error.message : 'Google Fonts background rebuild failed to start.',
+					if (outcome && outcome.runPromise && typeof outcome.runPromise.catch === 'function') {
+						outcome.runPromise.catch((error) => {
+							pushToast({
+								id: toastId,
+								type: 'error',
+								title: 'Local Google Fonts',
+								text: error && error.message ? error.message : 'Google Fonts background rebuild failed to start.',
+							});
 						});
-					});
+					}
 					pushToast({
 						id: toastId,
-					type: 'success',
-					title: 'Local Google Fonts',
-					text: 'Google Fonts rebuild queued and started in the background.',
+						type: 'success',
+						title: 'Local Google Fonts',
+						text: 'Google Fonts rebuild queued and started in the background.',
 					});
 				} catch (error) {
 					pushToast({
@@ -1711,11 +3095,39 @@
 
 			window.setTimeout(async () => {
 				const current = settingsRef.current && typeof settingsRef.current.deferJsExcludeList !== 'undefined' ? settingsRef.current.deferJsExcludeList : '';
-				const merged = await populateDeferDelayExclusionDefaults(current);
+				const merged = await populateDeferDelayExclusionDefaults(current, { silentWhenUnchanged: true });
 				if (merged !== null && String(merged || '') !== String(current || '')) {
 					queueSettingsPatch({ deferJsExcludeList: String(merged || '') });
 				}
 			}, 0);
+		}
+
+		async function runDelayIconFontsEnableEffects(options = {}) {
+			const persistImmediately = !!(options && options.persistImmediately);
+			if (persistImmediately) {
+				await saveSettingsPatch({ delayIconFontsAutoDetectEnabled: false }, { preserveConfiguredInfrastructure: true });
+			} else {
+				queueSettingsPatch({ delayIconFontsAutoDetectEnabled: false });
+			}
+			const response = await scanFrontpageFontPatterns();
+			if (!response || !Array.isArray(response.delayIconFontsList) || !response.delayIconFontsList.length) {
+				pushToast({ type: 'warning', text: __("Delay icon fonts is enabled, but no likely icon font patterns were detected on the front page.", 'ultracache') });
+				return { detected: 0, added: 0, value: String((settingsRef.current && settingsRef.current.delayIconFontsList) || '') };
+			}
+
+			const currentDraft = (settingsRef.current && settingsRef.current.delayIconFontsList) || '';
+			const merged = mergeUniqueSettingLines(currentDraft, response.delayIconFontsList.join('\n'));
+			if (merged.added) {
+				if (persistImmediately) {
+					await saveSettingsPatch({ delayIconFontsList: merged.value }, { preserveConfiguredInfrastructure: true });
+				} else {
+					queueSettingsPatch({ delayIconFontsList: merged.value });
+				}
+				pushToast({ type: 'success', text: 'Delay icon fonts added ' + merged.added + ' front-page icon font pattern(s).' });
+			} else {
+				pushToast({ type: 'info', text: __("Detected icon font patterns are already listed.", 'ultracache') });
+			}
+			return { detected: response.delayIconFontsList.length, added: merged.added, value: merged.value };
 		}
 
 		async function updateDelayIconFonts(value) {
@@ -1727,21 +3139,7 @@
 			if (!enabled) {
 				return;
 			}
-
-			const response = await scanFrontpageFontPatterns();
-			if (!response || !Array.isArray(response.delayIconFontsList) || !response.delayIconFontsList.length) {
-				pushToast({ type: 'warning', text: __("Delay icon fonts is enabled, but no likely icon font patterns were detected on the front page.", 'ultracache') });
-				return;
-			}
-
-			const currentDraft = (settingsRef.current && settingsRef.current.delayIconFontsList) || '';
-			const merged = mergeUniqueSettingLines(currentDraft, response.delayIconFontsList.join('\n'));
-			if (merged.added) {
-				queueSettingsPatch({ delayIconFontsList: merged.value });
-				pushToast({ type: 'success', text: 'Delay icon fonts added ' + merged.added + ' front-page icon font pattern(s).' });
-			} else {
-				pushToast({ type: 'info', text: __("Detected icon font patterns are already listed.", 'ultracache') });
-			}
+			await runDelayIconFontsEnableEffects({ persistImmediately: false });
 		}
 
 		async function rebuildGoogleFontsCacheFromSettings(currentDraft) {
@@ -1786,7 +3184,8 @@
 			return value;
 		}
 
-		async function populateDeferDelayExclusionDefaults(currentDraft) {
+		async function populateDeferDelayExclusionDefaults(currentDraft, options) {
+			const behavior = options && typeof options === 'object' ? options : {};
 			const defaultsPayload = initialDefaults && typeof initialDefaults === 'object' ? initialDefaults : {};
 			let defaults = ultracache && typeof ultracache.jsDelayDeferRecommendedExclusions !== 'undefined'
 				? String(ultracache.jsDelayDeferRecommendedExclusions || '')
@@ -1803,7 +3202,11 @@
 				return String(currentDraft || '');
 			}
 			const merged = mergeUniqueSettingLines(currentDraft, defaults);
-			pushToast({ type: merged.added ? 'success' : 'info', text: merged.added ? ('Added ' + merged.added + ' missing default Do Not Defer or Delay item(s).') : 'All recommended JS Do Not Defer or Delay defaults are already present.' });
+			if (merged.added) {
+				pushToast({ type: 'success', text: 'Added ' + merged.added + ' missing default Do Not Defer or Delay item(s).' });
+			} else if (!behavior.silentWhenUnchanged) {
+				pushToast({ type: 'info', text: 'All recommended JS Do Not Defer or Delay defaults are already present.' });
+			}
 			return merged.value;
 		}
 
@@ -1866,111 +3269,805 @@
 			}
 
 
-																async function submitRuntimeJsScanSnapshot(snapshot) {
-			if (!snapshot) {
-				return null;
+
+		function runtimeJsScanResourceLooksLikeJavaScript(item) {
+			const source = String(item && item.source ? item.source : '').trim();
+			const detail = String(item && item.detail ? item.detail : '').trim().toLowerCase();
+			if (/^(?:script|pendingScript)(?:#|\s|$)/i.test(detail)) {
+				return true;
 			}
 			try {
-				const response = await apiRequest('runtime_js_scan_submit', snapshot);
-				return response && response.runtimeJsScan ? response.runtimeJsScan : null;
+				const pathname = new URL(source, window.location.origin).pathname || '';
+				return /\.(?:m?js)$/i.test(pathname);
 			} catch (error) {
-				return null;
+				return /\.(?:m?js)(?:[?#]|$)/i.test(source);
 			}
 		}
 
-		async function submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, completed, queueJobId) {
-			const snapshot = readPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, queueJobId);
-			if (snapshot) {
-				snapshot.completed = !!completed;
+		function runtimeJsScanResourceLikelyClientBlocked(item) {
+			const source = String(item && item.source ? item.source : '').toLowerCase();
+			const message = String(item && item.message ? item.message : '').toLowerCase();
+			const detail = String(item && item.detail ? item.detail : '').toLowerCase();
+			const text = source + ' ' + message + ' ' + detail;
+			if (text.indexOf('err_blocked_by_client') !== -1 || text.indexOf('blocked by client') !== -1) {
+				return true;
 			}
-			return submitRuntimeJsScanSnapshot(snapshot);
+			return [
+				'googletagmanager.com',
+				'google-analytics.com',
+				'woocommerce-google-analytics-integration',
+				'connect.facebook.net',
+				'fbevents.js',
+				'mailchimp-for-woocommerce',
+				'pixel-tracking',
+				'analytics.tiktok.com',
+				'clarity.ms',
+				'hotjar.com',
+				'doubleclick.net',
+				'googleadservices.com'
+			].some((needle) => text.indexOf(needle) !== -1);
+		}
+
+		function browserRuntimeJsScanSupportsCredentialless() {
+			return !!(window.isSecureContext && typeof window.HTMLIFrameElement !== 'undefined' && 'credentialless' in window.HTMLIFrameElement.prototype);
+		}
+
+		function prepareBrowserRuntimeJsScanWindow() {
+			const currentSettings = settingsRef.current || {};
+			const debugEnabled = !!currentSettings.openBrowserScannerInNewWindowEnabled;
+			if (!browserRuntimeJsScanSupportsCredentialless()) {
+				const message = __('Browser Runtime Scan requires Chrome or Edge in a secure context because anonymous scanning uses a credentialless browser frame.', 'ultracache');
+				pushToast({ type: 'error', text: message });
+				return { enabled: debugEnabled, mode: debugEnabled ? 'visible-frame' : 'hidden-frame', unsupported: true, message: message };
+			}
+
+			return { enabled: debugEnabled, mode: debugEnabled ? 'visible-frame' : 'hidden-frame' };
+		}
+
+		async function resetRealCookieBannerRuntimeScanState(setRuntimeStatus) {
+			const currentSettings = settingsRef.current && typeof settingsRef.current === 'object' ? settingsRef.current : {};
+			if (!currentSettings.realCookieBannerCompatibilityEnabled) {
+				return { ok: true, skipped: true };
+			}
+
+			if (typeof setRuntimeStatus === 'function') {
+				setRuntimeStatus('Resetting isolated Real Cookie Banner consent state before this Runtime Scan lifecycle…');
+			}
+
+			let resetUrl = '';
+			try {
+				const source = String((ultracache && ultracache.restNonceUrl) || '/wp-admin/admin-ajax.php');
+				const parsed = new URL(source, window.location.origin);
+				parsed.search = '';
+				parsed.hash = '';
+				parsed.searchParams.set('action', 'ultracache_rcb_scanner_reset_frame');
+				parsed.searchParams.set('uc_rcb_reset', Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+				resetUrl = parsed.toString();
+			} catch (error) {
+				return { ok: false, reason: 'reset-url-invalid', error: error && error.message ? String(error.message) : String(error || '') };
+			}
+
+			const frame = document.createElement('iframe');
+			frame.setAttribute('credentialless', '');
+			try {
+				frame.credentialless = true;
+			} catch (error) {
+				ignoreExpectedAdminFailure(error);
+			}
+			frame.setAttribute('aria-hidden', 'true');
+			frame.setAttribute('tabindex', '-1');
+			frame.setAttribute('title', 'UltraCache Real Cookie Banner scanner state reset');
+			frame.style.position = 'fixed';
+			frame.style.left = '0';
+			frame.style.top = '0';
+			frame.style.width = '1px';
+			frame.style.height = '1px';
+			frame.style.opacity = '0';
+			frame.style.pointerEvents = 'none';
+			frame.style.zIndex = '-2147483647';
+
+			function isRcbStateName(value) {
+				return String(value || '').trim().toLowerCase().indexOf('real_cookie_banner') === 0;
+			}
+
+			function matchingStorageKeys(storage) {
+				const keys = [];
+				for (let index = 0; index < storage.length; index++) {
+					const key = storage.key(index);
+					if (isRcbStateName(key)) {
+						keys.push(String(key));
+					}
+				}
+				return keys;
+			}
+
+			function matchingCookieNames(cookieText) {
+				return String(cookieText || '').split(';').map((part) => {
+					const separator = part.indexOf('=');
+					return String(separator === -1 ? part : part.slice(0, separator)).trim();
+				}).filter(isRcbStateName);
+			}
+
+			function expireCookie(doc, name, path, domain) {
+				let value = name + '=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=' + path + '; SameSite=Lax';
+				if (domain) {
+					value += '; Domain=' + domain;
+				}
+				doc.cookie = value;
+			}
+
+			const loadResult = await new Promise((resolve) => {
+				let done = false;
+				const finish = (value) => {
+					if (done) {
+						return;
+					}
+					done = true;
+					clearTimeout(timer);
+					resolve(value);
+				};
+				const timer = setTimeout(() => finish({ ok: false, reason: 'reset-frame-timeout' }), 5000);
+				frame.addEventListener('load', () => finish({ ok: true, reason: 'load' }), { once: true });
+				frame.addEventListener('error', () => finish({ ok: false, reason: 'reset-frame-error-event' }), { once: true });
+				frame.src = resetUrl;
+				document.body.appendChild(frame);
+			});
+
+			if (!loadResult || !loadResult.ok) {
+				if (frame.parentNode) {
+					frame.parentNode.removeChild(frame);
+				}
+				return { ok: false, reason: loadResult && loadResult.reason ? String(loadResult.reason) : 'reset-frame-load-failed' };
+			}
+
+			try {
+				const frameWindow = frame.contentWindow;
+				const frameDocument = frameWindow && frameWindow.document ? frameWindow.document : null;
+				if (!frameWindow || !frameDocument) {
+					throw new Error('reset-frame-inaccessible');
+				}
+
+				const localKeys = matchingStorageKeys(frameWindow.localStorage);
+				const sessionKeys = matchingStorageKeys(frameWindow.sessionStorage);
+				localKeys.forEach((key) => frameWindow.localStorage.removeItem(key));
+				sessionKeys.forEach((key) => frameWindow.sessionStorage.removeItem(key));
+
+				const cookieNames = matchingCookieNames(frameDocument.cookie);
+				let parsedResetUrl = null;
+				try {
+					parsedResetUrl = new URL(resetUrl);
+				} catch (error) {
+					parsedResetUrl = null;
+				}
+				const pathname = parsedResetUrl ? String(parsedResetUrl.pathname || '/') : '/';
+				const adminIndex = pathname.indexOf('/wp-admin/');
+				const wpRoot = adminIndex >= 0 ? pathname.slice(0, adminIndex + 1) : '/';
+				const paths = Array.from(new Set(['/', wpRoot, wpRoot.replace(/\/$/, '') + '/wp-admin/']));
+				const hostname = parsedResetUrl ? String(parsedResetUrl.hostname || '') : '';
+				const labels = hostname.split('.').filter(Boolean);
+				const parentDomain = labels.length > 2 ? labels.slice(1).join('.') : '';
+				const domains = Array.from(new Set(['', hostname, hostname ? '.' + hostname : '', parentDomain, parentDomain ? '.' + parentDomain : ''].filter((value, index, list) => index === 0 || !!value)));
+				cookieNames.forEach((name) => {
+					paths.forEach((path) => domains.forEach((domain) => expireCookie(frameDocument, name, path || '/', domain)));
+				});
+
+				const remainingLocal = matchingStorageKeys(frameWindow.localStorage);
+				const remainingSession = matchingStorageKeys(frameWindow.sessionStorage);
+				const remainingCookies = matchingCookieNames(frameDocument.cookie);
+				const ok = remainingLocal.length === 0 && remainingSession.length === 0 && remainingCookies.length === 0;
+				return {
+					ok: ok,
+					reason: ok ? '' : 'reset-verification-failed',
+					clearedLocalStorageKeys: localKeys.length,
+					clearedSessionStorageKeys: sessionKeys.length,
+					clearedCookieNames: cookieNames.length,
+					remainingLocalStorageKeys: remainingLocal,
+					remainingSessionStorageKeys: remainingSession,
+					remainingCookieNames: remainingCookies,
+				};
+			} catch (error) {
+				return { ok: false, reason: 'reset-frame-inaccessible', error: error && error.message ? String(error.message) : String(error || '') };
+			} finally {
+				if (frame.parentNode) {
+					frame.parentNode.removeChild(frame);
+				}
+			}
+		}
+
+
+		async function resetComplianzRuntimeScanState(setRuntimeStatus) {
+			const currentSettings = settingsRef.current && typeof settingsRef.current === 'object' ? settingsRef.current : {};
+			if (!currentSettings.complianzCompatibilityEnabled) {
+				return { ok: true, skipped: true };
+			}
+
+			if (typeof setRuntimeStatus === 'function') {
+				setRuntimeStatus('Resetting isolated Complianz consent state before this Runtime Scan lifecycle…');
+			}
+
+			let resetUrl = '';
+			try {
+				const source = String((ultracache && ultracache.restNonceUrl) || '/wp-admin/admin-ajax.php');
+				const parsed = new URL(source, window.location.origin);
+				parsed.search = '';
+				parsed.hash = '';
+				parsed.searchParams.set('action', 'ultracache_complianz_scanner_reset_frame');
+				parsed.searchParams.set('uc_cmplz_reset', Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
+				resetUrl = parsed.toString();
+			} catch (error) {
+				return { ok: false, reason: 'reset-url-invalid', error: error && error.message ? String(error.message) : String(error || '') };
+			}
+
+			const frame = document.createElement('iframe');
+			frame.setAttribute('credentialless', '');
+			try {
+				frame.credentialless = true;
+			} catch (error) {
+				ignoreExpectedAdminFailure(error);
+			}
+			frame.setAttribute('aria-hidden', 'true');
+			frame.setAttribute('tabindex', '-1');
+			frame.setAttribute('title', 'UltraCache Complianz scanner state reset');
+			frame.style.position = 'fixed';
+			frame.style.left = '0';
+			frame.style.top = '0';
+			frame.style.width = '1px';
+			frame.style.height = '1px';
+			frame.style.opacity = '0';
+			frame.style.pointerEvents = 'none';
+			frame.style.zIndex = '-2147483647';
+
+			const localStorageNames = ['cmplz_tcf_consent', 'cmplz_ac_string'];
+			const sessionStorageNames = ['cmplz_user_data', 'cmplz_id', 'cmplz_cookie_data'];
+			function isComplianzCookieName(value) {
+				const name = String(value || '').trim().toLowerCase();
+				return name.indexOf('cmplz_') === 0 || name === 'usprivacy';
+			}
+
+			function existingStorageKeys(storage, names) {
+				return names.filter((name) => {
+					try {
+						return storage.getItem(name) !== null;
+					} catch (error) {
+						return false;
+					}
+				});
+			}
+
+			function matchingCookieNames(cookieText) {
+				return String(cookieText || '').split(';').map((part) => {
+					const separator = part.indexOf('=');
+					return String(separator === -1 ? part : part.slice(0, separator)).trim();
+				}).filter(isComplianzCookieName);
+			}
+
+			function expireCookie(doc, name, path, domain) {
+				let value = name + '=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=' + path + '; SameSite=Lax';
+				if (domain) {
+					value += '; Domain=' + domain;
+				}
+				doc.cookie = value;
+			}
+
+			const loadResult = await new Promise((resolve) => {
+				let done = false;
+				const finish = (value) => {
+					if (done) {
+						return;
+					}
+					done = true;
+					clearTimeout(timer);
+					resolve(value);
+				};
+				const timer = setTimeout(() => finish({ ok: false, reason: 'reset-frame-timeout' }), 5000);
+				frame.addEventListener('load', () => finish({ ok: true, reason: 'load' }), { once: true });
+				frame.addEventListener('error', () => finish({ ok: false, reason: 'reset-frame-error-event' }), { once: true });
+				frame.src = resetUrl;
+				document.body.appendChild(frame);
+			});
+
+			if (!loadResult || !loadResult.ok) {
+				if (frame.parentNode) {
+					frame.parentNode.removeChild(frame);
+				}
+				return { ok: false, reason: loadResult && loadResult.reason ? String(loadResult.reason) : 'reset-frame-load-failed' };
+			}
+
+			try {
+				const frameWindow = frame.contentWindow;
+				const frameDocument = frameWindow && frameWindow.document ? frameWindow.document : null;
+				if (!frameWindow || !frameDocument) {
+					throw new Error('reset-frame-inaccessible');
+				}
+
+				const localKeys = existingStorageKeys(frameWindow.localStorage, localStorageNames);
+				const sessionKeys = existingStorageKeys(frameWindow.sessionStorage, sessionStorageNames);
+				localKeys.forEach((key) => frameWindow.localStorage.removeItem(key));
+				sessionKeys.forEach((key) => frameWindow.sessionStorage.removeItem(key));
+
+				const cookieNames = matchingCookieNames(frameDocument.cookie);
+				let parsedResetUrl = null;
+				try {
+					parsedResetUrl = new URL(resetUrl);
+				} catch (error) {
+					parsedResetUrl = null;
+				}
+				const pathname = parsedResetUrl ? String(parsedResetUrl.pathname || '/') : '/';
+				const adminIndex = pathname.indexOf('/wp-admin/');
+				const wpRoot = adminIndex >= 0 ? pathname.slice(0, adminIndex + 1) : '/';
+				const paths = Array.from(new Set(['/', wpRoot, wpRoot.replace(/\/$/, '') + '/wp-admin/']));
+				const hostname = parsedResetUrl ? String(parsedResetUrl.hostname || '') : '';
+				const labels = hostname.split('.').filter(Boolean);
+				const parentDomain = labels.length > 2 ? labels.slice(1).join('.') : '';
+				const domains = Array.from(new Set(['', hostname, hostname ? '.' + hostname : '', parentDomain, parentDomain ? '.' + parentDomain : ''].filter((value, index) => index === 0 || !!value)));
+				cookieNames.forEach((name) => {
+					paths.forEach((path) => domains.forEach((domain) => expireCookie(frameDocument, name, path || '/', domain)));
+				});
+
+				const remainingLocal = existingStorageKeys(frameWindow.localStorage, localStorageNames);
+				const remainingSession = existingStorageKeys(frameWindow.sessionStorage, sessionStorageNames);
+				const remainingCookies = matchingCookieNames(frameDocument.cookie);
+				const ok = remainingLocal.length === 0 && remainingSession.length === 0 && remainingCookies.length === 0;
+				return {
+					ok: ok,
+					reason: ok ? '' : 'reset-verification-failed',
+					clearedLocalStorageKeys: localKeys.length,
+					clearedSessionStorageKeys: sessionKeys.length,
+					clearedCookieNames: cookieNames.length,
+					remainingLocalStorageKeys: remainingLocal,
+					remainingSessionStorageKeys: remainingSession,
+					remainingCookieNames: remainingCookies,
+				};
+			} catch (error) {
+				return { ok: false, reason: 'reset-frame-inaccessible', error: error && error.message ? String(error.message) : String(error || '') };
+			} finally {
+				if (frame.parentNode) {
+					frame.parentNode.removeChild(frame);
+				}
+			}
 		}
 
 		async function runBrowserRuntimeJsScanForUrl(url, onStatus, options) {
 			const scanOptions = options && typeof options === 'object' ? options : {};
-			const scanContext = scanOptions.context === 'logged-in' ? 'logged-in' : 'anonymous';
+			const scanContext = 'anonymous';
 			function setRuntimeStatus(message) {
 				if (typeof onStatus === 'function') {
 					onStatus(message);
 				}
 			}
-			let scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
-			const scanId = 'rt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
-			const runtimeUrl = buildRuntimeJsScanUrl(scanUrl, scanId, scanContext);
-			setRuntimeStatus('Opening ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' diagnostic page…');
-			const popup = window.open(runtimeUrl, 'ultracacheRuntimeJsScan', 'width=1280,height=900');
-			if (!popup) {
-				setRuntimeStatus('Popup was blocked. Allow popups for this admin page and try again. Diagnostic URL: ' + runtimeUrl);
-				pushToast({ type: 'error', text: __("Browser blocked the runtime scan window. Allow popups for this admin page and try again.", 'ultracache') });
-				return { available: false, suggestions: [], suggestionCount: 0, missingCount: 0, scanContext: scanContext, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl), debugUrl: runtimeUrl };
+
+			const scanUrl = String(url || '').trim() || ((ultracache && ultracache.frontendProbeUrl) ? ultracache.frontendProbeUrl : '/');
+			const scanId = String(scanOptions.scanId || '').trim() || ('rt_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10));
+			const browserWindowState = scanOptions.browserWindow && typeof scanOptions.browserWindow === 'object' ? scanOptions.browserWindow : null;
+			const useVisibleFrame = !!(browserWindowState && browserWindowState.enabled);
+
+			if (!browserRuntimeJsScanSupportsCredentialless()) {
+				const message = __('Browser Runtime Scan requires Chrome or Edge in a secure context because it needs a cookieless credentialless iframe. No scan result was produced.', 'ultracache');
+				setRuntimeStatus(message);
+				return {
+					available: false,
+					source: 'browser-runtime-credentialless-unsupported',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl),
+					failureReason: 'credentialless-unsupported',
+					message: message,
+				};
 			}
 
-			try { popup.focus(); } catch (error) {
-				ignoreExpectedAdminFailure(error);
+			const isolationDiagnostics = {
+				realCookieBanner: null,
+				complianz: null,
+			};
+			const isolationWarnings = [];
+
+			const realCookieBannerReset = await resetRealCookieBannerRuntimeScanState(setRuntimeStatus);
+			isolationDiagnostics.realCookieBanner = realCookieBannerReset || { ok: false, reason: 'reset-no-result' };
+			if (!realCookieBannerReset || !realCookieBannerReset.ok) {
+				const reason = realCookieBannerReset && realCookieBannerReset.reason ? String(realCookieBannerReset.reason) : 'reset-unknown-failure';
+				isolationWarnings.push({ integration: 'real-cookie-banner', reason: reason, diagnostics: realCookieBannerReset || {} });
+				setRuntimeStatus('Real Cookie Banner scanner-state reset did not complete (' + reason + '). Continuing Runtime Scan.');
 			}
-			setRuntimeStatus('Diagnostic page opened in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Waiting for browser errors…');
-			pushToast({ type: 'info', text: 'Browser Runtime Scan opened the page in ' + (scanContext === 'anonymous' ? 'anonymous frontend' : 'logged-in/admin frontend') + ' mode. Keep it open for a few seconds.' });
-			let latestReport = null;
-			let navigationLossReported = false;
-			const startedAt = Date.now();
-			for (let i = 0; i < 18; i++) {
-				setRuntimeStatus('Waiting for runtime scan report… ' + (i + 1) + '/18');
-				await sleep(i < 2 ? 900 : 1200);
-				const directReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, false, scanOptions.queueJobId || '');
-				if (directReport && Number(directReport.errorCount || 0) > 0) {
-					latestReport = directReport;
+
+			const complianzReset = await resetComplianzRuntimeScanState(setRuntimeStatus);
+			isolationDiagnostics.complianz = complianzReset || { ok: false, reason: 'reset-no-result' };
+			if (!complianzReset || !complianzReset.ok) {
+				const reason = complianzReset && complianzReset.reason ? String(complianzReset.reason) : 'reset-unknown-failure';
+				isolationWarnings.push({ integration: 'complianz', reason: reason, diagnostics: complianzReset || {} });
+				setRuntimeStatus('Complianz scanner-state reset did not complete (' + reason + '). Continuing Runtime Scan.');
+			}
+
+			const bridgeRunId = 'run_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+			const bridgeName = 'ultracacheRuntimeJsScanBridge:' + scanId + ':' + bridgeRunId + ':' + encodeURIComponent(window.location.origin);
+			const debugFrameId = 'ultracache-runtime-js-debug-frame';
+			if (useVisibleFrame) {
+				const previousFrame = document.getElementById(debugFrameId);
+				if (previousFrame && previousFrame.parentNode) {
+					previousFrame.parentNode.removeChild(previousFrame);
 				}
-				if (!directReport && !navigationLossReported) {
-					const navigationLossSnapshot = readPopupRuntimeJsScanNavigationLossSnapshot(popup, scanId, scanUrl, runtimeUrl, scanContext, scanOptions.queueJobId || '', startedAt);
-					if (navigationLossSnapshot) {
-						navigationLossReported = true;
-						setRuntimeStatus('Runtime scan detected navigation before the collector could report.');
-						const navigationLossReport = await submitRuntimeJsScanSnapshot(navigationLossSnapshot);
-						if (navigationLossReport) {
-							latestReport = navigationLossReport;
-							break;
+			}
+
+			function createRuntimeScanFrame(visible) {
+				const frame = document.createElement('iframe');
+				frame.setAttribute('credentialless', '');
+				try {
+					frame.credentialless = true;
+				} catch (error) {
+					ignoreExpectedAdminFailure(error);
+				}
+				frame.setAttribute('title', 'UltraCache Browser Runtime Scan');
+				frame.style.border = '0';
+
+				if (visible) {
+					frame.id = debugFrameId;
+					frame.style.position = 'fixed';
+					frame.style.right = '18px';
+					frame.style.bottom = '18px';
+					frame.style.width = 'min(1280px, calc(100vw - 36px))';
+					frame.style.height = '70vh';
+					frame.style.opacity = '1';
+					frame.style.pointerEvents = 'auto';
+					frame.style.zIndex = '10020';
+					frame.style.background = '#fff';
+					frame.style.boxShadow = '0 24px 64px rgba(0,0,0,.55)';
+				} else {
+					frame.setAttribute('aria-hidden', 'true');
+					frame.setAttribute('tabindex', '-1');
+					frame.style.position = 'fixed';
+					frame.style.left = '0';
+					frame.style.top = '0';
+					frame.style.width = '1280px';
+					frame.style.height = '900px';
+					frame.style.opacity = '0';
+					frame.style.pointerEvents = 'none';
+					frame.style.zIndex = '-2147483647';
+				}
+				return frame;
+			}
+
+			let iframe = null;
+			let resolvedScanUrl = '';
+			let runtimeUrl = '';
+			let expectedOrigin = '';
+			let scannerReady = false;
+			let settled = false;
+			let resolveReport = null;
+			const reportPromise = new Promise((resolve) => {
+				resolveReport = resolve;
+			});
+
+			function finish(report) {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				resolveReport(report || null);
+			}
+
+			function frameHref() {
+				try {
+					return String(iframe.contentWindow && iframe.contentWindow.location ? iframe.contentWindow.location.href : '');
+				} catch (error) {
+					return '';
+				}
+			}
+
+			function frameScannerState() {
+				try {
+					const frameWindow = iframe.contentWindow;
+					const frameDocument = frameWindow && frameWindow.document ? frameWindow.document : null;
+					const config = frameWindow && frameWindow.ultracacheRuntimeJsScanConfig && typeof frameWindow.ultracacheRuntimeJsScanConfig === 'object'
+						? frameWindow.ultracacheRuntimeJsScanConfig
+						: null;
+					const scanner = frameWindow && frameWindow.__ultracacheRuntimeJsScan && typeof frameWindow.__ultracacheRuntimeJsScan === 'object'
+						? frameWindow.__ultracacheRuntimeJsScan
+						: null;
+					const collectorLoaded = !!(frameDocument && Array.from(frameDocument.scripts || []).some((script) => {
+						const src = String(script.src || '');
+						if (src.indexOf('runtime-js-scan-collector.js') !== -1) {
+							return true;
 						}
+						const modules = String(script.getAttribute && script.getAttribute('data-ultracache-modules') || '');
+						return modules.split(',').map((moduleId) => moduleId.trim()).indexOf('runtime-js-scan-collector') !== -1;
+					}));
+					return { accessible: true, config: config, scanner: scanner, collectorLoaded: collectorLoaded };
+				} catch (error) {
+					return { accessible: false, config: null, scanner: null, collectorLoaded: false };
+				}
+			}
+
+			function installFreshMeasurementFrame(targetRuntimeUrl) {
+				if (iframe) {
+					iframe.removeEventListener('load', onFrameLoad, false);
+					iframe.removeEventListener('error', onFrameError, false);
+					try {
+						if (iframe && iframe.parentNode) {
+							iframe.parentNode.removeChild(iframe);
+						}
+					} catch (error) {
+						ignoreExpectedAdminFailure(error);
 					}
 				}
+
+				iframe = createRuntimeScanFrame(useVisibleFrame);
+				iframe.setAttribute('data-ultracache-runtime-scan-measurement', '1');
+				iframe.addEventListener('load', onFrameLoad, false);
+				iframe.addEventListener('error', onFrameError, false);
+				iframe.name = bridgeName;
 				try {
-					const response = await apiRequest('runtime_js_scan_report', { scanId });
-					const fetchedReport = response && response.runtimeJsScan ? response.runtimeJsScan : null;
-					if (fetchedReport) {
-						if (!latestReport || Number(fetchedReport.errorCount || 0) >= Number(latestReport.errorCount || 0)) {
-							latestReport = fetchedReport;
-						}
-						if (latestReport && latestReport.completed && Number(latestReport.errorCount || 0) > 0) {
-							break;
-						}
+					if (iframe.contentWindow) {
+						iframe.contentWindow.name = bridgeName;
 					}
 				} catch (error) {
-					reportNonFatalAdminError('dashboard.runtime-js-scan.poll', error, { severity: 'debug', dedupeKey: 'dashboard.runtime-js-scan.poll', dedupeWindowMs: 30000 });
+					ignoreExpectedAdminFailure(error);
+				}
+				iframe.src = targetRuntimeUrl;
+				document.body.appendChild(iframe);
+			}
+
+			function onFrameLoad() {
+				if (settled) {
+					return;
+				}
+
+				const state = frameScannerState();
+				const loadedUrl = frameHref() || runtimeUrl;
+				const configScanId = state.config && state.config.scanId ? String(state.config.scanId) : '';
+				if (!state.accessible || !state.collectorLoaded || !state.scanner || !state.config || configScanId !== scanId) {
+					finish({
+						__ultracacheFailure: true,
+						failureReason: 'collector-not-injected',
+						url: loadedUrl,
+						collectorLoaded: !!state.collectorLoaded,
+						configPresent: !!state.config,
+						scannerPresent: !!state.scanner,
+						preResolvedTargetRequired: true,
+					});
+					return;
+				}
+
+				scannerReady = true;
+				setRuntimeStatus('Runtime scanner ready; collecting browser runtime errors…');
+			}
+
+			function onFrameError() {
+				finish({
+					__ultracacheFailure: true,
+					failureReason: 'runtime-frame-load-error',
+					url: runtimeUrl,
+				});
+			}
+
+			setRuntimeStatus('Resolving the final anonymous Runtime Scan target server-side and creating its one-time token…');
+			let tokenResponse = null;
+			try {
+				tokenResponse = await apiRequest('runtime_js_scan_token', {
+					scanId: scanId,
+					url: scanUrl,
+				});
+			} catch (error) {
+				const message = error && error.message ? String(error.message) : __('Could not resolve the Runtime Scan target and create its anonymous token.', 'ultracache');
+				setRuntimeStatus(message);
+				return {
+					available: false,
+					source: 'browser-runtime-token',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl),
+					failureReason: 'token-failed',
+					message: message,
+				};
+			}
+
+			const scanToken = tokenResponse && tokenResponse.scanToken ? String(tokenResponse.scanToken) : '';
+			const tokenUrl = tokenResponse && tokenResponse.url ? String(tokenResponse.url) : String(scanUrl || '');
+			resolvedScanUrl = sanitizeRuntimeJsScanDisplayUrl(tokenUrl) || tokenUrl;
+			if (sanitizeRuntimeJsScanDisplayUrl(scanUrl) !== resolvedScanUrl) {
+				setRuntimeStatus('Anonymous Runtime Scan target resolved server-side to ' + resolvedScanUrl);
+			}
+
+			if (!scanToken) {
+				const message = __('Runtime Scan token response did not contain a usable token.', 'ultracache');
+				setRuntimeStatus(message);
+				if (!useVisibleFrame && iframe && iframe.parentNode) {
+					iframe.parentNode.removeChild(iframe);
+				}
+				return {
+					available: false,
+					source: 'browser-runtime-token',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: resolvedScanUrl,
+					failureReason: 'token-missing',
+					message: message,
+				};
+			}
+
+			runtimeUrl = buildRuntimeJsScanUrl(tokenUrl, scanId, scanToken);
+			try {
+				expectedOrigin = new URL(runtimeUrl, window.location.origin).origin;
+			} catch (error) {
+				expectedOrigin = window.location.origin;
+			}
+
+			function onRuntimeMessage(event) {
+				if (!event || event.source !== iframe.contentWindow || event.origin !== expectedOrigin) {
+					return;
+				}
+				const data = event.data && typeof event.data === 'object' ? event.data : null;
+				if (!data || data.channel !== 'ultracache-runtime-js-scan' || String(data.scanId || '') !== scanId) {
+					return;
+				}
+				if (data.type === 'ready') {
+					scannerReady = true;
+					setRuntimeStatus('Runtime scanner ready; collecting browser runtime errors…');
+					return;
+				}
+				if (data.type !== 'completed') {
+					return;
+				}
+				const payload = data.payload && typeof data.payload === 'object' ? data.payload : null;
+				if (!payload || !payload.completed || String(payload.scanId || '') !== scanId) {
+					return;
+				}
+				finish(payload);
+			}
+
+			window.addEventListener('message', onRuntimeMessage, false);
+			setRuntimeStatus(useVisibleFrame
+				? 'Loading Runtime Scan in a fresh visible Browser Scanner measurement frame…'
+				: 'Loading Runtime Scan in a fresh isolated anonymous measurement frame…');
+			installFreshMeasurementFrame(runtimeUrl);
+			setRuntimeStatus('Collecting browser runtime errors…');
+
+			let rawReport = null;
+			try {
+				rawReport = await reportPromise;
+			} finally {
+				window.removeEventListener('message', onRuntimeMessage, false);
+				if (iframe) {
+					iframe.removeEventListener('load', onFrameLoad, false);
+					iframe.removeEventListener('error', onFrameError, false);
+				}
+				if (!useVisibleFrame) {
+					try {
+						if (iframe && iframe.parentNode) {
+							iframe.parentNode.removeChild(iframe);
+						}
+					} catch (error) {
+						ignoreExpectedAdminFailure(error);
+					}
 				}
 			}
-			const finalDirectReport = await submitPopupRuntimeJsScanSnapshot(popup, scanId, scanUrl, true, scanOptions.queueJobId || '');
-			if (finalDirectReport && (!latestReport || Number(finalDirectReport.errorCount || 0) >= Number(latestReport.errorCount || 0))) {
-				latestReport = finalDirectReport;
+
+			if (rawReport && rawReport.__ultracacheFailure) {
+				const loadedUrl = sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl);
+				const failureMessage = rawReport.failureReason === 'collector-not-injected'
+					? __('Runtime Scan loaded the pre-resolved anonymous frontend target, but the verified collector was not injected. No browser measurement is available for this target; the scanner will report this exact target failure without reusing the browser context.', 'ultracache')
+					: __('Runtime Scan could not load the isolated anonymous frontend frame.', 'ultracache');
+				setRuntimeStatus(failureMessage);
+				pushToast({ type: 'error', text: failureMessage });
+				return {
+					available: false,
+					source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: loadedUrl,
+					failureReason: String(rawReport.failureReason || 'runtime-frame-failed'),
+					message: failureMessage,
+					diagnostics: {
+						resolvedUrl: resolvedScanUrl,
+						loadedUrl: loadedUrl,
+						collectorLoaded: !!rawReport.collectorLoaded,
+						configPresent: !!rawReport.configPresent,
+						scannerPresent: !!rawReport.scannerPresent,
+						scannerReady: !!scannerReady,
+					},
+				};
 			}
 
-			if (!latestReport) {
-				setRuntimeStatus('No runtime report returned. The diagnostic page may have been served from cache or blocked.');
-				pushToast({ type: 'warning', text: __("Runtime scan did not return a report. Check that the diagnostic page opened and that cache bypass is active.", 'ultracache') });
-				return { available: false, source: 'browser-runtime', suggestions: [], suggestionCount: 0, missingCount: 0, scanContext: scanContext, scannedUrl: sanitizeRuntimeJsScanDisplayUrl(scanUrl) };
+			if (!rawReport || !rawReport.completed) {
+				const failureMessage = __('Runtime Scan failed because the isolated frontend frame did not return a completed browser error payload. No clean result was recorded.', 'ultracache');
+				setRuntimeStatus(failureMessage);
+				pushToast({ type: 'error', text: failureMessage });
+				return {
+					available: false,
+					source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: resolvedScanUrl || sanitizeRuntimeJsScanDisplayUrl(scanUrl),
+					failureReason: 'incomplete-report',
+					message: failureMessage,
+				};
 			}
 
-			const result = normalizeRuntimeJsScanResult(latestReport, scanUrl);
-			const missingCount = Number(result.missingCount || 0);
-			const runtimeErrorCount = Number(result.runtimeErrorCount || latestReport.errorCount || 0);
-			if (runtimeErrorCount > 0) {
-				setRuntimeStatus('Runtime scan captured ' + runtimeErrorCount + ' browser error(s).');
-				pushToast({ type: missingCount ? 'warning' : 'info', text: 'Runtime scan captured ' + runtimeErrorCount + ' browser error(s)' + (missingCount ? ' and found ' + missingCount + ' missing exclusion suggestion(s).' : '.') });
+			const reportDebug = rawReport.debug && typeof rawReport.debug === 'object' ? rawReport.debug : {};
+			if (reportDebug.credentialless !== true) {
+				const failureMessage = __('Runtime Scan refused the result because the browser did not confirm a credentialless anonymous frame. No differential was produced.', 'ultracache');
+				setRuntimeStatus(failureMessage);
+				pushToast({ type: 'error', text: failureMessage });
+				return {
+					available: false,
+					source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
+					runtimeErrorCount: 0,
+					errors: [],
+					resourceErrors: [],
+					scanContext: scanContext,
+					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl),
+					failureReason: 'credentialless-not-confirmed',
+					message: failureMessage,
+					rawReport: rawReport,
+				};
+			}
+
+			const allErrors = Array.isArray(rawReport.errors) ? rawReport.errors : [];
+			const resourceErrors = allErrors
+				.filter((item) => item && String(item.kind || '').toLowerCase() === 'resource-error')
+				.map((item) => Object.assign({}, item, {
+					isJavaScript: runtimeJsScanResourceLooksLikeJavaScript(item),
+					likelyClientBlocked: runtimeJsScanResourceLikelyClientBlocked(item),
+				}));
+			const runtimeErrors = allErrors.filter((item) => item && String(item.kind || '').toLowerCase() !== 'resource-error');
+			const failedJavaScriptResources = resourceErrors.filter((item) => item && item.isJavaScript);
+			const likelyBlockedJavaScriptResources = failedJavaScriptResources.filter((item) => item && item.likelyClientBlocked);
+			if (failedJavaScriptResources.length) {
+				const likelyClientBlocked = likelyBlockedJavaScriptResources.length > 0;
+				const failureMessage = likelyClientBlocked
+					? __('Runtime Scan could not complete because JavaScript resources appear to be blocked by your browser or an extension. Please disable any ad blocker or content-blocking extension for this site and try again.', 'ultracache')
+					: __('Runtime Scan could not complete because one or more JavaScript resources failed to load. Fix the failed JavaScript resource, or disable any browser/content blocker affecting this site, and try again.', 'ultracache');
+				setRuntimeStatus(failureMessage);
+				pushToast({ type: 'error', text: failureMessage });
+				return {
+					available: false,
+					source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
+					runtimeErrorCount: runtimeErrors.length,
+					resourceErrorCount: resourceErrors.length,
+					blockedResourceCount: likelyBlockedJavaScriptResources.length,
+					errors: runtimeErrors,
+					resourceErrors: resourceErrors,
+					blockedResources: likelyBlockedJavaScriptResources,
+					scripts: Array.isArray(rawReport.scripts) ? rawReport.scripts : [],
+					scanContext: scanContext,
+					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl),
+					failureReason: likelyClientBlocked ? 'client-script-blocked' : 'javascript-resource-load-failed',
+					scanContaminated: true,
+					message: failureMessage,
+					rawReport: rawReport,
+				};
+			}
+			const result = {
+				available: true,
+				source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
+				runtimeErrorCount: runtimeErrors.length,
+				resourceErrorCount: resourceErrors.length,
+				errors: runtimeErrors,
+				resourceErrors: resourceErrors,
+				scripts: Array.isArray(rawReport.scripts) ? rawReport.scripts : [],
+				scanContext: scanContext,
+				scannedUrl: sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl),
+				completed: true,
+				rawReport: rawReport,
+				isolationDiagnostics: isolationDiagnostics,
+				isolationWarnings: isolationWarnings.slice(),
+			};
+
+			if (runtimeErrors.length) {
+				setRuntimeStatus('Runtime Scan captured ' + runtimeErrors.length + ' browser error(s).');
 			} else {
-				setRuntimeStatus('Runtime scan completed with no browser JS errors captured.');
-				pushToast({ type: 'success', text: __("Runtime scan completed with no browser JS errors captured.", 'ultracache') });
+				setRuntimeStatus('Runtime Scan completed with no browser JavaScript errors captured.');
 			}
 			return result;
 		}
-
 
 		async function runJsDelaySafetyScanForUrl(url, onProgress, scanOptions) {
 			const options = scanOptions && typeof scanOptions === 'object' ? scanOptions : {};
@@ -2005,7 +4102,7 @@
 					startTime: Date.now(),
 					cancellable: false,
 					cancelRequested: false,
-					showWhenInactive: !active,
+					showWhenInactive: !active && !options.embeddedProgress,
 					complete: !active && !failed,
 					currentStageLabel: stageLabel,
 					currentItem: '',
@@ -2139,7 +4236,7 @@
 			const profile = result && result.performanceProfile ? result.performanceProfile : null;
 			const scan = profile && profile.jsDelaySafetyScan ? profile.jsDelaySafetyScan : null;
 			if (!scan || !scan.available) {
-				if (!options.resumeOnly) {
+				if (!options.resumeOnly && !options.silent) {
 					pushToast({ type: 'warning', text: __('HTML JS dependency analysis was not available for this URL.', 'ultracache') });
 				}
 				return { available: false, source: 'html-strong-dependency-analysis', suggestions: [], suggestionCount: 0, missingCount: 0, scannedUrl: scanUrl };
@@ -2156,12 +4253,14 @@
 				scannedUrl: (profile && (profile.profileUrl || profile.url)) ? (profile.profileUrl || profile.url) : scanUrl,
 				scannedAt: profile && profile.scannedAt ? profile.scannedAt : '',
 			});
-			pushToast({
-				type: enrichedScan.missingCount ? 'warning' : 'success',
-				text: enrichedScan.missingCount
-					? ('Found ' + enrichedScan.missingCount + ' strong JS dependency suggestion(s).')
-					: 'No missing high-confidence silent JS dependency conflicts were found for this URL.'
-			});
+			if (!options.silent) {
+				pushToast({
+					type: enrichedScan.missingCount ? 'warning' : 'success',
+					text: enrichedScan.missingCount
+						? ('Found ' + enrichedScan.missingCount + ' strong JS dependency suggestion(s).')
+						: 'No missing high-confidence silent JS dependency conflicts were found for this URL.'
+				});
+			}
 			return enrichedScan;
 		}
 
@@ -2179,7 +4278,7 @@
 			});
 		}
 
-		function normalizeProfileBackendProbeResult(backend, response, error) {
+		function normalizeOptimalBackendProbeResult(backend, response, error) {
 			const source = response && typeof response === 'object' ? response : (error && error.data && typeof error.data === 'object' ? error.data : null);
 			const message = source && source.message ? String(source.message) : (error && error.message ? String(error.message) : '');
 			if (source && source.success) {
@@ -2191,84 +4290,124 @@
 			return { backend: backend, status: 'indeterminate', success: false, message: message || ('Could not verify ' + backend.toUpperCase() + ' backend availability.'), response: null };
 		}
 
-		async function probeObjectCacheBackendForProfile(backend, basePatch) {
-			const currentSettings = settingsRef.current || {};
-			const currentRedisForm = redisForm || {};
-			const payload = Object.assign({}, currentSettings, currentRedisForm, basePatch || {}, {
+		async function probeObjectCacheBackendForOptimalSettings(backend, basePatch) {
+			// Optimal setup probes the persisted infrastructure configuration. In particular,
+			// do not send the redacted client-side Redis password field back as an empty
+			// override; the server-side probe must use the stored/externally-managed secret.
+			void basePatch;
+			const payload = {
 				backend: backend,
-				profileProbe: true,
+				capabilityProbe: true,
 				skipPayloadProbe: true,
-			});
+			};
 			try {
 				const response = await apiRequest('object_cache_test', payload);
-				return normalizeProfileBackendProbeResult(backend, response, null);
+				return normalizeOptimalBackendProbeResult(backend, response, null);
 			} catch (error) {
-				return normalizeProfileBackendProbeResult(backend, null, error);
+				return normalizeOptimalBackendProbeResult(backend, null, error);
 			}
 		}
 
-		function assertProfileProbeDeterminate(result) {
+		function assertOptimalProbeDeterminate(result) {
 			if (result && result.status !== 'indeterminate') {
 				return;
 			}
 			const backend = result && result.backend ? result.backend.toUpperCase() : 'object cache';
 			const message = result && result.message ? result.message : 'The backend availability probe did not complete.';
-			throw new Error('Profile object-cache detection stopped: ' + backend + ' availability is indeterminate. ' + message);
+			throw new Error('Optimal settings object-cache detection stopped: ' + backend + ' availability is indeterminate. ' + message);
 		}
 
-		async function getProfileDiskFallbackPatch() {
-			const diskResult = await probeObjectCacheBackendForProfile('disk', {});
-			assertProfileProbeDeterminate(diskResult);
+		async function getOptimalDiskFallbackPatch() {
+			const diskResult = await probeObjectCacheBackendForOptimalSettings('disk', {});
+			assertOptimalProbeDeterminate(diskResult);
 			return diskResult.status === 'available' ? 'disk' : 'none';
 		}
 
-		async function getProfileSqliteFallbackPatch(basePatch) {
-			const sqliteResult = await probeObjectCacheBackendForProfile('sqlite', basePatch || {});
-			assertProfileProbeDeterminate(sqliteResult);
-			return sqliteResult.status === 'available' ? 'sqlite' : await getProfileDiskFallbackPatch();
+		async function getOptimalSqliteFallbackPatch(basePatch) {
+			const sqliteResult = await probeObjectCacheBackendForOptimalSettings('sqlite', basePatch || {});
+			assertOptimalProbeDeterminate(sqliteResult);
+			return sqliteResult.status === 'available' ? 'sqlite' : await getOptimalDiskFallbackPatch();
 		}
 
-		async function getProfileObjectCachePatch(basePatch) {
-			// Profile detection is part of the queued profile operation and must be
-			// resolved in deterministic Redis > APCu > SQLite > Disk order. Do not run these
-			// probes in parallel and do not fall back to Disk on indeterminate REST
-			// results, otherwise fast follow-up clicks can save the wrong backend.
-			const redisResult = await probeObjectCacheBackendForProfile('redis', basePatch);
-			assertProfileProbeDeterminate(redisResult);
+		async function getOptimalObjectCachePatch(basePatch, preferredBackend = '') {
+			// Object Cache detection is part of the queued setup operation. When the Wizard
+			// supplies a backend, verify that exact backend through the same probe path used
+			// by the normal Object Cache setup. Without an explicit choice, keep the existing
+			// deterministic Redis > APCu > SQLite > Disk recommendation order.
+			const selected = String(preferredBackend || '').trim().toLowerCase();
+			if (['redis', 'apcu', 'sqlite', 'disk'].indexOf(selected) !== -1) {
+				const selectedResult = await probeObjectCacheBackendForOptimalSettings(selected, basePatch);
+				assertOptimalProbeDeterminate(selectedResult);
+				if (selectedResult.status !== 'available') {
+					throw new Error('The Object Cache backend selected in the Setup Wizard is not available: ' + selected.toUpperCase() + '.');
+				}
 
-			if (redisResult.status === 'available') {
-				const apcuFallbackResult = await probeObjectCacheBackendForProfile('apcu', basePatch);
-				assertProfileProbeDeterminate(apcuFallbackResult);
+				if (selected === 'redis') {
+					const apcuFallbackResult = await probeObjectCacheBackendForOptimalSettings('apcu', basePatch);
+					assertOptimalProbeDeterminate(apcuFallbackResult);
+					return {
+						objectCacheEnabled: true,
+						objectCacheBackend: 'redis',
+						objectCacheFallbackBackend: apcuFallbackResult.status === 'available' ? 'apcu' : await getOptimalSqliteFallbackPatch(basePatch),
+					};
+				}
+				if (selected === 'apcu') {
+					return {
+						objectCacheEnabled: true,
+						objectCacheBackend: 'apcu',
+						objectCacheFallbackBackend: await getOptimalSqliteFallbackPatch(basePatch),
+					};
+				}
+				if (selected === 'sqlite') {
+					return {
+						objectCacheEnabled: true,
+						objectCacheBackend: 'sqlite',
+						objectCacheFallbackBackend: await getOptimalDiskFallbackPatch(),
+					};
+				}
 				return {
 					objectCacheEnabled: true,
-					objectCacheBackend: 'redis',
-					objectCacheFallbackBackend: apcuFallbackResult.status === 'available' ? 'apcu' : await getProfileSqliteFallbackPatch(basePatch),
+					objectCacheBackend: 'disk',
+					objectCacheFallbackBackend: 'none',
 				};
 			}
 
-			const apcuResult = await probeObjectCacheBackendForProfile('apcu', basePatch);
-			assertProfileProbeDeterminate(apcuResult);
+			const redisResult = await probeObjectCacheBackendForOptimalSettings('redis', basePatch);
+			assertOptimalProbeDeterminate(redisResult);
+
+			if (redisResult.status === 'available') {
+				const apcuFallbackResult = await probeObjectCacheBackendForOptimalSettings('apcu', basePatch);
+				assertOptimalProbeDeterminate(apcuFallbackResult);
+				return {
+					objectCacheEnabled: true,
+					objectCacheBackend: 'redis',
+					objectCacheFallbackBackend: apcuFallbackResult.status === 'available' ? 'apcu' : await getOptimalSqliteFallbackPatch(basePatch),
+				};
+			}
+
+			const apcuResult = await probeObjectCacheBackendForOptimalSettings('apcu', basePatch);
+			assertOptimalProbeDeterminate(apcuResult);
 
 			if (apcuResult.status === 'available') {
 				return {
 					objectCacheEnabled: true,
 					objectCacheBackend: 'apcu',
-					objectCacheFallbackBackend: await getProfileSqliteFallbackPatch(basePatch),
+					objectCacheFallbackBackend: await getOptimalSqliteFallbackPatch(basePatch),
 				};
 			}
 
-			const sqliteResult = await probeObjectCacheBackendForProfile('sqlite', basePatch);
-			assertProfileProbeDeterminate(sqliteResult);
+			const sqliteResult = await probeObjectCacheBackendForOptimalSettings('sqlite', basePatch);
+			assertOptimalProbeDeterminate(sqliteResult);
 			if (sqliteResult.status === 'available') {
 				return {
 					objectCacheEnabled: true,
 					objectCacheBackend: 'sqlite',
-					objectCacheFallbackBackend: await getProfileDiskFallbackPatch(),
+					objectCacheFallbackBackend: await getOptimalDiskFallbackPatch(),
 				};
 			}
 
-			const diskResult = await probeObjectCacheBackendForProfile('disk', basePatch);
-			assertProfileProbeDeterminate(diskResult);
+			const diskResult = await probeObjectCacheBackendForOptimalSettings('disk', basePatch);
+			assertOptimalProbeDeterminate(diskResult);
 			if (diskResult.status === 'available') {
 				return {
 					objectCacheEnabled: true,
@@ -2277,14 +4416,9 @@
 				};
 			}
 
-			throw new Error('Profile object-cache detection found no available persistent backend. Redis, APCu, SQLite and Disk probes were unavailable.');
+			throw new Error('Setup Wizard object-cache detection found no available persistent backend. Redis, APCu, SQLite and Disk probes were unavailable.');
 		}
 
-		async function getProfileQueryAllowlistPatch() {
-			// Profiles must not overwrite or append to user-maintained visible lists.
-			// Query-string allowlist population remains available from its dedicated UI action.
-			return {};
-		}
 
 		async function inspectCacheDecision() {
 			if (inspectBusy || !String(inspectUrl || '').trim()) {
@@ -2318,11 +4452,12 @@
 			});
 		}
 
-		async function endManualMediaSession(token) {
+		async function endManualMediaSession(token, resumeBackground = true) {
 			return endMediaManualSession({
 				mediaFormat: getSelectedMediaQueueFormat(),
 				token: String(token || ''),
 				currentToken: String(manualMediaSessionTokenRef.current || ''),
+				resumeBackground: resumeBackground !== false,
 				clearToken: (ownerToken) => {
 					if (manualMediaSessionTokenRef.current === ownerToken) {
 						manualMediaSessionTokenRef.current = '';
@@ -2451,6 +4586,7 @@
 					label: state.type === 'media' && (result.avifIncrement > 0 || result.webpIncrement > 0) ? 'Optimizing Media' : state.label,
 				}),
 				buildCompletionNotice: (state) => {
+					const languageSuffix = state && state.language ? ' [' + String(state.language) + ']' : '';
 					const failedCount = Math.max(0, Number(state.failedCount || 0));
 					const skippedCount = Math.max(0, Number(state.skippedCount || 0));
 					const successCount = Math.max(0, Number(state.successCount || 0));
@@ -2464,7 +4600,7 @@
 						: '';
 					let finalNotice = { type: 'success', text: isWarmJobType(state.type) ? 'Cache warming complete.' : (state.forceRegenerateExisting ? 'Media regeneration complete.' : 'Media optimization complete.') };
 					if (isWarmJobType(state.type)) {
-						const subject = isWarmCssJobType(state.type) ? (getWarmScopeForType(state.type) === 'menu' ? 'Menu HTML + CSS bundle warm' : 'Full site HTML + CSS bundle warm') : 'Cache warming';
+						const subject = (isWarmCssJobType(state.type) ? (getWarmScopeForType(state.type) === 'menu' ? 'Menu HTML + CSS bundle warm' : 'Full site HTML + CSS bundle warm') : 'Cache warming') + languageSuffix;
 						if (failedCount > 0) {
 							finalNotice = {
 								type: 'warning',
@@ -2520,6 +4656,29 @@
 		}
 
 
+		function getDashboardManualWarmLanguages(operation) {
+			const currentSettings = settingsRef.current && typeof settingsRef.current === 'object' ? settingsRef.current : {};
+			const status = currentSettings.multilingualStatus && typeof currentSettings.multilingualStatus === 'object'
+				? currentSettings.multilingualStatus
+				: null;
+			if (!status || !status.active) {
+				return [''];
+			}
+			if (!status.ready) {
+				return [];
+			}
+			const diagnostics = status.warmDiagnostics && typeof status.warmDiagnostics === 'object' ? status.warmDiagnostics : {};
+			const operations = diagnostics.operations && typeof diagnostics.operations === 'object' ? diagnostics.operations : {};
+			const selected = operations[String(operation || '')] && typeof operations[String(operation || '')] === 'object'
+				? operations[String(operation || '')]
+				: null;
+			if (!selected || !Array.isArray(selected.included)) {
+				return [];
+			}
+			return selected.included.map((language) => String(language || '').trim()).filter(Boolean);
+		}
+
+
 		const warmupController = createWarmupController({
 			getSettings: () => settingsRef.current || {},
 			syncQueuedSettingsBeforeAction,
@@ -2534,10 +4693,24 @@
 			isBusy: () => busy,
 			runJob,
 			getWarmupGeneration: () => Number(warmupGenerationRef.current || 0),
+			getManualWarmLanguages: getDashboardManualWarmLanguages,
 			hasFullSiteWarmScope,
 			hasMenuWarmScope,
-			beginManualWarmPriority: (jobType, preferredToken) => beginManualWarmSession({ type: jobType }, preferredToken),
-			endManualWarmPriority: (token) => endManualWarmSession(token),
+			prepareHomepageDiscovery: async () => {
+				const action = settingsRef.current && settingsRef.current.warmCssBundlesEnabled && settingsRef.current.homepageCssBundleEnabled ? 'warm_frontpage_html_css' : 'warm_frontpage_html';
+				const languages = getDashboardManualWarmLanguages('homepage');
+				for (let index = 0; index < languages.length; index += 1) {
+					const language = String(languages[index] || '');
+					const job = await queueDashboardAction(action, language ? { language } : {}, {
+						queued: __('Homepage media discovery processing…', 'ultracache'),
+						success: __('Homepage media discovery refreshed.', 'ultracache'),
+						failed: __('Homepage media discovery failed.', 'ultracache'),
+					}, 'media_homepage_discovery' + (language ? '_' + language : ''));
+					if (!job || job.status !== 'done') {
+						throw new Error(__('Homepage media discovery did not complete.', 'ultracache'));
+					}
+				}
+			},
 			defaultBatchSize: DEFAULT_QUEUE_BATCH_SIZE,
 		});
 		const {
@@ -2706,6 +4879,10 @@
 			getMediaLibraryReplacementVerifyStatus,
 			runMediaLibraryReplacementVerify,
 			getMediaLibraryReplacementVerifyLabel,
+			isMediaLibraryReplacementRollbackRunnerReady,
+			getMediaLibraryReplacementRollbackStatus,
+			runMediaLibraryReplacementRollback,
+			getMediaLibraryReplacementRollbackLabel,
 			isMediaLibraryReplacementDeleteRunnerReady,
 			getMediaLibraryReplacementDeleteStatus,
 			runMediaLibraryReplacementDelete,
@@ -2740,19 +4917,6 @@
 			openMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			closeMediaLibraryReplacementCleanupPreviewModal,
-			copyMediaLibraryReplacementFiles,
-			prepareMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementMetadataUpdates,
-			rollbackMediaLibraryReplacementMetadataUpdates,
-			scanMediaLibraryReplacementReferences,
-			matchMediaLibraryReplacementReferences,
-			scanMediaLibraryReplacementThemeCssReferences,
-			previewMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementThemeCssReplacements,
-			verifyMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementDatabaseReplacements,
-			verifyMediaLibraryReplacementDatabaseReplacements,
-			rollbackMediaLibraryReplacementDatabaseReplacements,
 		} = useMediaReplacementWorkflow(Object.assign({}, mediaLibraryReplacementState, {
 			busy,
 			mediaConversionTestBusy,
@@ -3054,15 +5218,14 @@ async function deleteAllPluginDataAndDeactivate() {
 		}
 
 		const mediaOptimizationEnabled = !!settings.mediaOptimizationEnabled;
-		const activePerformanceProfile = getActivePerformanceProfile(settings);
 		const pageCacheReady = !!settings.pageCacheEnabled;
-		const cssBundleReady = pageCacheReady && !!settings.homepageCssBundleEnabled;
+		const warmCssBundlesEnabled = !!settings.warmCssBundlesEnabled;
+		const warmCssModeReady = !warmCssBundlesEnabled || !!settings.homepageCssBundleEnabled;
 		const cssWarmScope = normalizeCssBundleScopeValue(settings.cssBundleScope || 'homepage');
 		const menuCssWarmJobType = getCssWarmJobType('menu', cssWarmScope);
 		const fullCssWarmJobType = getCssWarmJobType('full', cssWarmScope);
-		const homepageCssButtonLabel = 'Warm Up Homepage HTML Cache + Homepage CSS Bundle';
-		const menuCssButtonLabel = 'Warm Up Menu HTML Cache + ' + getCssWarmBundleLabel(cssWarmScope, true);
-		const fullCssButtonLabel = 'Warm Up Full Site HTML Cache + ' + getCssWarmBundleLabel(cssWarmScope, true);
+		const selectedMenuWarmJobType = warmCssBundlesEnabled ? menuCssWarmJobType : 'warm_menu';
+		const selectedFullWarmJobType = warmCssBundlesEnabled ? fullCssWarmJobType : 'warm';
 		const cssBundleSummaryDiag = diagnostics && diagnostics.cssBundleSummary ? diagnostics.cssBundleSummary : {};
 		const cssBundleSummaryLastWarm = cssBundleSummaryDiag && cssBundleSummaryDiag.lastWarm ? cssBundleSummaryDiag.lastWarm : null;
 		const statsCssLastWarm = stats.lastFrontpageCssWarm || null;
@@ -3091,8 +5254,10 @@ async function deleteAllPluginDataAndDeactivate() {
 			: '';
 		const warmBusy = busy || process.active || homepageHtmlBusy || homepageHtmlCssBusy || menuUrlsCssBusy || allUrlsCssBusy;
 		const warmDisabledMessage = !pageCacheReady
-			? 'Please enable Page Caching first or select a profile before warming cache.'
-			: (!settings.homepageCssBundleEnabled ? 'CSS bundle warm buttons are disabled until CSS Bundling is enabled.' : '');
+			? 'Please enable Page Caching first or apply Optimal Settings before warming cache.'
+			: (warmCssBundlesEnabled && !settings.homepageCssBundleEnabled
+				? 'Also warm CSS bundles is enabled, but CSS Bundling is disabled. Enable CSS Bundling or turn this option off to warm HTML only.'
+				: '');
 		const menuWarmScopeReady = hasMenuWarmScope(settings);
 		const fullSiteWarmScopeReady = hasFullSiteWarmScope(settings);
 		const menuWarmScopeMessage = menuWarmScopeReady ? '' : 'Select a frontend menu and depth before using menu warm-up.';
@@ -3128,7 +5293,7 @@ async function deleteAllPluginDataAndDeactivate() {
 			: (mediaBackgroundCoolingDown ? 'Cooldown' : 'Ready');
 		const mediaBackgroundSafetyStatusClass = mediaBackgroundPaused
 			? 'text-red-300'
-			: (mediaBackgroundCoolingDown ? 'text-amber-300' : 'text-emerald-300');
+			: (mediaBackgroundCoolingDown ? 'text-amber-400' : 'text-emerald-300');
 		const mediaBackgroundAutomaticAction = mediaBackgroundPaused
 			? 'Global breaker open · explicit resume required'
 			: (mediaBackgroundCoolingDown ? 'Queue resumes automatically after cooldown' : 'Queue continues normally');
@@ -3137,10 +5302,16 @@ async function deleteAllPluginDataAndDeactivate() {
 		const optimizedWebpTotal = Math.max(0, Number(mediaFileCounts.webp || 0));
 		const mediaQueueTotal = Math.max(0, Number(effectiveMediaQueueStatus.total || 0));
 		const mediaQueuePending = Math.max(0, Number(effectiveMediaQueueStatus.pending || 0));
+		const mediaQueueProcessing = Math.max(0, Number(effectiveMediaQueueStatus.processing || 0));
+		const mediaQueueDone = Math.max(0, Number(effectiveMediaQueueStatus.done || 0));
 		const mediaQueueFailed = Math.max(0, Number(effectiveMediaQueueStatus.failed || 0));
-		const mediaQueueRecoverableInterrupted = Math.max(0, Number(effectiveMediaQueueStatus.recoverableInterrupted || 0));
-		const mediaQueueRetryable = Math.max(0, Number(effectiveMediaQueueStatus.retryable || (mediaQueueFailed + mediaQueueRecoverableInterrupted)));
+		const mediaQueueRetryable = Math.max(0, Number(
+			undefined !== effectiveMediaQueueStatus.retryable
+				? effectiveMediaQueueStatus.retryable
+				: mediaQueueFailed
+		));
 		const mediaQueueAlreadyOptimized = Math.max(0, Number(effectiveMediaQueueStatus.alreadyOptimized || effectiveMediaQueueStatus.skipped || 0));
+		const mediaQueueCompleted = Math.max(0, Number(effectiveMediaQueueStatus.completed || (mediaQueueDone + mediaQueueAlreadyOptimized)));
 		const mediaQueueNeedsRepair = !!effectiveMediaQueueStatus.needsRepair;
 		const mediaQueueIsComplete = !!effectiveMediaQueueStatus.isComplete;
 		const varnishLayer = getExternalCacheLayer(stats, 'varnish');
@@ -3165,11 +5336,6 @@ async function deleteAllPluginDataAndDeactivate() {
 		const liteSpeedDiagnostic = diagnostics && diagnostics.liteSpeed ? diagnostics.liteSpeed : {};
 		const liteSpeedConfigured = !!(settings && (
 			settings.liteSpeedCacheEnabled ||
-			settings.liteSpeedRefillAfterTargetedInvalidation ||
-			settings.liteSpeedWarmDuringSiteWarmup ||
-			settings.liteSpeedStalePurgeEnabled ||
-			settings.liteSpeedRefreshAheadEnabled ||
-			settings.liteSpeedRefreshAheadPinnedUrls ||
 			settings.flushAllIncludeLiteSpeed
 		));
 		const showLiteSpeedCard = !!(
@@ -3298,6 +5464,10 @@ async function deleteAllPluginDataAndDeactivate() {
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			runMediaConversionTest,
 			openMediaConversionTestModal,
+			isMediaLibraryReplacementRollbackRunnerReady,
+			getMediaLibraryReplacementRollbackStatus,
+			runMediaLibraryReplacementRollback,
+			getMediaLibraryReplacementRollbackLabel,
 			getMediaLibraryReplacementDeleteDisabledReason,
 			getMediaLibraryReplacementRecoveryStatus,
 			isMediaLibraryReplacementRunnerReady,
@@ -3321,21 +5491,185 @@ async function deleteAllPluginDataAndDeactivate() {
 			openMediaLibraryReplacementPreviewModal,
 			openMediaLibraryReplacementDbPreviewModal,
 			openMediaLibraryReplacementCleanupPreviewModal,
-			copyMediaLibraryReplacementFiles,
-			prepareMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementMetadataUpdates,
-			scanMediaLibraryReplacementReferences,
-			matchMediaLibraryReplacementReferences,
-			applyMediaLibraryReplacementDatabaseReplacements,
-			verifyMediaLibraryReplacementDatabaseReplacements,
-			rollbackMediaLibraryReplacementDatabaseReplacements,
-			scanMediaLibraryReplacementThemeCssReferences,
-			previewMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementThemeCssReplacements,
-			verifyMediaLibraryReplacementThemeCssReplacements,
-			rollbackMediaLibraryReplacementMetadataUpdates,
 		});
-		return h('div', { className: 'max-w-6xl p-6 space-y-8' }, [
+		const multilingualStatus = settings.multilingualStatus && typeof settings.multilingualStatus === 'object'
+			? settings.multilingualStatus
+			: { provider: 'none', active: false, ambiguous: false, ready: true, defaultLanguage: '', urlMode: 'inactive', languages: [] };
+		const multilingualLanguages = Array.isArray(multilingualStatus.languages) ? multilingualStatus.languages : [];
+		const multilingualProviderLabels = {
+			none: __('None detected', 'ultracache'),
+			wpml: 'WPML',
+			translatepress: 'TranslatePress',
+			ambiguous: __('Multiple providers detected', 'ultracache'),
+		};
+		const multilingualModeLabels = {
+			directory: __('Language directories', 'ultracache'),
+			domain: __('Different domains', 'ultracache'),
+			parameter: __('Query parameter', 'ultracache'),
+			inactive: __('Not applicable', 'ultracache'),
+			unknown: __('Unknown', 'ultracache'),
+		};
+		const multilingualProviderLabel = multilingualProviderLabels[String(multilingualStatus.provider || 'none')] || String(multilingualStatus.provider || 'none');
+		const multilingualModeLabel = multilingualModeLabels[String(multilingualStatus.urlMode || 'unknown')] || String(multilingualStatus.urlMode || 'unknown');
+		const multilingualStatusLabel = multilingualStatus.ambiguous
+			? __('Ambiguous — integration disabled', 'ultracache')
+			: (multilingualStatus.active
+				? (multilingualStatus.ready ? __('Active', 'ultracache') : __('Detected, topology not ready', 'ultracache'))
+				: __('No multilingual provider detected', 'ultracache'));
+		const multilingualStatusReasonLabels = {
+			'multiple-supported-providers': __('More than one supported multilingual provider is active. UltraCache disables multilingual fan-out until only one provider owns the runtime.', 'ultracache'),
+			'no-supported-provider': __('No supported multilingual provider is currently active. Ordinary WordPress warm behavior remains available.', 'ultracache'),
+			'provider-topology-not-ready': __('The multilingual provider is detected but its public language topology is incomplete. UltraCache will not guess translated URLs.', 'ultracache'),
+		};
+		const multilingualStatusReason = multilingualStatusReasonLabels[String(multilingualStatus.reason || '')] || '';
+		const multilingualWarmDiagnostics = multilingualStatus.warmDiagnostics && typeof multilingualStatus.warmDiagnostics === 'object'
+			? multilingualStatus.warmDiagnostics
+			: { active: false, masterEnabled: false, operations: {} };
+		const multilingualWarmDiagnosticOperations = multilingualWarmDiagnostics.operations && typeof multilingualWarmDiagnostics.operations === 'object'
+			? multilingualWarmDiagnostics.operations
+			: {};
+		const multilingualWarmOperationLabels = {
+			homepage: __('Homepage', 'ultracache'),
+			menu: __('Configured Menu', 'ultracache'),
+			full_site: __('Full Site', 'ultracache'),
+			scheduled: __('Scheduled / Cron', 'ultracache'),
+			after_flush: __('After Flush All', 'ultracache'),
+			after_cleanup: __('After Scheduled Cleanup', 'ultracache'),
+			affected_save: __('Affected pages after save', 'ultracache'),
+			css_bundle: __('CSS bundles', 'ultracache'),
+		};
+
+		const multilingualProvider = String(multilingualStatus.provider || 'none');
+		const multilingualPolicyStore = settings.multilingualWarmPolicyV1 && typeof settings.multilingualWarmPolicyV1 === 'object'
+			? settings.multilingualWarmPolicyV1
+			: { schemaVersion: 2, migrationVersion: 0, providerPolicies: {}, providerStates: {} };
+		const sortedMultilingualLanguages = multilingualLanguages.slice().sort((a, b) => {
+			if (!!(a && a.isDefault) !== !!(b && b.isDefault)) {
+				return a && a.isDefault ? -1 : 1;
+			}
+			return String((a && (a.name || a.code)) || '').localeCompare(String((b && (b.name || b.code)) || ''));
+		});
+
+		function getMultilingualWarmProfilePreset(profile) {
+			profile = String(profile || 'custom');
+			const preset = {
+				profile,
+				warmHomepage: false,
+				warmMenu: false,
+				warmFullSite: false,
+				warmScheduled: false,
+				warmAfterFlushAll: false,
+				warmAfterCleanup: false,
+				warmAffectedSave: false,
+				warmCssBundles: false,
+				useGlobalFullSiteSources: true,
+				fullSiteSources: [],
+			};
+			if (profile === 'full') {
+				['warmHomepage', 'warmMenu', 'warmFullSite', 'warmScheduled', 'warmAfterFlushAll', 'warmAfterCleanup', 'warmAffectedSave', 'warmCssBundles'].forEach((key) => { preset[key] = true; });
+				return preset;
+			}
+			if (profile === 'essential') {
+				preset.warmHomepage = true;
+				preset.warmMenu = true;
+				preset.warmAffectedSave = true;
+				preset.warmCssBundles = true;
+				return preset;
+			}
+			if (profile === 'on_demand') {
+				return preset;
+			}
+			preset.profile = 'custom';
+			return preset;
+		}
+
+		function getStoredMultilingualLanguagePolicy(languageCode) {
+			const providers = multilingualPolicyStore.providerPolicies && typeof multilingualPolicyStore.providerPolicies === 'object'
+				? multilingualPolicyStore.providerPolicies
+				: {};
+			const providerPolicies = providers[multilingualProvider] && typeof providers[multilingualProvider] === 'object'
+				? providers[multilingualProvider]
+				: {};
+			const policy = providerPolicies[String(languageCode || '')];
+			return policy && typeof policy === 'object' ? policy : null;
+		}
+
+		function getEffectiveMultilingualLanguagePolicy(language) {
+			const code = String(language && language.code || '');
+			const stored = getStoredMultilingualLanguagePolicy(code);
+			if (stored) {
+				return Object.assign({}, getMultilingualWarmProfilePreset(stored.profile || 'custom'), stored);
+			}
+			if (language && language.warmPolicy && typeof language.warmPolicy === 'object') {
+				return Object.assign({}, getMultilingualWarmProfilePreset(language.warmPolicy.profile || 'custom'), language.warmPolicy);
+			}
+			return getMultilingualWarmProfilePreset(language && language.isDefault ? 'full' : 'on_demand');
+		}
+
+		function saveMultilingualLanguagePolicy(language, nextPolicy) {
+			const code = String(language && language.code || '');
+			if (!code || ['wpml', 'translatepress'].indexOf(multilingualProvider) === -1) {
+				return;
+			}
+			const currentStore = settingsRef.current && settingsRef.current.multilingualWarmPolicyV1 && typeof settingsRef.current.multilingualWarmPolicyV1 === 'object'
+				? settingsRef.current.multilingualWarmPolicyV1
+				: multilingualPolicyStore;
+			const nextStore = Object.assign({}, currentStore || {}, {
+				schemaVersion: 2,
+				migrationVersion: Number(currentStore && currentStore.migrationVersion || 0),
+				providerPolicies: Object.assign({}, currentStore && currentStore.providerPolicies || {}),
+				providerStates: Object.assign({}, currentStore && currentStore.providerStates || {}),
+			});
+			nextStore.providerPolicies[multilingualProvider] = Object.assign({}, nextStore.providerPolicies[multilingualProvider] || {});
+			nextStore.providerPolicies[multilingualProvider][code] = Object.assign({}, nextPolicy || {});
+			updateSetting('multilingualWarmPolicyV1', nextStore);
+		}
+
+		function applyMultilingualWarmProfile(language, profile) {
+			profile = String(profile || 'custom');
+			if (profile === 'custom') {
+				const current = getEffectiveMultilingualLanguagePolicy(language);
+				saveMultilingualLanguagePolicy(language, Object.assign({}, current, { profile: 'custom' }));
+				return;
+			}
+			saveMultilingualLanguagePolicy(language, getMultilingualWarmProfilePreset(profile));
+		}
+
+		function updateMultilingualWarmSwitch(language, key, enabled) {
+			const current = getEffectiveMultilingualLanguagePolicy(language);
+			saveMultilingualLanguagePolicy(language, Object.assign({}, current, { [key]: !!enabled, profile: 'custom' }));
+		}
+
+		function updateMultilingualFullSiteSourceMode(language, useGlobal) {
+			const current = getEffectiveMultilingualLanguagePolicy(language);
+			const next = Object.assign({}, current, {
+				useGlobalFullSiteSources: !!useGlobal,
+				profile: 'custom',
+			});
+			if (!useGlobal && (!Array.isArray(next.fullSiteSources) || next.fullSiteSources.length === 0)) {
+				next.fullSiteSources = splitWarmSourceList(settingsRef.current && settingsRef.current.warmFullSiteSources);
+			}
+			saveMultilingualLanguagePolicy(language, next);
+		}
+
+		function updateMultilingualFullSiteSource(language, source, enabled) {
+			const current = getEffectiveMultilingualLanguagePolicy(language);
+			const selected = {};
+			(Array.isArray(current.fullSiteSources) ? current.fullSiteSources : []).forEach((item) => {
+				item = String(item || '').trim();
+				if (item) { selected[item] = true; }
+			});
+			source = String(source || '').trim();
+			if (enabled) { selected[source] = true; } else { delete selected[source]; }
+			const ordered = getFullSiteSourceOptions().map((option) => String(option.value || '')).filter((value) => !!selected[value]);
+			saveMultilingualLanguagePolicy(language, Object.assign({}, current, {
+				useGlobalFullSiteSources: false,
+				fullSiteSources: ordered,
+				profile: 'custom',
+			}));
+		}
+
+		return h('div', { className: 'uc-dashboard-shell max-w-6xl p-6 space-y-8', 'data-active-tab': activeTab }, [
 			h('header', { className: 'uc-dashboard-header flex flex-col gap-4 md:flex-row md:justify-between md:items-end', key: 'header' }, [
 				h('div', { key: 'title' }, [
 					h('h1', { className: 'text-3xl font-black tracking-tighter m-0 text-white' }, 'UltraCache'),
@@ -3363,6 +5697,16 @@ async function deleteAllPluginDataAndDeactivate() {
 				]),
 			]),
 
+			h('nav', { className: 'uc-dashboard-tabs', 'aria-label': __('UltraCache sections', 'ultracache'), key: 'dashboard-tabs' },
+				dashboardTabs.map((tab) => h('button', {
+					type: 'button',
+					className: classNames('uc-dashboard-tab', activeTab === tab.key ? 'is-active' : ''),
+					'aria-current': activeTab === tab.key ? 'page' : undefined,
+					onClick: () => selectDashboardTab(tab.key),
+					key: tab.key,
+				}, tab.label))
+			),
+
 			h(ToastViewport, { toasts, onDismiss: dismissToast, key: 'toast-viewport' }),
 			h(SupportModal, {
 				open: supportModalOpen,
@@ -3377,6 +5721,46 @@ async function deleteAllPluginDataAndDeactivate() {
 				onClose: closeVersionHelpModal,
 				key: 'version-help-modal',
 			}),
+			h(FirstRunSetupWizard, {
+				open: firstRunWizardOpen,
+				state: firstRunWizardState,
+				plan: firstRunWizardPlan,
+				loading: firstRunWizardPlanBusy,
+				loadError: firstRunWizardPlanError,
+				applying: firstRunWizardApplying,
+				applyComplete: firstRunWizardApplyComplete,
+				progress: firstRunWizardProgress,
+				process,
+				etaText,
+				javascriptNotice: firstRunWizardJavascriptNotice,
+				javascriptStrategyChoice: wizardJavascriptStrategyChoice,
+				objectCacheBackend: wizardObjectCacheBackend,
+				objectCacheOptions: (typeof getObjectCacheBackendChoices === 'function' ? getObjectCacheBackendChoices() : []).map((choice) => ({ value: choice.value, label: choice.label })).concat([
+					{ value: 'external', label: __('Do not manage Object Cache with UltraCache', 'ultracache') },
+				]),
+				warmScope: wizardWarmScope,
+				menuLocation: wizardMenuLocation,
+				menuDepth: wizardMenuDepth,
+				fullSiteSources: wizardFullSiteSources,
+				menuOptions: getWarmMenuOptions(),
+				menuDepthOptions: getWarmMenuDepthOptions(),
+				fullSiteSourceOptions: getFullSiteSourceOptions(),
+				mediaStepActive: setupMediaStepActive,
+				mediaSkipRequested: setupMediaSkipRequested,
+				onJavascriptStrategyChoiceChange: setWizardJavascriptStrategyChoice,
+				onObjectCacheBackendChange: setWizardObjectCacheBackend,
+				onWarmScopeChange: setWizardWarmScope,
+				onMenuLocationChange: setWizardMenuLocation,
+				onMenuDepthChange: setWizardMenuDepth,
+				onFullSiteSourcesChange: setWizardFullSiteSources,
+				onSkipMedia: requestSetupMediaSkip,
+				onClose: closeFirstRunWizard,
+				onStart: startFirstRunWizard,
+				onRetry: loadFirstRunWizardPlan,
+				onApply: confirmFirstRunWizard,
+				onFinish: finishFirstRunWizard,
+				key: 'setup-wizard',
+			}),
 
 			renderMediaConversionTestModal(),
 			renderMediaLibraryReplacementWarningModal(),
@@ -3385,62 +5769,56 @@ async function deleteAllPluginDataAndDeactivate() {
 			renderMediaLibraryReplacementBlockersModal(),
 			renderMediaLibraryReplacementCleanupPreviewModal(),
 
-			h(CacheStatisticsPanel, {
-				settings,
-				stats,
-				diagnostics,
-				busy,
-				asyncActions,
-				onToggleStats: (value) => updateSetting('cacheStatsEnabled', value),
-				onFullObjectCount: runFullObjectCount,
-				key: 'cache-statistics-panel',
-			}),
-
-				h(
+			h(TabGate, { visible: activeTab === 'advanced', className: 'uc-dashboard-section-spacing', key: 'cache-statistics-tab-gate' },
+				h(CacheStatisticsPanel, {
+					settings,
+					stats,
+					diagnostics,
+					busy,
+					asyncActions,
+					onToggleStats: (value) => updateSetting('cacheStatsEnabled', value),
+					onFullObjectCount: runFullObjectCount,
+					key: 'cache-statistics-panel',
+				})
+			),
+			h(
 				Card,
 				{
-					title: __("Select profile", 'ultracache'),
-					description: __("Select a known preset below. Profiles apply their settings immediately and can be adjusted manually afterwards.", 'ultracache'),
-					key: 'performance-profile-card',
+					title: __("Optimal Configuration", 'ultracache'),
+					description: OPTIMAL_SETTINGS_RECIPE.description,
+					key: 'optimal-settings-card',
+					hidden: activeTab !== 'overview',
 				},
 				[
-					h(ToggleRow, {
-						label: PERFORMANCE_PROFILE_CUSTOM.label,
-						description: PERFORMANCE_PROFILE_CUSTOM.description,
-						checked: activePerformanceProfile === 'custom',
-						onChange: (value) => {
-							if (!value) { return; }
-							pushToast({ type: 'info', text: __("Custom turns on automatically when settings do not match a preset.", 'ultracache') });
-						},
-						disabled: busy,
-						key: 'performance-profile-custom',
-					}),
-					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mt-4', key: 'performance-profile-presets-grid' },
-						PERFORMANCE_PROFILE_ORDER.map((profileKey) => {
-							const profile = PERFORMANCE_PROFILES[profileKey];
-							return h(ToggleRow, {
-								label: profile.label,
-								description: profile.description,
-								checked: activePerformanceProfile === profileKey,
-								onChange: (value) => {
-									if (!value) { return; }
-									applyPerformanceProfile(profileKey);
-								},
-								disabled: busy,
-								key: 'performance-profile-' + profileKey,
-							});
-						})
-					),
+					h('div', { className: 'flex flex-col gap-4', key: 'optimal-settings-content' }, [
+						h('p', { className: 'text-sm text-zinc-400 m-0 max-w-3xl', key: 'optimal-settings-note' }, __('You can still adjust every setting manually after running the wizard.', 'ultracache')),
+						h('div', { className: 'flex flex-wrap gap-3', key: 'overview-quick-actions' }, [
+							h(Button, {
+								onClick: setupWizardCanResume ? resumeSetupWizardFromDashboard : startSetupWizardFromDashboard,
+								disabled: busy || !!asyncActions.apply_optimal_settings || firstRunWizardApplying || firstRunWizardPlanBusy,
+								variant: 'primary',
+								key: 'start-or-resume-setup-wizard',
+							}, (firstRunWizardApplying || firstRunWizardPlanBusy || !!asyncActions.apply_optimal_settings)
+								? __('Running…', 'ultracache')
+								: (setupWizardCanResume ? __('Resume Wizard', 'ultracache') : __('Start Wizard', 'ultracache'))),
+							setupWizardCanResume ? h(Button, {
+								onClick: restartSetupWizardFromDashboard,
+								disabled: busy || !!asyncActions.apply_optimal_settings || firstRunWizardApplying || firstRunWizardPlanBusy,
+								key: 'restart-setup-wizard',
+							}, __('Restart Wizard', 'ultracache')) : null,
+						]),
+					]),
 				]
 			),
 
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'jobs' }, [
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', hidden: activeTab !== 'cache', key: 'jobs' }, [
 			h(
 					Card,
 					{
 						title: __("Cache Engine", 'ultracache'),
 						description: __("Core page cache behavior, compression variants, and safe prefetch hints.", 'ultracache'),
 						key: 'cache-engine',
+						hidden: activeTab !== 'cache',
 					},
 					[
 						h(ToggleRow, {
@@ -3545,8 +5923,8 @@ h(ToggleRow, {
 								key: 'cache-engine-speculation-rules',
 							}),
 h(ToggleRow, {
-								label: __("Cache Pages with Safe Tracking Cookies", 'ultracache'),
-								description: __("Allow public HTML cache storage when the response sets only cookies from the Safe Tracking Cookies list. UltraCache still never stores or replays Set-Cookie headers. Disable for strict mode where any Set-Cookie must skip cache.", 'ultracache'),
+								label: __("Cache Public Pages with Response Cookies", 'ultracache'),
+								description: __("Allow public HTML cache storage when a response creates cookies that are not known private/auth/cart state. PHPSESSID alone no longer proves that HTML is personalized. Incoming sensitive cookies still bypass through Never Cache When These Cookies Exist. UltraCache stores only the HTML body and never stores or replays Set-Cookie headers. Disable for strict mode where any response Set-Cookie must skip storage.", 'ultracache'),
 								checked: !!settings.cacheSafeTrackingCookiesEnabled,
 								onChange: (value) => updateSetting('cacheSafeTrackingCookiesEnabled', value),
 								disabled: busy,
@@ -3561,6 +5939,7 @@ h(ToggleRow, {
 						title: __("Warm Cache", 'ultracache'),
 						description: __("Crawl public URLs and prebuild static cache files.", 'ultracache'),
 						key: 'warm',
+						hidden: activeTab !== 'cache',
 					},
 					[
 						warmDisabledMessage ? h('div', { className: 'mt-4 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2', key: 'warm-disabled-message' }, warmDisabledMessage) : null,
@@ -3572,24 +5951,23 @@ h(ToggleRow, {
 							disabled: busy || !pageCacheReady,
 							key: 'warm-uncached-first-visit',
 						}),
+						h(ToggleRow, {
+							label: __("Also warm CSS bundles", 'ultracache'),
+							description: __("When enabled, the three manual warm actions build the configured UltraCache CSS bundle scope together with HTML. Disable to warm HTML only.", 'ultracache'),
+							checked: !!settings.warmCssBundlesEnabled,
+							onChange: (value) => updateSetting('warmCssBundlesEnabled', value),
+							disabled: warmBusy,
+							key: 'warm-css-bundles-enabled',
+						}),
 						h('div', { className: 'mt-4 uc-warm-cache-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' }, key: 'warm-homepage-actions' }, [
 							h(
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: warmFrontpageHtml,
-									disabled: !pageCacheReady || warmBusy,
+									onClick: () => (warmCssBundlesEnabled ? warmFrontpageHtmlCss() : warmFrontpageHtml()),
+									disabled: !pageCacheReady || !warmCssModeReady || warmBusy,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (warmBusy && !homepageHtmlBusy ? 'Engine Busy' : (homepageHtmlBusy ? 'Warming Homepage HTML…' : 'Warm Up Homepage HTML Cache'))
-							),
-							h(
-								'button',
-								{
-									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: warmFrontpageHtmlCss,
-									disabled: !cssBundleReady || warmBusy,
-								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (warmBusy && !homepageHtmlCssBusy ? 'Engine Busy' : (homepageHtmlCssBusy ? 'Warming Homepage HTML + Homepage CSS Bundle…' : homepageCssButtonLabel)))
+								!pageCacheReady ? 'Enable Page Cache First' : (!warmCssModeReady ? 'Enable CSS Bundling First' : (warmBusy ? 'Engine Busy' : 'Warm Up Homepage'))
 							),
 						]),
 						h('div', { className: 'mt-5 grid grid-cols-1 gap-4', key: 'warm-menu-scope-controls' }, [
@@ -3616,27 +5994,12 @@ h(ToggleRow, {
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: () => startMenuWarming(false),
-									disabled: !pageCacheReady || warmBusy || !menuWarmScopeReady,
+									onClick: () => (warmCssBundlesEnabled ? startMenuWarmingWithFrontpageCss(false) : startMenuWarming(false)),
+									disabled: !pageCacheReady || !warmCssModeReady || warmBusy || !menuWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm_menu').canResume ? 'Resume Warm Up Menu HTML Cache' : 'Warm Up Menu HTML Cache')))
-							),
-							h(
-								'button',
-								{
-									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: () => startMenuWarmingWithFrontpageCss(false),
-									disabled: !cssBundleReady || warmBusy || !menuWarmScopeReady,
-								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy && !menuUrlsCssBusy ? 'Engine Busy' : (menuUrlsCssBusy ? 'Warming Menu HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(menuCssWarmJobType).canResume ? 'Resume ' + menuCssButtonLabel : menuCssButtonLabel)))))
+								!pageCacheReady ? 'Enable Page Cache First' : (!warmCssModeReady ? 'Enable CSS Bundling First' : (!menuWarmScopeReady ? 'Select Menu + Depth First' : (warmBusy ? 'Engine Busy' : (getJobControls(selectedMenuWarmJobType).canResume ? 'Resume Warm Up Configured Menu' : 'Warm Up Configured Menu'))))
 							),
 						]),
-							(getJobControls('warm_menu').canRestart || getJobControls(menuCssWarmJobType).canRestart) ? h('button', {
-								className: 'uc-btn flex-1 min-w-[220px] text-white py-3 font-bold',
-								style: { marginTop: '12px' },
-								onClick: () => (getJobControls(menuCssWarmJobType).canRestart ? startMenuWarmingWithFrontpageCss(true) : startMenuWarming(true)),
-								disabled: !pageCacheReady || warmBusy || !menuWarmScopeReady,
-							}, getJobControls(menuCssWarmJobType).canRestart ? 'Restart ' + menuCssButtonLabel : 'Restart Warm Up Menu HTML Cache') : null,
 
 						h('div', { className: 'mt-5', key: 'warm-full-scope-controls' }, [
 							h(MultiSelectField, {
@@ -3654,27 +6017,12 @@ h(ToggleRow, {
 								'button',
 								{
 									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: () => startWarming(false),
-									disabled: !pageCacheReady || warmBusy || !fullSiteWarmScopeReady,
+									onClick: () => (warmCssBundlesEnabled ? startWarmingAllWithFrontpageCss(false) : startWarming(false)),
+									disabled: !pageCacheReady || !warmCssModeReady || warmBusy || !fullSiteWarmScopeReady,
 								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy ? 'Engine Busy' : (getJobControls('warm').canResume ? 'Resume Warm Up Full Site HTML Cache' : 'Warm Up Full Site HTML Cache')))
-							),
-							h(
-								'button',
-								{
-									className: 'uc-btn uc-btn--primary flex-1 min-w-[220px] text-white py-3 font-bold',
-									onClick: () => startWarmingAllWithFrontpageCss(false),
-									disabled: !cssBundleReady || warmBusy || !fullSiteWarmScopeReady,
-								},
-								!pageCacheReady ? 'Enable Page Cache First' : (!settings.homepageCssBundleEnabled ? 'Enable CSS Bundling First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy && !allUrlsCssBusy ? 'Engine Busy' : (allUrlsCssBusy ? 'Warming Full Site HTML + ' + getCssWarmBundleLabel(cssWarmScope, true) + '…' : (getJobControls(fullCssWarmJobType).canResume ? 'Resume ' + fullCssButtonLabel : fullCssButtonLabel)))))
+								!pageCacheReady ? 'Enable Page Cache First' : (!warmCssModeReady ? 'Enable CSS Bundling First' : (!fullSiteWarmScopeReady ? 'Select Full-Site Sources First' : (warmBusy ? 'Engine Busy' : (getJobControls(selectedFullWarmJobType).canResume ? 'Resume Warm Up Full Site' : 'Warm Up Full Site'))))
 							),
 						]),
-							(getJobControls('warm').canRestart || getJobControls(fullCssWarmJobType).canRestart) ? h('button', {
-								className: 'uc-btn flex-1 min-w-[220px] text-white py-3 font-bold',
-								style: { marginTop: '12px' },
-								onClick: () => (getJobControls(fullCssWarmJobType).canRestart ? startWarmingAllWithFrontpageCss(true) : startWarming(true)),
-								disabled: !pageCacheReady || warmBusy || !fullSiteWarmScopeReady,
-							}, getJobControls(fullCssWarmJobType).canRestart ? 'Restart ' + fullCssButtonLabel : 'Restart Warm Up Full Site HTML Cache') : null,
 
 					]
 				),
@@ -3683,6 +6031,8 @@ h(ToggleRow, {
 
 			SettingsAccordionCard({
 						keyName: 'query-string-args-caching-box',
+						defaultOpen: true,
+						hidden: activeTab !== 'cache',
 						title: __("Query-string args caching", 'ultracache'),
 						description: __("Control which query-string URL variants are eligible for public HTML cache.", 'ultracache'),
 						children: [
@@ -3694,6 +6044,37 @@ h(ToggleRow, {
 															disabled: busy,
 															key: 'query-string-caching',
 														}),
+							(() => {
+								const allowlistCount = getEffectiveQueryAllowlistCount(settings.cacheQueryStringAllowlist || '');
+								const selectedLevel = ['1', '2', '3', '4', 'all'].indexOf(String(settings.cacheQueryCombinationLevel || '3')) !== -1
+									? String(settings.cacheQueryCombinationLevel || '3')
+									: '3';
+								const calculation = getQueryCombinationDisplay(selectedLevel, allowlistCount);
+								return h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'query-combination-level-wrap' }, [
+									h(SelectField, {
+										label: __("Query cache combination level", 'ultracache'),
+										description: __("Hard limit for cached query-string identities per URL path. When the limit is full, new unknown query variants bypass cache instead of evicting older variants.", 'ultracache'),
+										value: selectedLevel,
+										onChange: (value) => updateSetting('cacheQueryCombinationLevel', value),
+										disabled: busy,
+										options: [
+											{ value: '1', label: __('1 — 8 variants per URL', 'ultracache') },
+											{ value: '2', label: __('2 — 64 variants per URL', 'ultracache') },
+											{ value: '3', label: __('3 — 512 variants per URL (Default)', 'ultracache') },
+											{ value: '4', label: __('4 — 4,096 variants per URL', 'ultracache') },
+											{ value: 'all', label: __('ALL — NOT RECOMMENDED', 'ultracache') },
+										],
+										key: 'query-cache-combination-level',
+									}),
+									h('div', { className: 'uc-field-wrap', key: 'query-cache-combination-calculator' }, [
+										h('div', { className: 'block text-sm font-medium text-white' }, __('Current combination limit', 'ultracache')),
+										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-2' }, __('Calculated immediately from the selected level. ALL uses the effective unique allowlist count and switches to bounded scientific notation for very large lists.', 'ultracache')),
+										h('div', { className: 'uc-field-input min-h-[42px] flex items-center' }, calculation.limitText + ' ' + __('cached query variants per URL', 'ultracache')),
+										h('div', { className: 'text-xs text-zinc-500 mt-2' }, __('Effective allowlisted query args', 'ultracache') + ': ' + String(allowlistCount)),
+										calculation.warning ? h('div', { className: 'text-xs text-amber-400 mt-2' }, calculation.warning) : null,
+									]),
+								]);
+							})(),
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'query-string-fields' }, [
 															h(SaveableTextAreaField, {
 																											label: __("Query-string args whitelist", 'ultracache'),
@@ -3724,16 +6105,16 @@ h(ToggleRow, {
 														]),
 						],
 					}),
-			h(ProgressPanel, {
+			!firstRunWizardApplying ? h(ProgressPanel, {
 				process,
 				etaText,
 				onCancel: requestCancel,
 				showWhenInactive: !!process.showWhenInactive,
 				key: 'job-progress-after-jobs',
-			}),
+			}) : null,
 
 			
-			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'settings' }, [
+			h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', hidden: ['media', 'javascript', 'fonts-css'].indexOf(activeTab) === -1, key: 'settings' }, [
 
 				h(
 				Card,
@@ -3741,6 +6122,7 @@ h(ToggleRow, {
 					title: __("Media Optimization", 'ultracache'),
 					description: __("Controls frontend AVIF/WebP URL rewriting, missing-media queueing, and image frontend handling.", 'ultracache'),
 					key: 'media-optimization',
+					hidden: activeTab !== 'media',
 				},
 				[
 					h(ToggleRow, {
@@ -3860,6 +6242,7 @@ h(ToggleRow, {
 					title: __("AVIF / WebP Batch Conversion", 'ultracache'),
 					description: __("Queue-based conversion and maintenance for existing uploads.", 'ultracache'),
 					key: 'batch-media-conversion',
+					hidden: activeTab !== 'media',
 				},
 				[
 					h('div', { className: 'text-xs text-zinc-500 mt-1', key: 'media-batch-support-summary' }, 'Conversion support: Imagick installed ' + (mediaSupport.imagick ? 'Yes' : 'No') + ' · Imagick AVIF test ' + (mediaSupport.imagick_avif ? 'Passed' : 'Failed') + ' · Imagick WebP available ' + (mediaSupport.imagick_webp ? 'Yes' : 'No') + ' · GD AVIF test ' + (mediaSupport.gd_avif ? 'Passed' : 'Failed') + ' · GD WebP available ' + (mediaSupport.gd_webp ? 'Yes' : 'No')),
@@ -3867,17 +6250,29 @@ h(ToggleRow, {
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'optimized-files' }, [
 							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Optimized image files", 'ultracache')),
 							h('div', { className: 'text-2xl font-black text-white mt-1' }, formatNumber(optimizedImagesTotal || 0)),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(optimizedAvifTotal || 0) + ' AVIF · ' + formatNumber(optimizedWebpTotal || 0) + ' WebP'),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, [
+								h('div', { key: 'optimized-avif' }, formatNumber(optimizedAvifTotal || 0) + ' AVIF'),
+								h('div', { key: 'optimized-webp' }, formatNumber(optimizedWebpTotal || 0) + ' WebP'),
+							]),
 						]),
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-status' }, [
-							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Media status", 'ultracache')),
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Media queue items", 'ultracache')),
 							h('div', { className: 'text-2xl font-black text-white mt-1' }, formatNumber(mediaQueueTotal)),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, formatNumber(mediaQueuePending) + ' pending · ' + formatNumber(mediaQueueAlreadyOptimized) + ' already optimized · ' + formatNumber(mediaQueueFailed) + ' failed' + (mediaQueueRecoverableInterrupted > 0 ? (' · ' + formatNumber(mediaQueueRecoverableInterrupted) + ' interrupted') : '')),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, [
+								h('div', { key: 'queue-completed' }, formatNumber(mediaQueueCompleted) + ' completed'),
+								h('div', { key: 'queue-pending' }, formatNumber(mediaQueuePending) + ' pending'),
+								h('div', { key: 'queue-processing' }, formatNumber(mediaQueueProcessing) + ' processing'),
+								h('div', { key: 'queue-failed' }, formatNumber(mediaQueueFailed) + ' failed'),
+								]),
 						]),
 						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'queue-health' }, [
 							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __("Queue health", 'ultracache')),
 							h('div', { className: mediaQueueNeedsRepair ? 'text-lg font-black text-amber-300 mt-1' : 'text-lg font-black text-emerald-300 mt-1' }, mediaQueueNeedsRepair ? 'Needs repair' : (mediaQueueIsComplete ? 'Complete' : 'Ready')),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, 'Target policy: ' + (('avif' === settings.mediaOutputMode) ? ('avif / fallback ' + (('webp' === settings.mediaFallbackFormat) ? 'webp' : 'original')) : 'webp / fallback original') + ' · queue format: best'),
+							h('div', { className: 'text-xs text-zinc-500 mt-1' }, [
+								h('div', { key: 'queue-policy' }, 'Target policy: ' + (('avif' === settings.mediaOutputMode) ? 'AVIF' : 'WebP')),
+								h('div', { key: 'queue-fallback' }, 'Fallback: ' + (('avif' === settings.mediaOutputMode) ? (('webp' === settings.mediaFallbackFormat) ? 'WebP' : 'Original') : 'Original')),
+								h('div', { key: 'queue-format' }, 'Queue format: Best'),
+							]),
 						]),
 					]),
 
@@ -3935,8 +6330,8 @@ h(ToggleRow, {
 								className: 'uc-btn w-full text-white py-3 font-bold',
 								onClick: retryFailedMediaQueue,
 								disabled: busy || !mediaOptimizationEnabled || !mediaSupport.supported || mediaQueueRetryable <= 0,
-							}, busy ? 'Engine Busy' : 'Retry Failed'),
-							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __("Recovers interrupted queue rows and moves failed rows back to pending so image conversion can continue.", 'ultracache')),
+							}, busy ? 'Engine Busy' : 'Retry failed media'),
+							h('div', { className: 'text-xs text-zinc-500 mt-2' }, __('Failed media: ', 'ultracache') + formatNumber(mediaQueueFailed)),
 						]),
 						h('div', { key: 'clear-completed' }, [
 							h('button', {
@@ -3963,19 +6358,21 @@ h(ToggleRow, {
 					]),
 				]
 			),
-				h(LcpDiagnosticsCard, {
-					settings,
-					busy,
-					onSettingChange: updateSetting,
-					onQuery: queryLcpObservations,
-					onDetail: queryLcpObservationDetail,
-					queryBusy: lcpDiagnosticsQueryBusy,
-					onSaveManualSelector: saveLcpObservationManualSelector,
-					onAction: runLcpObservationAction,
-					busyKey: lcpDiagnosticsBusyKey,
-					key: 'lcp-diagnostics-card',
-				}),
-				h('div', { className: 'uc-media-settings-replacement-card', style: { gridColumn: '1 / -1' }, key: 'media-settings-library-replacement-wrap' }, [
+				h(TabGate, { visible: activeTab === 'media', className: 'uc-diagnostics-spacing uc-media-lcp-diagnostics', style: { gridColumn: '1 / -1' }, key: 'lcp-diagnostics-tab-gate' },
+					h(LcpDiagnosticsCard, {
+						settings,
+						busy,
+						onSettingChange: updateSetting,
+						onQuery: queryLcpObservations,
+						onDetail: queryLcpObservationDetail,
+						queryBusy: lcpDiagnosticsQueryBusy,
+						onSaveManualSelector: saveLcpObservationManualSelector,
+						onAction: runLcpObservationAction,
+						busyKey: lcpDiagnosticsBusyKey,
+						key: 'lcp-diagnostics-card',
+					})
+				),
+				h('div', { className: 'uc-media-settings-replacement-card', style: { gridColumn: '1 / -1' }, hidden: activeTab !== 'media', key: 'media-settings-library-replacement-wrap' }, [
 				SettingsAccordionCard({
 					keyName: 'media-settings-library-replacement-box',
 					title: __("Media settings & Media Library replacement", 'ultracache'),
@@ -4092,9 +6489,11 @@ h(ToggleRow, {
 				h(
 					Card,
 					{
-						title: __("Frontend Javascript manipulation", 'ultracache'),
+						title: __("Javascript manipulation", 'ultracache'),
 						description: __("Control frontend JavaScript defer/delay behavior and the unified delayed JS release timing.", 'ultracache'),
 						key: 'frontend-js-request-chains-card',
+						hidden: activeTab !== 'javascript',
+						className: 'uc-js-main-card',
 					},
 					[
 						h('div', { className: 'py-4', key: 'javascript-strategy' }, [
@@ -4113,48 +6512,24 @@ h(ToggleRow, {
 							h('div', { className: 'text-xs text-zinc-500 mt-2' }, getJavascriptStrategyDescription(getJavascriptStrategyValue(settings))),
 						]),
 
+
+
 h(ToggleRow, {
-									label: __("First-party parallel execution", 'ultracache'),
-									description: __("Applies parallel execution to eligible same-origin frontend JavaScript in Defer and Delay modes.", 'ultracache'),
-									checked: !!settings.firstPartyJsParallelExecutionEnabled,
-									onChange: (value) => updateSetting('firstPartyJsParallelExecutionEnabled', value),
+									label: __("Delay non-critical/local JS", 'ultracache'),
+									description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
+									checked: settings.delayNonCriticalJsEnabled,
+									onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
 									disabled: busy,
-									key: 'first-party-js-parallel-execution',
+									key: 'defer-stage-three',
 								}),
 	h(ToggleRow, {
-									label: __("Third-party parallel execution", 'ultracache'),
-									description: __("Applies parallel execution to eligible third-party frontend JavaScript in Defer and Delay modes.", 'ultracache'),
-									checked: !!settings.thirdPartyJsParallelExecutionEnabled,
-									onChange: (value) => updateSetting('thirdPartyJsParallelExecutionEnabled', value),
-									disabled: busy,
-									key: 'third-party-js-parallel-execution',
-								}),
-
-h(ToggleRow, {
-									label: __("LCP Boundary Delay", 'ultracache'),
-									description: __("Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed through the UltraCache delayed loader.", 'ultracache'),
-									checked: !!settings.lcpBoundaryDeferEnabled,
-									onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
-									disabled: busy || !settings.lcpImagePriorityEnabled,
-									key: 'lcp-boundary-defer',
-								}),
-
-h(ToggleRow, {
-									label: __("Delay safe third-party JS", 'ultracache'),
+									label: __("Delay third-party JS", 'ultracache'),
 									description: __("Delay analytics, pixels, ads, tracking, and marketing scripts according to the unified Delayed JS auto-start controls, keeping them out of the initial PageSpeed/LCP/TBT critical window. Examples: Google Analytics, gtag, GTM, Google Site Kit event providers, Meta Pixel, TikTok Pixel, LinkedIn Insight, Pinterest Tag, Bing UET, Hotjar, Clarity, DoubleClick, Google Ads, Taboola, Outbrain, and Yahoo tracking.", 'ultracache'),
 									checked: settings.delaySafeThirdPartyJsEnabled,
 									onChange: (value) => updateSetting('delaySafeThirdPartyJsEnabled', value),
 									disabled: busy,
 									key: 'delay-safe-third-party-js',
 								}),
-					h(ToggleRow, {
-						label: __("Delay non-critical/local JS", 'ultracache'),
-						description: __("Delay selected same-host enhancement scripts such as popups, sliders, filters, consent extras, marketing helpers, and other local footer scripts unless protected or excluded here.", 'ultracache'),
-						checked: settings.delayNonCriticalJsEnabled,
-						onChange: (value) => updateSetting('delayNonCriticalJsEnabled', value),
-						disabled: busy,
-						key: 'defer-stage-three',
-					}),
 	h(ToggleRow, {
 									label: __("Delay known functional third-party JS", 'ultracache'),
 									description: __("Delay matched third-party scripts that provide visible functionality, such as cookie banners, captcha, maps, chat widgets, booking widgets, embedded forms, opt-in popups, newsletter widgets, and review widgets. Matching is based on the visible include/exclude patterns below. If a form, map, captcha, checkout, or cookie banner misbehaves, add its script keyword to exclusions.", 'ultracache'),
@@ -4173,11 +6548,11 @@ h(ToggleRow, {
 									}),
 
 h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto-start-controls' }, [
-										h('div', { className: 'text-sm font-medium text-white' }, renderLabelWithHelp(__('Delayed JS auto-start', 'ultracache'), __("What it does: controls when all delayed JavaScript queues are allowed to run.\n\nWhy it helps: delayed scripts stay out of the first loading rush, then release by visitor interaction or by the fallback timer.\n\nWatch for: event triggers are useful when a widget must wake as soon as the visitor interacts. Leaving events off gives a cleaner timer-only test.", 'ultracache'))),
-										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-3' }, __('Controls when all delayed JavaScript queues are released. Applies to Delay all JS, Delay non-critical/local JS, LCP Boundary Delay, known functional third-party delay, and all third-party delay.', 'ultracache')),
+										h('div', { className: 'text-sm font-medium text-white' }, renderLabelWithHelp(__('Delayed JS auto-start', 'ultracache'), __("What it does: controls when all delayed JavaScript queues are allowed to run.\n\nWhy it helps: delayed scripts stay out of the first loading rush, then release by visitor interaction or by the fallback timer.\n\nWatch for: Do not autostart JS disables the fallback timer completely. If it is selected with no event triggers, UltraCache automatically enables Mouse move, Keyboard, Touch / pointer, and Click.", 'ultracache'))),
+										h('div', { className: 'text-xs text-zinc-500 mt-1 mb-3' }, __('Controls when all delayed JavaScript queues are released. Applies to Delay all JS, Delay non-critical/local JS, LCP Boundary Delay, Delay third-party JS, known functional third-party delay, and all third-party delay.', 'ultracache')),
 										h(DelayedJsAutostartEventsField, {
 											label: __('Event triggers', 'ultracache'),
-											description: __('Optional. Keep these off for pure timer-based release. If enabled, these events can request the delayed JS queue release.', 'ultracache'),
+											description: __('Optional for timed release. With Do not autostart JS selected, at least one event trigger is required; if none is selected, Mouse move, Keyboard, Touch / pointer, and Click are enabled automatically.', 'ultracache'),
 											settings: settings,
 											onChange: (key, value) => updateSetting(key, value),
 											disabled: busy,
@@ -4186,10 +6561,33 @@ h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto
 										h(SelectField, {
 											label: __('If no event happens, autostart JS after', 'ultracache'),
 											description: __('Fallback timer for all delayed JavaScript queues.', 'ultracache'),
-											value: String(typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 0.05),
-											onChange: (value) => queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) }),
+											value: String(settings.delayedLocalJsAutoStart === 'infinite' ? 'infinite' : (typeof settings.delayedLocalJsAutoStartSeconds !== 'undefined' ? settings.delayedLocalJsAutoStartSeconds : 0.05)),
+											onChange: (value) => {
+												if (value === 'infinite') {
+													const hasEventTrigger = !!(
+														settings.delayedJsAutostartAfterLoadEnabled ||
+														settings.delayedJsAutostartMousemoveEnabled ||
+														settings.delayedJsAutostartClickEnabled ||
+														settings.delayedJsAutostartTouchPointerEnabled ||
+														settings.delayedJsAutostartKeyboardEnabled
+													);
+													const patch = { delayedLocalJsAutoStart: 'infinite' };
+													if (!hasEventTrigger) {
+														Object.assign(patch, {
+															delayedJsAutostartMousemoveEnabled: true,
+															delayedJsAutostartClickEnabled: true,
+															delayedJsAutostartTouchPointerEnabled: true,
+															delayedJsAutostartKeyboardEnabled: true,
+														});
+													}
+													queueSettingsPatch(patch);
+													return;
+												}
+												queueSettingsPatch({ delayedLocalJsAutoStart: 'custom', delayedLocalJsAutoStartSeconds: Number(value) });
+											},
 											disabled: busy,
 											options: [
+												{ value: 'infinite', label: __('Do not autostart JS', 'ultracache') },
 												{ value: '0.05', label: __('0.05 seconds', 'ultracache') },
 												{ value: '0.1', label: __('0.1 seconds', 'ultracache') },
 												{ value: '0.5', label: __('0.5 seconds', 'ultracache') },
@@ -4201,6 +6599,21 @@ h('div', { className: 'mt-4 pt-4 border-t border-white/5', key: 'delayed-js-auto
 											],
 											key: 'delayed-js-auto-start-fallback',
 										}),
+										h(SelectField, {
+											label: __('Minimum Delay Release', 'ultracache'),
+											description: __('Prevents delayed JavaScript from being released before this time. It does not trigger release by itself; early interaction or Auto Release requests remain pending until the minimum has elapsed.', 'ultracache'),
+											value: String(typeof settings.delayedJsMinimumReleaseSeconds !== 'undefined' ? settings.delayedJsMinimumReleaseSeconds : 0),
+											onChange: (value) => updateSetting('delayedJsMinimumReleaseSeconds', Number(value)),
+											disabled: busy,
+											options: [
+												{ value: '0', label: __('Disabled', 'ultracache') },
+												{ value: '1', label: __('1 second', 'ultracache') },
+												{ value: '2', label: __('2 seconds', 'ultracache') },
+												{ value: '3', label: __('3 seconds', 'ultracache') },
+												{ value: '4', label: __('4 seconds', 'ultracache') },
+											],
+											key: 'delayed-js-minimum-release',
+										}),
 									])
 
 					]
@@ -4211,6 +6624,8 @@ h(
 						title: __("CSS Delivery", 'ultracache'),
 						description: __("Bundle eligible CSS and async low-risk stylesheets without changing media-related controls.", 'ultracache'),
 						key: 'css-delivery-lcp-card',
+						hidden: activeTab !== 'fonts-css',
+						className: 'uc-fonts-css-delivery-card',
 					},
 					[
 						h(ToggleRow, {
@@ -4247,14 +6662,6 @@ h(
 							})),
 
 h(ToggleRow, {
-							label: __("Inline CSS Bundling", 'ultracache'),
-							description: __("Inline the generated page CSS bundle directly into the document head. This is user-controlled and can greatly increase cached HTML size when the generated bundle is large; STORE profiler now shows final HTML size, inline CSS bytes, and fallback counts.", 'ultracache'),
-							checked: settings.homepageCssBundleInlineEnabled,
-							onChange: (value) => updateSetting('homepageCssBundleInlineEnabled', value),
-							disabled: busy || !settings.homepageCssBundleEnabled,
-							key: 'homepage-css-bundle-inline',
-						}),
-h(ToggleRow, {
 							label: __("Consolidate Remaining CSS", 'ultracache'),
 							description: __("After the main CSS bundle is injected, combine eligible leftover non-protected local stylesheet links into one extra CSS file. SR7/Revolution/Swiper/Slick hero CSS remains protected; this targets small leftover plugin/theme CSS calls that still block rendering.", 'ultracache'),
 							checked: !!settings.leftoverCssBundleEnabled,
@@ -4275,14 +6682,6 @@ h('div', { className: 'uc-css-bundle-first-visit-field', key: 'css-bundle-first-
 							],
 						})),
 h(ToggleRow, {
-							label: __("Async Remaining CSS", 'ultracache'),
-							description: __("Rewrite low-risk local stylesheet links and UltraCache-generated external CSS bundles/optimized CSS to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.", 'ultracache'),
-							checked: settings.asyncCssEnabled,
-							onChange: (value) => updateSetting('asyncCssEnabled', value),
-							disabled: busy,
-							key: 'async-css',
-						}),
-h(ToggleRow, {
 							label: __("Async external CSS", 'ultracache'),
 							description: __("Converts stylesheet links from other domains to non-render-blocking async CSS. Same-site stylesheets continue through the normal CSS optimization/bundling flow.", 'ultracache'),
 							checked: !!settings.asyncExternalCssEnabled,
@@ -4291,16 +6690,24 @@ h(ToggleRow, {
 							key: 'async-external-css',
 						}),
 h(ToggleRow, {
-											label: __("Aggressive Async CSS", 'ultracache'),
-											description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
-											checked: settings.aggressiveAsyncCssEnabled,
-											onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
-											disabled: busy,
-											key: 'aggressive-async-css',
-										}),
+							label: __("Async Consent Banner CSS", 'ultracache'),
+							description: __("Manual mode for recognized consent/banner stylesheets already present in the final HTML. Keeps the existing always-ready async CSS runtime behavior while enabled. Late-injected CMP CSS stays under the CMP's native runtime timing.", 'ultracache'),
+							checked: !!settings.asyncConsentCssEnabled,
+							onChange: (value) => updateSetting('asyncConsentCssEnabled', value),
+							disabled: busy,
+							key: 'async-consent-css',
+						}),
+ h(ToggleRow, {
+							label: __("Auto-detect static Consent CSS", 'ultracache'),
+							description: __("Automatically applies Async Consent Banner CSS only when a recognized static CMP stylesheet is actually found in the final HTML. With no match, Auto mode adds no frontend runtime. Manual Async Consent Banner CSS takes precedence when both are enabled.", 'ultracache'),
+							checked: !!settings.asyncConsentCssAutoEnabled,
+							onChange: (value) => updateSetting('asyncConsentCssAutoEnabled', value),
+							disabled: busy,
+							key: 'async-consent-css-auto',
+						}),
 					]
 				),
-			h('div', { className: 'uc-media-settings-replacement-card', style: { gridColumn: '1 / -1' }, key: 'js-delay-defer-safeguards-diagnostics-wrap' }, [
+			h('div', { className: 'uc-media-settings-replacement-card uc-diagnostics-spacing uc-js-diagnostics-card', style: { gridColumn: '1 / -1' }, hidden: activeTab !== 'javascript', key: 'js-delay-defer-safeguards-diagnostics-wrap' }, [
 SettingsAccordionCard({
 						keyName: 'js-delay-defer-exclusions-diagnostics-box',
 						title: __("JS Defer / Delay Safeguards & Diagnostics", 'ultracache'),
@@ -4312,48 +6719,42 @@ SettingsAccordionCard({
 																		forceDeferValue: settings.deferJsForceList || '',
 																		onForceDeferSave: (value) => updateSetting('deferJsForceList', value),
 																		onSaveBoth: (excludeValue, forceValue) => queueSettingsPatch({ deferJsExcludeList: excludeValue, deferJsForceList: forceValue }),
+																		delayPatternValue: settings.delaySafeThirdPartyJsPatterns || '',
+																		delayPatternEnabled: !!settings.delaySafeThirdPartyJsEnabled,
+																		functionalDelayPatternValue: settings.delayFunctionalThirdPartyJsPatterns || '',
+																		functionalDelayPatternEnabled: !!settings.delayFunctionalThirdPartyJsEnabled,
+																		onSaveLists: (excludeValue, forceValue, delayValue, functionalDelayValue) => queueSettingsPatch({
+																			deferJsExcludeList: excludeValue,
+																			deferJsForceList: forceValue,
+																			delaySafeThirdPartyJsPatterns: delayValue,
+																			delayFunctionalThirdPartyJsPatterns: functionalDelayValue,
+																		}),
+																		onSaveRuntimeSafeguards: (excludeValue, forceValue, delayValue, decision) => queueSettingsPatch({
+																								deferJsExcludeList: excludeValue,
+																								deferJsForceList: forceValue,
+																								delaySafeThirdPartyJsPatterns: delayValue,
+																							}, { runtimeJsScanDecision: decision || null }),
+																		onPopulateDelayPatterns: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'third-party delay patterns'),
+																		onPopulateFunctionalDelayPatterns: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'known functional third-party delay patterns'),
 																		disabled: busy,
 																		placeholder: [jqueryPublicPath, wpUtilPublicPath, apiFetchPublicPath].filter(Boolean).join('\n'),
 																		forceDeferPlaceholder: 'my-theme-script\n/custom-plugin/assets/app.js',
 																		onPopulateDefaults: populateDeferDelayExclusionDefaults,
 																		onScan: runJsDelaySafetyScanForUrl,
 																		onRuntimeScan: runBrowserRuntimeJsScanForUrl,
-																		onAppendDelayPattern: (value) => appendScannerPatternToSafeDelayDraft(value),
+																		onRuntimeWindowPrepare: prepareBrowserRuntimeJsScanWindow,
+																						onRuntimeStrategyPrepare: prepareBrowserRuntimeScanStrategySafeguards,
+																						onRuntimeCyclePrepare: refreshRuntimeScanTargetUrl,
+																						onRuntimeBaselineBegin: beginRuntimeScanJavascriptBaseline,
+																						onRuntimeBaselineRestore: restoreRuntimeScanJavascriptState,
+												debugBrowserScannerEnabled: !!settings.openBrowserScannerInNewWindowEnabled,
 																		key: 'defer-stages-exclude-list-final',
 																	}),
-							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'js-exclusions-grid' }, [
-															h(SaveableTextAreaField, {
-																											label: __("Safe Third-Party Delay Patterns", 'ultracache'),
-																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin.", 'ultracache'),
-																											value: settings.delaySafeThirdPartyJsPatterns || '',
-																											onSave: (value) => updateSetting('delaySafeThirdPartyJsPatterns', value),
-																											disabled: busy || !settings.delaySafeThirdPartyJsEnabled,
-																											placeholder: 'googletagmanager.com\ngoogle-analytics.com\nconnect.facebook.net\nclarity.ms',
-																											saveLabel: 'Save Safe Third-Party Patterns',
-																											appendRequest: safeDelayAppendRequest,
-																											populateLabel: __("Populate Defaults", 'ultracache'),
-																											populateWarning: 'Your current safe third-party delay patterns will be replaced with the recommended defaults.',
-																											onPopulate: () => populateDefaultSettingList('delaySafeThirdPartyJsPatterns', 'safe third-party delay patterns'),
-																											key: 'delay-safe-third-party-patterns',
-																										}),
-															h(SaveableTextAreaField, {
-																											label: __("Known Functional Third-Party Delay Patterns", 'ultracache'),
-																											description: __("User-editable matching fragments for scripts already printed by the site, theme, or another plugin. Matching consent, captcha, maps, chat, booking, embedded form, opt-in popup, newsletter, and widget scripts are delayed unless excluded.", 'ultracache'),
-																											value: settings.delayFunctionalThirdPartyJsPatterns || '',
-																											onSave: (value) => updateSetting('delayFunctionalThirdPartyJsPatterns', value),
-																											disabled: busy || !settings.delayFunctionalThirdPartyJsEnabled,
-																											placeholder: 'recaptcha\nhcaptcha\nmaps.googleapis.com\ncomplianz\ncmplz',
-																											saveLabel: 'Save Known Functional Third-Party Patterns',
-																											populateLabel: __("Populate Defaults", 'ultracache'),
-																											populateWarning: 'Your current known functional third-party delay patterns will be replaced with the recommended defaults.',
-																											onPopulate: () => populateDefaultSettingList('delayFunctionalThirdPartyJsPatterns', 'known functional third-party delay patterns'),
-																											key: 'delay-functional-third-party-patterns',
-																										}),
-														]),
+
 						],
 					}),
 			]),
-			h('div', { className: 'uc-media-settings-replacement-card', style: { gridColumn: '1 / -1' }, key: 'css-bundle-exclusions-diagnostics-wrap' }, [
+			h('div', { className: 'uc-media-settings-replacement-card uc-diagnostics-spacing uc-fonts-css-diagnostics-card', style: { gridColumn: '1 / -1' }, hidden: activeTab !== 'fonts-css', key: 'css-bundle-exclusions-diagnostics-wrap' }, [
 SettingsAccordionCard({
 						keyName: 'css-bundle-exclusions-diagnostics-box',
 						title: __("CSS Bundle Exclusions & Diagnostics", 'ultracache'),
@@ -4431,6 +6832,8 @@ h(
 						title: __("Fonts Optimization", 'ultracache'),
 						description: __("Optimize remote Google Fonts, local @font-face display behavior, self-hosted font CSS delivery, and optional delayed icon-font loading.", 'ultracache'),
 						key: 'fonts-optimization-card',
+						hidden: activeTab !== 'fonts-css',
+						className: 'uc-fonts-css-fonts-card',
 					},
 					[
 						h(ToggleRow, {
@@ -4471,15 +6874,6 @@ h(ToggleRow, {
 							key: 'font-mix-css-bundle',
 						}),
 h(ToggleRow, {
-							label: __("Async Generated Font-Mix CSS Bundle", 'ultracache'),
-							description: __("Load the consolidated bundle-font-mix stylesheet with non-blocking print+onload delivery. Individual css-font-mix source files are not async-loaded by this option.", 'ultracache'),
-							checked: !!settings.fontMixCssBundleAsyncEnabled,
-							onChange: (value) => updateSetting('fontMixCssBundleAsyncEnabled', value),
-							disabled: busy || !settings.fontMixCssBundleEnabled,
-							tooltip: __("What it does: async-loads only the single consolidated bundle-font-mix stylesheet.\n\nWhy it helps: a large font-mix bundle can leave the render-blocking path, so the page can paint sooner.\n\nWatch for: text or icons may appear with fallback styling first and settle later. Check the first viewport, product cards, menus, headers, and decorative fonts.", 'ultracache'),
-							key: 'font-mix-css-bundle-async',
-						}),
-h(ToggleRow, {
 							label: __("Delay icon fonts", 'ultracache'),
 							description: __("Moves only matching entries from the visible font pattern list into a non-render-blocking delayed font stylesheet. Use the scanner to append detected icon-font patterns, then save the visible list.", 'ultracache'),
 							checked: !!settings.delayIconFontsEnabled,
@@ -4487,22 +6881,16 @@ h(ToggleRow, {
 							disabled: busy,
 							key: 'delay-icon-fonts',
 						}),
-h(ToggleRow, {
-							label: __("Advanced Runtime Font CSS Rewrite", 'ultracache'),
-							description: __("Advanced opt-in / experimental. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Keep off unless a site specifically needs runtime font-link rewriting.", 'ultracache'),
-							checked: settings.selfHostedFontRuntimeRewriteEnabled,
-							onChange: (value) => updateSetting('selfHostedFontRuntimeRewriteEnabled', value),
-							disabled: busy || !settings.selfHostedFontCssOptimizationEnabled,
-							key: 'self-hosted-fonts-runtime-rewrite',
-						}),
 					]
 				),
 h(
 					Card,
 					{
-						title: __("WooCommerce Controls", 'ultracache'),
-						description: __("Control WooCommerce cache safety, frontend request timing, and optional asset cleanup.", 'ultracache'),
+						title: __("WooCommerce", 'ultracache'),
+						description: __("Control WooCommerce cache safety, request timing, and optional asset cleanup.", 'ultracache'),
 						key: 'asset-cleanup-section-card',
+						hidden: activeTab !== 'javascript',
+						className: 'uc-js-woo-card',
 					},
 					[
 						h(ToggleRow, {
@@ -4514,7 +6902,15 @@ h(
 							hideDescription: true,
 							key: 'woo-safe',
 						}),
-						h('div', { className: 'mt-3 pt-3 border-t border-white/5', key: 'woocommerce-strategy-divider' }),
+						h(ToggleRow, {
+							label: __("WooCommerce JS Compatibility", 'ultracache'),
+							description: __("Protects variable-product variation and swatch interaction runtimes from Delay on variable product pages, preloads the core variation dependencies when their final URLs are known, and enables UltraCache's delegated pre-submit variation guard. This is an explicit WooCommerce integration switch; when disabled, those scripts follow the normal visible JavaScript policy.", 'ultracache'),
+							checked: !!settings.woocommerceVariableProductCompatibilityEnabled,
+							onChange: (value) => updateSetting('woocommerceVariableProductCompatibilityEnabled', value),
+							disabled: busy,
+							hideDescription: true,
+							key: 'woo-js-compatibility',
+						}),
 						h(SelectField, {
 							label: __("WooCommerce frontend strategy", 'ultracache'),
 							description: __("Choose a preset for cart-fragments timing and WooCommerce asset cleanup. Custom appears when the individual controls no longer match a preset.", 'ultracache'),
@@ -4577,13 +6973,147 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 				),
 			]),
 
+
+				SettingsAccordionCard({
+					keyName: 'advanced-frontend-javascript-manipulation',
+					hidden: activeTab !== 'advanced',
+					title: __("Advanced Frontend Javascript manipulation", 'ultracache'),
+					description: h('span', { className: 'uc-advanced-warning' }, __("Warning these settings may hurt your performance", 'ultracache')),
+					children: [
+						h(ToggleRow, {
+							label: __("First-party parallel execution", 'ultracache'),
+							description: __("Applies parallel execution to eligible same-origin frontend JavaScript in Defer and Delay modes.", 'ultracache'),
+							checked: !!settings.firstPartyJsParallelExecutionEnabled,
+							onChange: (value) => updateSetting('firstPartyJsParallelExecutionEnabled', value),
+							disabled: busy,
+							key: 'first-party-js-parallel-execution',
+						}),
+						h(ToggleRow, {
+							label: __("Third-party parallel execution", 'ultracache'),
+							description: __("Applies parallel execution to eligible third-party frontend JavaScript in Defer and Delay modes.", 'ultracache'),
+							checked: !!settings.thirdPartyJsParallelExecutionEnabled,
+							onChange: (value) => updateSetting('thirdPartyJsParallelExecutionEnabled', value),
+							disabled: busy,
+							key: 'third-party-js-parallel-execution',
+						}),
+						h(ToggleRow, {
+							label: __("LCP Boundary Delay", 'ultracache'),
+							description: __("Uses the LCP image detected by LCP Image Priority as a visual boundary. Eligible local scripts printed after that image in the HTML are delayed through the UltraCache delayed loader.", 'ultracache'),
+							checked: !!settings.lcpBoundaryDeferEnabled,
+							onChange: (value) => updateSetting('lcpBoundaryDeferEnabled', value),
+							disabled: busy || !settings.lcpImagePriorityEnabled,
+							key: 'lcp-boundary-defer',
+						}),
+						h(ToggleRow, {
+							label: __("Elementor Compatibility", 'ultracache'),
+							description: __("Analyzes the rendered Elementor widgets and the installed Elementor, Elementor Pro, and addon handler sources, then keeps only interaction-critical widget runtimes and their declared dependencies out of UltraCache Delay and parallel execution. The knowledge map is version-aware and adapts per page instead of applying a blanket Elementor exclusion.", 'ultracache'),
+							checked: !!settings.protectElementorCompatibilityEnabled,
+							onChange: (value) => updateSetting('protectElementorCompatibilityEnabled', value),
+							disabled: busy,
+							key: 'protect-elementor-compatibility',
+						}),
+						h(ToggleRow, {
+							label: __("Protect WPBakery animations", 'ultracache'),
+							description: __("Keeps lifecycle-critical WPBakery/Visual Composer frontend JavaScript out of UltraCache Delay queues while still allowing normal defer optimization, protecting animations, carousels, legacy sliders, tabs, accordions, and isotope grids from broken one-shot initialization.", 'ultracache'),
+							checked: !!settings.protectWpBakeryAnimationsEnabled,
+							onChange: (value) => updateSetting('protectWpBakeryAnimationsEnabled', value),
+							disabled: busy,
+							key: 'protect-wpbakery-animations',
+						}),
+						h(ToggleRow, {
+							label: __("Debug Browser Scanner", 'ultracache'),
+							description: __("Diagnostic debug mode. Shows the same isolated anonymous Browser Runtime Scan frame on screen so you can inspect the live page and DevTools. It also enables the temporary Runtime Scan Comparison diagnostics. When disabled, Runtime Scan uses the same credentialless frame hidden from view and comparison diagnostics stay off.", 'ultracache'),
+							checked: !!settings.openBrowserScannerInNewWindowEnabled,
+							onChange: (value) => updateSetting('openBrowserScannerInNewWindowEnabled', value),
+							disabled: busy,
+							key: 'debug-browser-scanner',
+						}),
+					],
+				}),
+
+				SettingsAccordionCard({
+					keyName: 'advanced-css-delivery',
+					hidden: activeTab !== 'advanced',
+					title: __("Advanced CSS Delivery", 'ultracache'),
+					description: h('span', { className: 'uc-advanced-warning' }, __("Warning these settings may hurt your performance", 'ultracache')),
+					children: [
+						h(ToggleRow, {
+							label: __("Inline CSS Bundling", 'ultracache'),
+							description: __("Inline the generated page CSS bundle directly into the document head. This is user-controlled and can greatly increase cached HTML size when the generated bundle is large; STORE profiler now shows final HTML size, inline CSS bytes, and fallback counts.", 'ultracache'),
+							checked: settings.homepageCssBundleInlineEnabled,
+							onChange: (value) => updateSetting('homepageCssBundleInlineEnabled', value),
+							disabled: busy || !settings.homepageCssBundleEnabled,
+							key: 'homepage-css-bundle-inline',
+						}),
+						h(ToggleRow, {
+							label: __("Async Remaining CSS", 'ultracache'),
+							description: __("Rewrite low-risk local stylesheet links and UltraCache-generated external CSS bundles/optimized CSS to non-blocking print+onload loading with a noscript fallback. This complements CSS Bundling.", 'ultracache'),
+							checked: settings.asyncCssEnabled,
+							onChange: (value) => updateSetting('asyncCssEnabled', value),
+							disabled: busy,
+							key: 'async-css',
+						}),
+						h(ToggleRow, {
+							label: __("Aggressive Async CSS", 'ultracache'),
+							description: __("Optional advanced mode. Rewrite almost all remaining local stylesheet links, including late footer output, to non-blocking print+onload loading with a noscript fallback. Use the exclude list for styles that must stay blocking.", 'ultracache'),
+							checked: settings.aggressiveAsyncCssEnabled,
+							onChange: (value) => updateSetting('aggressiveAsyncCssEnabled', value),
+							disabled: busy,
+							key: 'aggressive-async-css',
+						}),
+					],
+				}),
+
+				SettingsAccordionCard({
+					keyName: 'advanced-fonts-optimisation',
+					hidden: activeTab !== 'advanced',
+					title: __("Advanced Fonts Optimisation", 'ultracache'),
+					description: h('span', { className: 'uc-advanced-warning' }, __("Warning these settings may hurt your performance", 'ultracache')),
+					children: [
+						h(ToggleRow, {
+							label: __("Async Generated Font-Mix CSS Bundle", 'ultracache'),
+							description: __("Load the consolidated bundle-font-mix stylesheet with non-blocking print+onload delivery. Individual css-font-mix source files are not async-loaded by this option.", 'ultracache'),
+							checked: !!settings.fontMixCssBundleAsyncEnabled,
+							onChange: (value) => updateSetting('fontMixCssBundleAsyncEnabled', value),
+							disabled: busy || !settings.fontMixCssBundleEnabled,
+							tooltip: __("What it does: async-loads only the single consolidated bundle-font-mix stylesheet.\n\nWhy it helps: a large font-mix bundle can leave the render-blocking path, so the page can paint sooner.\n\nWatch for: text or icons may appear with fallback styling first and settle later. Check the first viewport, product cards, menus, headers, and decorative fonts.", 'ultracache'),
+							key: 'font-mix-css-bundle-async',
+						}),
+						h(ToggleRow, {
+							label: __("Advanced Runtime Font CSS Rewrite", 'ultracache'),
+							description: __("Advanced opt-in / experimental. Uses a MutationObserver to rewrite late-injected local font stylesheet links. Keep off unless a site specifically needs runtime font-link rewriting.", 'ultracache'),
+							checked: settings.selfHostedFontRuntimeRewriteEnabled,
+							onChange: (value) => updateSetting('selfHostedFontRuntimeRewriteEnabled', value),
+							disabled: busy || !settings.selfHostedFontCssOptimizationEnabled,
+							key: 'self-hosted-fonts-runtime-rewrite',
+						}),
+					],
+				}),
+
 				SettingsAccordionCard({
 						keyName: 'advanced-settings-box',
+						hidden: activeTab !== 'advanced',
 						title: __("Advanced settings", 'ultracache'),
 						description: __("General advanced controls kept separate from exclusion lists.", 'ultracache'),
 						children: [
 							h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 uc-exclusions-grid', key: 'advanced-settings-grid' }, [
 															h(ToggleRow, {
+																					label: __("Real Cookie Banner Compatibility", 'ultracache'),
+																					description: __("Keeps Real Cookie Banner controller, blocker, vendor chunks, and TCF bootstrap on their native lifecycle. Runtime Scan clears only its isolated real_cookie_banner* consent state before each measured lifecycle, and RCB configuration/revision changes invalidate UltraCache. Service scripts released after consent still follow your visible Do Not Defer / Defer Instead / Delay policy.", 'ultracache'),
+																					checked: !!settings.realCookieBannerCompatibilityEnabled,
+																					onChange: (value) => updateSetting('realCookieBannerCompatibilityEnabled', value),
+																					disabled: busy,
+																					key: 'real-cookie-banner-compatibility',
+																				}),
+															h(ToggleRow, {
+																					label: __("Complianz Compatibility", 'ultracache'),
+																					description: __("Keeps only Complianz cookie-banner, TCF, router, and postscribe infrastructure on its native lifecycle. Runtime Scan clears only isolated Complianz consent state, and real Complianz settings/banner changes invalidate UltraCache. Scripts released by Complianz after consent still follow your visible Do Not Defer / Defer Instead / Delay policy. Async Consent Banner CSS remains an independent setting.", 'ultracache'),
+																					checked: !!settings.complianzCompatibilityEnabled,
+																					onChange: (value) => updateSetting('complianzCompatibilityEnabled', value),
+																					disabled: busy,
+																					key: 'complianz-compatibility',
+																				}),
+													h(ToggleRow, {
 																							label: __("Lazy MailerLite nonce refresh", 'ultracache'),
 																							description: 'Prevents MailerLite forms from calling the WordPress Ajax endpoint on page load for ml_create_nonce. The nonce is refreshed on first form interaction or before submit, so cached pages avoid the load-time Ajax request.',
 																							checked: !!settings.lazyMailerliteNonceEnabled,
@@ -4642,6 +7172,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					}),
 			SettingsAccordionCard({
 						keyName: 'general-exclusions-box',
+						hidden: activeTab !== 'advanced',
 						title: __("General Exclusions", 'ultracache'),
 						description: __("General cache, cookie, asset-cleanup, LCP, and request-chain safeguards.", 'ultracache'),
 						children: [
@@ -4661,7 +7192,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 																										}),
 															h(SaveableTextAreaField, {
 																										label: __("Safe Tracking Cookies", 'ultracache'),
-																										description: __("Cookie names or fragments that may be ignored for public cache eligibility and safe Set-Cookie storage decisions. Use this only for analytics/marketing identifiers that do not change the HTML. UltraCache never stores or replays Set-Cookie headers.", 'ultracache'),
+																										description: __("Known harmless analytics/marketing response-cookie names used to classify diagnostics. Cacheability Policy v2 no longer requires every allowed response cookie to appear here; unknown response cookies can still store public HTML unless they match a private-response safeguard. UltraCache never stores or replays Set-Cookie headers.", 'ultracache'),
 																										value: settings.safeTrackingCookieList || '',
 																										onSave: (value) => updateSetting('safeTrackingCookieList', value),
 																										disabled: busy,
@@ -4703,6 +7234,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					}),
 			SettingsAccordionCard({
 						keyName: 'general-inclusions-box',
+						hidden: activeTab !== 'advanced',
 						title: __("General Inclusions", 'ultracache'),
 						description: __("Manual LCP targets, priority preloads, and request-chain delay entries.", 'ultracache'),
 						children: [
@@ -4740,7 +7272,249 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 							]),
 						],
 					}),
-			h(RedisCard, { form: redisForm, diagnostics, busy: hasDashboardWorkInProgress(), canManageInfrastructure, objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testObjectCacheBackend, onFlush: flushObjectCache, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'redis-card' }),
+			h(
+				Card,
+				{
+					title: __("Multilingual Status", 'ultracache'),
+					description: __("Provider-neutral multilingual runtime and public URL topology detected by UltraCache.", 'ultracache'),
+					key: 'multilingual-status-card',
+					hidden: activeTab !== 'multilingual',
+					className: 'uc-multilingual-card',
+				},
+				[
+					h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-3', key: 'multilingual-status-summary' }, [
+						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'provider' }, [
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __('Provider', 'ultracache')),
+							h('div', { className: 'text-sm font-bold text-white mt-1' }, multilingualProviderLabel),
+						]),
+						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'status' }, [
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __('Status', 'ultracache')),
+							h('div', { className: 'text-sm font-bold text-white mt-1' }, multilingualStatusLabel),
+						]),
+						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'default-language' }, [
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __('Default language', 'ultracache')),
+							h('div', { className: 'text-sm font-bold text-white mt-1' }, String(multilingualStatus.defaultLanguage || '—')),
+						]),
+						h('div', { className: 'rounded-xl bg-white/5 px-4 py-3', key: 'url-mode' }, [
+							h('div', { className: 'text-[10px] uppercase tracking-widest text-zinc-500' }, __('URL mode', 'ultracache')),
+							h('div', { className: 'text-sm font-bold text-white mt-1' }, multilingualModeLabel),
+						]),
+					]),
+					multilingualStatusReason
+						? h('div', { className: 'mt-4 rounded-xl bg-white/5 px-4 py-3 text-xs text-zinc-400', key: 'multilingual-status-reason' }, multilingualStatusReason)
+						: null,
+					multilingualLanguages.length > 0
+						? h('div', { className: 'mt-5', key: 'multilingual-language-list' }, [
+							h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 mb-2' }, __('Published languages', 'ultracache')),
+							h('div', { className: 'space-y-2' }, multilingualLanguages.map((language) => {
+								const code = String(language && language.code || '');
+								const name = String(language && language.name || code || __('Language', 'ultracache'));
+								const home = String(language && language.home || '');
+								const summary = language && language.warmSummary && typeof language.warmSummary === 'object' ? language.warmSummary : {};
+								const summaryProfile = String(summary.profile || 'custom');
+								const summaryProfileLabel = ({ full: __('Full', 'ultracache'), essential: __('Essential', 'ultracache'), on_demand: __('On demand', 'ultracache'), custom: __('Custom', 'ultracache') }[summaryProfile] || summaryProfile);
+								const operationSummary = Number(summary.enabledOperationCount || 0) + '/' + Number(summary.operationCount || 8) + ' ' + __('warm operations', 'ultracache');
+								const sourceSummary = summary.useGlobalFullSiteSources ? __('Global full-site sources', 'ultracache') : __('Custom full-site sources', 'ultracache');
+								return h('div', { className: 'rounded-xl bg-white/5 px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between', key: code || home }, [
+									h('div', { className: 'min-w-0', key: 'language' }, [
+										h('div', { className: 'text-sm font-bold text-white' }, name + (code ? ' — ' + code : '') + (language && language.isDefault ? ' · ' + __('Default', 'ultracache') : '')),
+										h('div', { className: 'text-xs text-zinc-500 break-all mt-1' }, home || '—'),
+									]),
+									multilingualStatus.ready
+										? h('div', { className: 'text-xs text-zinc-400 md:text-right', key: 'policy-summary' }, [
+											h('div', { className: 'font-semibold text-zinc-300' }, summaryProfileLabel + ' · ' + operationSummary),
+											h('div', { className: 'mt-1' }, sourceSummary),
+										])
+										: null,
+								]);
+							})),
+						])
+						: h('div', { className: 'mt-5 text-sm text-zinc-500', key: 'multilingual-no-languages' }, __('No published multilingual language routes are currently available.', 'ultracache')),
+				]
+			),
+			h(
+				Card,
+				{
+					title: __("Multilingual Warming", 'ultracache'),
+					description: __("Controls whether proactive Warm Cache operations include translated language variants. Cache invalidation and normal visitor-driven cache creation are not disabled by this setting.", 'ultracache'),
+					key: 'multilingual-warming-card',
+					hidden: activeTab !== 'multilingual',
+					className: 'uc-multilingual-card',
+				},
+				[
+					h(ToggleRow, {
+						label: __("Also warm translation pages", 'ultracache'),
+						description: __("Master multilingual warm-up switch. When enabled, the per-language policy below decides which translated languages participate. When disabled, non-default languages are excluded from proactive Warm Cache operations. Cache invalidation is unaffected.", 'ultracache'),
+						checked: !!settings.alsoWarmTranslationPagesEnabled,
+						onChange: (value) => updateSetting('alsoWarmTranslationPagesEnabled', value),
+						disabled: warmBusy || !multilingualStatus.active || !multilingualStatus.ready,
+						key: 'also-warm-translation-pages',
+					}),
+					!multilingualStatus.active
+						? h('div', { className: 'mt-3 text-xs text-zinc-500', key: 'multilingual-warming-inactive' }, __('This control becomes available when UltraCache positively detects a supported multilingual provider.', 'ultracache'))
+						: null,
+					multilingualStatus.active && multilingualStatus.ready && sortedMultilingualLanguages.length > 0
+						? h('div', { className: 'mt-5 space-y-3', key: 'multilingual-language-policies' }, sortedMultilingualLanguages.map((language) => {
+							const code = String(language && language.code || '');
+							const name = String(language && language.name || code || __('Language', 'ultracache'));
+							const home = String(language && language.home || '');
+							const policy = getEffectiveMultilingualLanguagePolicy(language);
+							const profile = ['full', 'essential', 'on_demand', 'custom'].indexOf(String(policy.profile || 'custom')) !== -1
+								? String(policy.profile || 'custom')
+								: 'custom';
+							return h('details', { className: 'uc-multilingual-warm-profile rounded-xl bg-white/[0.03] overflow-hidden', open: !!(language && language.isDefault), key: 'warm-policy-' + code }, [
+								h('summary', { className: 'cursor-pointer list-none px-4 py-3 flex flex-col gap-1 md:flex-row md:items-center md:justify-between' }, [
+									h('div', { className: 'min-w-0' }, [
+										h('div', { className: 'text-sm font-bold text-white' }, name + (code ? ' — ' + code : '') + (language && language.isDefault ? ' · ' + __('Default', 'ultracache') : '')),
+										h('div', { className: 'text-xs text-zinc-500 break-all mt-1' }, home || '—'),
+									]),
+									h('div', { className: 'w-full md:w-auto flex items-center justify-between md:justify-end gap-3', key: 'profile-summary' }, [
+										h('div', { className: 'text-xs uppercase tracking-widest text-zinc-400' }, __('Warm profile', 'ultracache') + ': ' + ({ full: __('Full', 'ultracache'), essential: __('Essential', 'ultracache'), on_demand: __('On demand', 'ultracache'), custom: __('Custom', 'ultracache') }[profile] || profile)),
+										h('span', { className: 'uc-accordion__chevron shrink-0', 'aria-hidden': 'true' }, '▸'),
+									]),
+								]),
+								h('div', { className: 'px-4 py-4 space-y-4' }, [
+									h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4 items-start' }, [
+										h('div', {}, [
+											h('div', { className: 'text-sm font-medium text-white' }, __('Warm profile', 'ultracache')),
+											h('div', { className: 'text-xs text-zinc-500 mt-1' }, __('Selecting a preset writes the switches. Editing any switch changes the profile to Custom.', 'ultracache')),
+										]),
+										h(CustomSelect, {
+											value: profile,
+											disabled: warmBusy,
+											onChange: (value) => applyMultilingualWarmProfile(language, value),
+											options: [
+												{ value: 'full', label: __('Full', 'ultracache') },
+												{ value: 'essential', label: __('Essential', 'ultracache') },
+												{ value: 'on_demand', label: __('On demand', 'ultracache') },
+												{ value: 'custom', label: __('Custom', 'ultracache') },
+											],
+										}),
+									]),
+									h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 pt-1' }, __('Manual Warm', 'ultracache')),
+									h(ToggleRow, {
+										label: __('Warm Homepage', 'ultracache'),
+										description: __('Include this language when Warm Up Homepage is run.', 'ultracache'),
+										checked: !!policy.warmHomepage,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmHomepage', value),
+										disabled: warmBusy,
+										key: code + '-warm-homepage',
+									}),
+									h(ToggleRow, {
+										label: __('Warm Configured Menu', 'ultracache'),
+										description: __('Include this language when Warm Up Configured Menu is run.', 'ultracache'),
+										checked: !!policy.warmMenu,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmMenu', value),
+										disabled: warmBusy,
+										key: code + '-warm-menu',
+									}),
+									h(ToggleRow, {
+										label: __('Warm Full Site', 'ultracache'),
+										description: __('Include this language when Warm Up Full Site is run.', 'ultracache'),
+										checked: !!policy.warmFullSite,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmFullSite', value),
+										disabled: warmBusy,
+										key: code + '-warm-full-site',
+									}),
+									h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 pt-1' }, __('Automatic Warm', 'ultracache')),
+									h(ToggleRow, {
+										label: __('Scheduled / Cron warm', 'ultracache'),
+										description: __('Include this language in scheduled/background full-site warm plans.', 'ultracache'),
+										checked: !!policy.warmScheduled,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmScheduled', value),
+										disabled: warmBusy,
+										key: code + '-warm-scheduled',
+									}),
+									h(ToggleRow, {
+										label: __('Warm after Flush All Cache', 'ultracache'),
+										description: __('Include this language when the global Warm full site after Flush All Cache trigger starts a background warm plan.', 'ultracache'),
+										checked: !!policy.warmAfterFlushAll,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmAfterFlushAll', value),
+										disabled: warmBusy,
+										key: code + '-warm-after-flush',
+									}),
+									h(ToggleRow, {
+										label: __('Warm after Scheduled Cleanup', 'ultracache'),
+										description: __('Include this language when the global warm-after-cleanup trigger starts a background warm plan.', 'ultracache'),
+										checked: !!policy.warmAfterCleanup,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmAfterCleanup', value),
+										disabled: warmBusy,
+										key: code + '-warm-after-cleanup',
+									}),
+									h(ToggleRow, {
+										label: __('Warm affected pages after save', 'ultracache'),
+										description: __('After correctness invalidation, proactively rewarm affected URLs for this language when the global Warm affected pages after save setting is enabled.', 'ultracache'),
+										checked: !!policy.warmAffectedSave,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmAffectedSave', value),
+										disabled: warmBusy,
+										key: code + '-warm-affected-save',
+									}),
+									h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 pt-1' }, __('Assets', 'ultracache')),
+									h(ToggleRow, {
+										label: __('Warm CSS bundles', 'ultracache'),
+										description: __('Allow CSS bundle stages for this language when the global Also warm CSS bundles setting and CSS Bundling are enabled.', 'ultracache'),
+										checked: !!policy.warmCssBundles,
+										onChange: (value) => updateMultilingualWarmSwitch(language, 'warmCssBundles', value),
+										disabled: warmBusy,
+										key: code + '-warm-css-bundles',
+									}),
+									h('div', { className: 'text-xs uppercase tracking-widest text-zinc-500 pt-1' }, __('Full-site sources', 'ultracache')),
+									h(ToggleRow, {
+										label: __('Use global full-site sources', 'ultracache'),
+										description: __('When enabled, this language follows the Full-site warm-up sources selected in Warm Cache. Disable it to choose sources specifically for this language.', 'ultracache'),
+										checked: !!policy.useGlobalFullSiteSources,
+										onChange: (value) => updateMultilingualFullSiteSourceMode(language, value),
+										disabled: warmBusy,
+										key: code + '-use-global-full-site-sources',
+									}),
+									!policy.useGlobalFullSiteSources
+										? h('div', { className: 'space-y-2 pl-1', key: code + '-custom-full-site-sources' }, getFullSiteSourceOptions().map((option) => {
+											const source = String(option.value || '');
+											const selected = Array.isArray(policy.fullSiteSources) && policy.fullSiteSources.indexOf(source) !== -1;
+											return h(ToggleRow, {
+												label: String(option.label || source),
+												description: __('Include this source when discovering full-site URLs for this language.', 'ultracache'),
+												checked: selected,
+												onChange: (value) => updateMultilingualFullSiteSource(language, source, value),
+												disabled: warmBusy,
+												key: code + '-full-site-source-' + source,
+											});
+										}))
+										: null,
+								]),
+							]);
+						}))
+						: null,
+				]
+			),
+
+			h(
+				Card,
+				{
+					title: __("Warm Policy Diagnostics", 'ultracache'),
+					description: __("Read-only effective include/exclude view from the same multilingual policy engine used by Warm Cache.", 'ultracache'),
+					key: 'multilingual-warm-diagnostics-card',
+					hidden: activeTab !== 'multilingual',
+					className: 'uc-multilingual-card',
+				},
+				[
+					h('div', { className: 'rounded-xl bg-white/5 px-4 py-3 text-xs text-zinc-400 mb-4', key: 'warm-diagnostics-master' }, __('Master multilingual warm-up', 'ultracache') + ': ' + (multilingualWarmDiagnostics.masterEnabled ? __('Enabled', 'ultracache') : __('Disabled', 'ultracache'))),
+					multilingualStatus.active && multilingualStatus.ready
+						? h('div', { className: 'space-y-2', key: 'warm-diagnostic-operations' }, Object.keys(multilingualWarmOperationLabels).map((operation) => {
+							const diagnostic = multilingualWarmDiagnosticOperations[operation] && typeof multilingualWarmDiagnosticOperations[operation] === 'object' ? multilingualWarmDiagnosticOperations[operation] : { included: [], excluded: [] };
+							const included = Array.isArray(diagnostic.included) ? diagnostic.included : [];
+							const excluded = Array.isArray(diagnostic.excluded) ? diagnostic.excluded : [];
+							return h('div', { className: 'rounded-xl bg-white/[0.03] px-4 py-3', key: 'warm-diag-' + operation }, [
+								h('div', { className: 'text-sm font-bold text-white' }, multilingualWarmOperationLabels[operation]),
+								h('div', { className: 'text-xs text-zinc-400 mt-2' }, __('Included', 'ultracache') + ': ' + (included.length ? included.join(', ') : __('None', 'ultracache'))),
+								h('div', { className: 'text-xs text-zinc-500 mt-1' }, __('Excluded', 'ultracache') + ': ' + (excluded.length ? excluded.join(', ') : __('None', 'ultracache'))),
+							]);
+						}))
+						: h('div', { className: 'text-sm text-zinc-500', key: 'warm-diagnostics-unavailable' }, __('Operation diagnostics become available when one supported multilingual provider has a ready public topology.', 'ultracache')),
+				]
+			),
+
+			h(TabGate, { visible: activeTab === 'server', className: 'uc-server-section uc-server-section--object-cache', key: 'redis-tab-gate' }, h(RedisCard, { form: redisForm, diagnostics, busy: hasDashboardWorkInProgress(), canManageInfrastructure, objectCacheEnabled: settings.objectCacheEnabled, onObjectCacheEnabledChange: (value) => updateSetting('objectCacheEnabled', value), onFieldChange: updateRedisField, onSave: saveRedisSettings, onTest: testObjectCacheBackend, onFlush: flushObjectCache, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'redis-card' })),
 
 			h(
 				Card,
@@ -4748,6 +7522,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					title: __("Automation & Scheduling", 'ultracache'),
 					description: __("Scheduled cache cleanup, background warmup queue, and stale cache timing controls.", 'ultracache'),
 					key: 'automation-scheduling-reworked',
+					hidden: activeTab !== 'automation',
 				},
 				[
 					h('div', { className: classNames('uc-inline-diagnostic', automationWorkerAttention ? 'is-disabled' : ''), key: 'automation-worker-status' }, [
@@ -4879,29 +7654,31 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 				]
 			),
 
-			showVarnishCard ? h(VarnishCard, { form: varnishForm, savedSettings: settings, diagnostics, busy: false, canManageInfrastructure, onEnabledChange: updateVarnishEnabled, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onDetect: runVarnishDiscovery, onTest: runVarnishTest, onMeasurePerformance: runVarnishPerformanceSnapshot, onFlushAll: runVarnishFlushAll, onFlushEntireHost: runVarnishFlushEntireHost, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'varnish-card' }) : null,
-			showLiteSpeedCard ? h(LiteSpeedCard, { layer: liteSpeedLayer, diagnostics, settings, busy, onSettingChange: updateSetting, onRedetect: redetectExternalCaches, onFlush: flushLiteSpeed, onTest: runLiteSpeedTest, key: 'litespeed-cache-card' }) : null,
-			h('div', { className: 'uc-info-grid', key: 'php-cache-cards' }, [
+			showVarnishCard ? h(TabGate, { visible: activeTab === 'server', className: 'uc-server-section uc-server-section--varnish', key: 'varnish-tab-gate' }, h(VarnishCard, { form: varnishForm, savedSettings: settings, diagnostics, busy: false, canManageInfrastructure, onEnabledChange: updateVarnishEnabled, onFieldChange: updateVarnishField, onSave: saveVarnishSettings, onDetect: runVarnishDiscovery, onTest: runVarnishTest, onMeasurePerformance: runVarnishPerformanceSnapshot, onFlushAll: runVarnishFlushAll, onFlushEntireHost: runVarnishFlushEntireHost, onRemoveConflictingDropins: removeConflictingCacheDropins, onRecheckConflicts: recheckCacheConflicts, key: 'varnish-card' })) : null,
+			showLiteSpeedCard ? h(TabGate, { visible: activeTab === 'server', className: 'uc-server-section uc-server-section--litespeed', key: 'litespeed-tab-gate' }, h(LiteSpeedCard, { layer: liteSpeedLayer, diagnostics, settings, busy, onSettingChange: updateSetting, onRedetect: redetectExternalCaches, onFlush: flushLiteSpeed, key: 'litespeed-cache-card' })) : null,
+			h('div', { className: 'uc-info-grid uc-server-section uc-server-section--php-caches', hidden: activeTab !== 'server', key: 'php-cache-cards' }, [
 			h(OPcacheCard, { stats, busy: false, onFlush: flushOpcache, key: 'opcache-card' }),
 			h(APCuCard, { stats, settings, busy: false, onFlush: flushApcu, onToggleScheduledCleanup: (value) => updateSetting('apcuFlushOnScheduledCleanup', value), key: 'apcu-card' }),
 			h(ExternalCacheCard, { title: __("Nginx Cache", 'ultracache'), description: __("Detected Nginx cache integration. UltraCache flushes Nginx only when a safe WordPress purge hook/integration is available.", 'ultracache'), layer: getExternalCacheLayer(stats, 'nginx'), busy: false, onFlush: flushNginx, key: 'nginx-cache-card' }),
 			]),
-			h(ExternalCacheFlushSettingsCard, { stats, diagnostics, settings, busy: false, canManageInfrastructure, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' }),
+			h(TabGate, { visible: activeTab === 'server', className: 'uc-server-section uc-server-section--external-flush', key: 'external-cache-flush-tab-gate' }, h(ExternalCacheFlushSettingsCard, { stats, diagnostics, settings, busy: false, canManageInfrastructure, onRedetect: redetectExternalCaches, onToggle: (key, value) => updateSetting(key, value), key: 'external-cache-flush-settings' })),
 
-				h('div', { className: 'uc-info-grid', key: 'info-cards' }, [
-					h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'diagnostics' }),
-					h(ActivitySummaryCard, { stats, cssBundleDiagnostics, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'activity-summary' }),
+				h('div', { className: 'uc-info-grid uc-advanced-diagnostics-grid', hidden: activeTab !== 'advanced', key: 'info-cards' }, [
+					h(TabGate, { visible: activeTab === 'advanced', key: 'activity-summary-tab-gate' }, h(ActivitySummaryCard, { stats, cssBundleDiagnostics, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, key: 'activity-summary' })),
+					h(TabGate, { visible: activeTab === 'advanced', key: 'diagnostics-tab-gate' }, h(DiagnosticsCard, { diagnostics, stats, open: infoAccordionsOpen, onToggle: function() { setInfoAccordionsOpen(function(current) { return !current; }); }, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'diagnostics' })),
 				]),
-				h(PerformanceProfilerCard, {
-					profile: performanceProfile,
-					busy: !!(asyncActions.performance_profile_compact || asyncActions.performance_profile_verbose || asyncActions.performance_profile_callback),
-					onRun: runPerformanceProfile,
-					onDownload: downloadPerformanceProfileJson,
-					onClear: clearPerformanceProfile,
-					onCopyCssExclusion: copyCssBundleExclusionSuggestion,
-					key: 'performance-profiler-card'
-				}),
-				h(AdvancedDiagnosticsCard, { diagnostics, stats, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'advanced-diagnostics-card' }),
+				h(TabGate, { visible: activeTab === 'advanced', key: 'performance-profiler-tab-gate' },
+					h(PerformanceProfilerCard, {
+						profile: performanceProfile,
+						busy: !!(asyncActions.performance_profile_compact || asyncActions.performance_profile_verbose || asyncActions.performance_profile_callback),
+						onRun: runPerformanceProfile,
+						onDownload: downloadPerformanceProfileJson,
+						onClear: clearPerformanceProfile,
+						onCopyCssExclusion: copyCssBundleExclusionSuggestion,
+						key: 'performance-profiler-card'
+					})
+				),
+				h(TabGate, { visible: activeTab === 'advanced', className: 'uc-diagnostics-spacing', key: 'advanced-diagnostics-tab-gate' }, h(AdvancedDiagnosticsCard, { diagnostics, stats, busy, onRefreshStorageDiagnostics: refreshStorageDiagnostics, key: 'advanced-diagnostics-card' })),
 
 			h(
 				Card,
@@ -4909,6 +7686,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					title: __("Cache Decision Tester", 'ultracache'),
 					description: __("Inspect how UltraCache evaluates a frontend URL without using your current admin session cookies.", 'ultracache'),
 					key: 'inspector',
+					hidden: activeTab !== 'advanced',
 				},
 				[
 					h(TextField, {
@@ -4928,7 +7706,10 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					h('div', { className: 'mt-4 flex flex-wrap gap-3 items-center' }, [
 						h(Button, { onClick: inspectCacheDecision, disabled: inspectBusy || !String(inspectUrl || '').trim(), variant: 'primary' }, inspectBusy ? 'Inspecting…' : 'Inspect URL'),
 						inspectResult
-							? h(StatusPill, { ok: !!inspectResult.cacheable, text: inspectResult.cacheable ? 'Cacheable' : 'Bypassed' })
+							? h(StatusPill, {
+								ok: !!inspectResult.cacheable,
+								text: inspectResult.eligibilityState || (inspectResult.cacheable ? 'CACHEABLE' : 'BYPASS'),
+							})
 							: null,
 					]),
 					inspectResult
@@ -4970,6 +7751,7 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					title: __("Export / Import Settings", 'ultracache'),
 					description: __("Download a JSON backup of UltraCache dashboard settings or restore them on another site.", 'ultracache'),
 					key: 'export-import',
+					hidden: activeTab !== 'advanced',
 				},
 				[
 					h('input', {
@@ -5015,25 +7797,23 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 				]
 			),
 
-			h(SupportInlineCard, {
-				isMobile,
-				onMobileTrigger: openSupportModal,
-				onHireClick: handleHireClick,
-				key: 'support-inline-card',
-			}),
+			h(TabGate, { visible: activeTab === 'overview', className: 'uc-dashboard-section-spacing', key: 'support-inline-tab-gate' },
+				h(SupportInlineCard, {
+					isMobile,
+					onMobileTrigger: openSupportModal,
+					onHireClick: handleHireClick,
+					key: 'support-inline-card',
+				})
+			),
 
-			h(
-				'div',
-				{
-					className:
-						'uc-help-box bg-zinc-900/50 border border-zinc-800 p-6 rounded text-xs text-zinc-400 leading-relaxed',
-					key: 'notes',
-				},
-				[
-					h('p', { className: 'mb-2 font-bold text-zinc-300' }, __("Quick start & examples", 'ultracache')),
-					h('div', { className: 'space-y-4' }, [
-						h('p', { className: 'm-0' }, __("For most sites, begin with the Balanced profile. It enables high-impact optimizations, uses aggressive CSS bundling, and avoids the broadest JavaScript delay strategy.", 'ultracache')),
-						h('p', { className: 'm-0' }, __("After applying a profile, run Flush All Cache once and warm the homepage.", 'ultracache')),
+			SettingsAccordionCard({
+				keyName: 'quick-start-examples',
+				hidden: activeTab !== 'overview',
+				title: __("Quick start & examples", 'ultracache'),
+				children: [
+					h('div', { className: 'space-y-4 text-xs text-zinc-400 leading-relaxed' }, [
+						h('p', { className: 'm-0' }, __("For most sites, begin with Start Wizard. It applies UltraCache's recommended cache, JavaScript, CSS, media, and Object Cache configuration while preserving user-maintained credentials, schedules, exclusions, safeguards, and lists.", 'ultracache')),
+						h('p', { className: 'm-0' }, __("The Wizard uses the warm-up scope you select: Homepage, Homepage + Menu, or Full Site. Homepage image conversion runs live through the existing AVIF / WebP conversion flow.", 'ultracache')),
 						h('div', { className: 'space-y-1' }, [
 							h('div', { className: 'text-zinc-300 font-semibold', key: 'css-title' }, __("For better CSS results", 'ultracache')),
 							h('p', { className: 'm-0', key: 'css-1' }, __("Start with Safe CSS Bundling. If the frontend and PageSpeed remain stable, test Aggressive CSS Bundling.", 'ultracache')),
@@ -5056,9 +7836,8 @@ h(ToggleRow, { label: __("Clean WooCommerce Blocks CSS when no Woo blocks are de
 					]),
 						h('p', { className: 'm-0' }, __("After major changes, test the homepage, key landing pages, product pages, cart, checkout, account pages, search/filter pages, forms, mobile menu, sliders, and hero sections.", 'ultracache')),
 					]),
-
-				]
-			),
+				],
+			}),
 		]);
 	}
 

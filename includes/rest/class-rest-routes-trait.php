@@ -104,11 +104,69 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
+            '/setup/wizard' => array(
+                array(
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => array($this, 'get_setup_wizard_state'),
+                    'permission_callback' => array($this, 'check_permission'),
+                ),
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'update_setup_wizard_state'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'action' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_key',
+                            'enum'              => array('start', 'progress', 'fail', 'complete'),
+                        ),
+                        'currentStep' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_key',
+                        ),
+                        'completedSteps' => array(
+                            'type'     => 'array',
+                            'required' => false,
+                        ),
+                        'lastError' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                    ),
+                ),
+            ),
+            '/setup/plan' => array(
+                array(
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => array($this, 'get_setup_plan'),
+                    'permission_callback' => array($this, 'check_permission'),
+                ),
+            ),
+            '/setup/apache-static-capability' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'setup_apache_static_capability'),
+                    'permission_callback' => array($this, 'check_file_mutation_permission'),
+                ),
+            ),
             '/varnish/discover' => array(
                 array(
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'varnish_discover'),
                     'permission_callback' => array($this, 'check_infrastructure_permission'),
+                    'args'                => array(
+                        'verifyCandidate' => array(
+                            'type'     => 'boolean',
+                            'required' => false,
+                        ),
+                        'persistVerified' => array(
+                            'type'     => 'boolean',
+                            'required' => false,
+                        ),
+                    ),
                 ),
             ),
             '/varnish/test' => array(
@@ -123,6 +181,12 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'varnish_test_behavior'),
                     'permission_callback' => array($this, 'check_infrastructure_permission'),
+                    'args'                => array(
+                        'diagnosticEnable' => array(
+                            'type'     => 'boolean',
+                            'required' => false,
+                        ),
+                    ),
                 ),
             ),
             '/varnish/performance-snapshot' => array(
@@ -161,13 +225,6 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
-            '/litespeed/test-behavior' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'litespeed_behavior_test'),
-                    'permission_callback' => array($this, 'check_infrastructure_permission'),
-                ),
-            ),
             '/litespeed/control' => array(
                 array(
                     'methods'             => WP_REST_Server::CREATABLE,
@@ -178,7 +235,7 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'type'              => 'string',
                             'required'          => true,
                             'sanitize_callback' => 'sanitize_key',
-                            'enum'              => array('site', 'urls', 'stale-urls'),
+                            'enum'              => array('site', 'urls', 'stale-urls', 'tags', 'stale-tags'),
                         ),
                         'urls' => array(
                             'type'              => 'array',
@@ -187,6 +244,16 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'items'             => array(
                                 'type'              => 'string',
                                 'sanitize_callback' => 'esc_url_raw',
+                            ),
+                            'maxItems'          => 20,
+                        ),
+                        'tags' => array(
+                            'type'              => 'array',
+                            'required'          => false,
+                            'default'           => array(),
+                            'items'             => array(
+                                'type'              => 'string',
+                                'sanitize_callback' => 'sanitize_text_field',
                             ),
                             'maxItems'          => 20,
                         ),
@@ -247,6 +314,25 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'object_cache_flush'),
                     'permission_callback' => array($this, 'check_object_cache_infrastructure_permission'),
+                ),
+            ),
+            '/cache-conflicts/status' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'cache_conflict_preflight_status'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'pageCacheRequested' => array(
+                            'type'              => 'boolean',
+                            'required'          => false,
+                            'sanitize_callback' => 'rest_sanitize_boolean',
+                        ),
+                        'objectCacheRequested' => array(
+                            'type'              => 'boolean',
+                            'required'          => false,
+                            'sanitize_callback' => 'rest_sanitize_boolean',
+                        ),
+                    ),
                 ),
             ),
             '/cache-conflicts/remove-dropins' => array(
@@ -384,6 +470,17 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'sanitize_callback' => array($this, 'sanitize_crawl_scope_param'),
                             'validate_callback' => array($this, 'validate_crawl_scope_param'),
                         ),
+                        'operation' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => array($this, 'sanitize_manual_warm_operation_param'),
+                            'validate_callback' => array($this, 'validate_manual_warm_operation_param'),
+                        ),
+                        'language' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
                     ),
                 ),
             ),
@@ -408,6 +505,11 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'required'          => false,
                             'sanitize_callback' => 'sanitize_text_field',
                         ),
+                        'purgeTargetFirst' => array(
+                            'type'              => 'boolean',
+                            'required'          => false,
+                            'default'           => false,
+                        ),
                     ),
                 ),
             ),
@@ -423,6 +525,19 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'warm_frontpage_html'),
                     'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'language' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                        'operation' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => array($this, 'sanitize_manual_warm_operation_param'),
+                            'validate_callback' => array($this, 'validate_manual_warm_operation_param'),
+                        ),
+                    ),
                 ),
             ),
             '/warm-frontpage-html-css' => array(
@@ -430,6 +545,19 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'warm_frontpage_html_css'),
                     'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'language' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                        'operation' => array(
+                            'type'              => 'string',
+                            'required'          => false,
+                            'sanitize_callback' => array($this, 'sanitize_manual_warm_operation_param'),
+                            'validate_callback' => array($this, 'validate_manual_warm_operation_param'),
+                        ),
+                    ),
                 ),
             ),
             '/inspect-url' => array(
@@ -624,20 +752,7 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'required'          => false,
                             'sanitize_callback' => 'absint',
                         ),
-                        'time_budget' => array(
-                            'required'          => false,
-                            'sanitize_callback' => static function ($value) {
-                                return max(1.0, min(30.0, (float) $value));
-                            },
-                        ),
                     ),
-                ),
-            ),
-            '/media/library-replacement/workflow-stage' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_workflow_stage'),
-                    'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
             '/media/library-replacement/blockers' => array(
@@ -682,12 +797,6 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'required'          => false,
                             'sanitize_callback' => 'absint',
                         ),
-                        'time_budget' => array(
-                            'required'          => false,
-                            'sanitize_callback' => static function ($value) {
-                                return max(1.0, min(30.0, (float) $value));
-                            },
-                        ),
                     ),
                 ),
             ),
@@ -704,12 +813,6 @@ trait Ultra_Cache_Rest_Routes_Trait
                         'limit' => array(
                             'required'          => false,
                             'sanitize_callback' => 'absint',
-                        ),
-                        'time_budget' => array(
-                            'required'          => false,
-                            'sanitize_callback' => static function ($value) {
-                                return max(1.0, min(30.0, (float) $value));
-                            },
                         ),
                     ),
                 ),
@@ -728,11 +831,22 @@ trait Ultra_Cache_Rest_Routes_Trait
                             'required'          => false,
                             'sanitize_callback' => 'absint',
                         ),
-                        'time_budget' => array(
+                    ),
+                ),
+            ),
+            '/media/library-replacement/rollback' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'media_library_replacement_rollback'),
+                    'permission_callback' => array($this, 'check_file_mutation_permission'),
+                    'args'                => array(
+                        'sessionToken' => array(
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                        'limit' => array(
                             'required'          => false,
-                            'sanitize_callback' => static function ($value) {
-                                return max(1.0, min(30.0, (float) $value));
-                            },
+                            'sanitize_callback' => 'absint',
                         ),
                     ),
                 ),
@@ -758,48 +872,6 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
-            '/media/library-replacement/copy' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_copy'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/metadata/prepare' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_metadata_prepare'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/metadata/apply' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_metadata_apply'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/metadata/rollback' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_metadata_rollback'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/references/scan' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_references_scan'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/references/match' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_references_match'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
             '/media/library-replacement/replacements/preview' => array(
                 array(
                     'methods'             => WP_REST_Server::READABLE,
@@ -807,52 +879,10 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
-            '/media/library-replacement/replacements/apply' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_database_apply'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/replacements/verify' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_database_verify'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/replacements/rollback' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_database_rollback'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/theme-css/scan' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_theme_css_scan'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
             '/media/library-replacement/theme-css/preview' => array(
                 array(
                     'methods'             => WP_REST_Server::READABLE,
                     'callback'            => array($this, 'media_library_replacement_theme_css_preview'),
-                    'permission_callback' => array($this, 'check_permission'),
-                ),
-            ),
-            '/media/library-replacement/theme-css/apply' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_theme_css_apply'),
-                    'permission_callback' => array($this, 'check_file_mutation_permission'),
-                ),
-            ),
-            '/media/library-replacement/theme-css/verify' => array(
-                array(
-                    'methods'             => WP_REST_Server::CREATABLE,
-                    'callback'            => array($this, 'media_library_replacement_theme_css_verify'),
                     'permission_callback' => array($this, 'check_permission'),
                 ),
             ),
@@ -887,6 +917,20 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'args'                => $this->get_media_queue_process_args(),
                 ),
             ),
+            '/media-queue/homepage-process' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'media_homepage_process'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'manual_token' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_text_field',
+                        ),
+                    ),
+                ),
+            ),
             '/media-queue/manual-session' => array(
                 array(
                     'methods'             => WP_REST_Server::CREATABLE,
@@ -907,6 +951,12 @@ trait Ultra_Cache_Rest_Routes_Trait
                                 'type'              => 'string',
                                 'required'          => false,
                                 'sanitize_callback' => 'sanitize_text_field',
+                            ),
+                            'resume_background' => array(
+                                'type'              => 'boolean',
+                                'required'          => false,
+                                'default'           => true,
+                                'sanitize_callback' => 'rest_sanitize_boolean',
                             ),
                         )
                     ),
@@ -965,6 +1015,51 @@ trait Ultra_Cache_Rest_Routes_Trait
                     'methods'             => WP_REST_Server::CREATABLE,
                     'callback'            => array($this, 'clear_performance_profile_last'),
                     'permission_callback' => array($this, 'check_permission'),
+                ),
+            ),
+            '/runtime-js-scan/targets' => array(
+                array(
+                    'methods'             => WP_REST_Server::READABLE,
+                    'callback'            => array($this, 'runtime_js_scan_targets'),
+                    'permission_callback' => array($this, 'check_permission'),
+                ),
+            ),
+            '/runtime-js-scan/strategy-state' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'runtime_js_scan_strategy_state'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'javascriptStrategy' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_key',
+                        ),
+                        'commit' => array(
+                            'type'              => 'boolean',
+                            'required'          => false,
+                            'default'           => false,
+                        ),
+                    ),
+                ),
+            ),
+            '/runtime-js-scan/token' => array(
+                array(
+                    'methods'             => WP_REST_Server::CREATABLE,
+                    'callback'            => array($this, 'create_runtime_js_scan_token'),
+                    'permission_callback' => array($this, 'check_permission'),
+                    'args'                => array(
+                        'scanId' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'sanitize_key',
+                        ),
+                        'url' => array(
+                            'type'              => 'string',
+                            'required'          => true,
+                            'sanitize_callback' => 'esc_url_raw',
+                        ),
+                    ),
                 ),
             ),
             '/runtime-js-scan/report' => array(
@@ -1340,9 +1435,18 @@ trait Ultra_Cache_Rest_Routes_Trait
 
         $absolute = wp_http_validate_url($url) ? $url : home_url('/' . ltrim($url, '/'));
         $url_host = strtolower((string) wp_parse_url($absolute, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-        if ('' === $url_host || '' === $home_host || $url_host !== $home_host) {
+        if ('' === $url_host) {
             return '';
+        }
+        if (function_exists('ultracache_is_local_site_url')) {
+            if (!ultracache_is_local_site_url($absolute)) {
+                return '';
+            }
+        } else {
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            if ('' === $home_host || $url_host !== $home_host) {
+                return '';
+            }
         }
 
         $candidate = function_exists('ultracache_local_path_from_public_url') ? ultracache_local_path_from_public_url($absolute, array('css')) : '';
@@ -1531,8 +1635,11 @@ trait Ultra_Cache_Rest_Routes_Trait
         unset($request);
 
         $url = home_url('/');
+        $request_timeout = function_exists('ultracache_get_php_max_execution_time_seconds')
+            ? ultracache_get_php_max_execution_time_seconds()
+            : max(0, (int) ini_get('max_execution_time'));
         $response = ultracache_safe_loopback_remote_request($url, array(
-            'timeout'     => 10,
+            'timeout'     => $request_timeout,
             'redirection' => 3,
             'headers'     => array(
                 'Cache-Control' => 'no-cache',

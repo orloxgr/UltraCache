@@ -234,19 +234,13 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
     {
         if (!$force) {
             $saved = get_option(self::get_external_cache_detection_option_key(), array());
-            if (is_array($saved) && !empty($saved['layers']) && !empty($saved['detectedAt']) && !empty($saved['schemaVersion']) && (int) $saved['schemaVersion'] >= 7) {
+            if (is_array($saved) && !empty($saved['layers']) && !empty($saved['detectedAt']) && !empty($saved['schemaVersion']) && (int) $saved['schemaVersion'] >= 9) {
                 if (isset($saved['layers']['litespeed']) && is_array($saved['layers']['litespeed'])) {
                     if (method_exists(__CLASS__, 'get_litespeed_metrics_status')) {
                         $saved['layers']['litespeed']['metrics'] = self::get_litespeed_metrics_status();
                     }
-                    if (method_exists(__CLASS__, 'get_litespeed_behavior_test_result')) {
-                        $saved['layers']['litespeed']['behaviorTest'] = self::get_litespeed_behavior_test_result();
-                    }
                     $litespeed_settings = self::get_dashboard_settings();
-                    $saved['layers']['litespeed']['stalePurgeEnabled'] = !empty($litespeed_settings['liteSpeedStalePurgeEnabled']);
-                    if (method_exists(__CLASS__, 'get_litespeed_refresh_ahead_status')) {
-                        $saved['layers']['litespeed']['refreshAhead'] = self::get_litespeed_refresh_ahead_status($litespeed_settings);
-                    }
+                    $saved['layers']['litespeed']['stalePurgeEnabled'] = self::is_litespeed_stale_invalidation_enabled($litespeed_settings);
                 }
                 return $saved;
             }
@@ -264,9 +258,15 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $server_software = sanitize_text_field(wp_unslash($_SERVER['SERVER_SOFTWARE']));
         }
         $reverse_proxy = method_exists(__CLASS__, 'get_reverse_proxy_status') ? self::get_reverse_proxy_status() : array();
+        $litespeed_origin_probe = method_exists(__CLASS__, 'probe_litespeed_origin')
+            ? self::probe_litespeed_origin()
+            : array();
         $litespeed = method_exists(__CLASS__, 'get_litespeed_diagnostics_status')
-            ? self::get_litespeed_diagnostics_status()
+            ? self::get_litespeed_diagnostics_status(false)
             : self::get_litespeed_transport_status($server_software, $reverse_proxy);
+        if (!empty($litespeed_origin_probe)) {
+            $litespeed['originProbe'] = $litespeed_origin_probe;
+        }
 
         $nginx_action = function_exists('has_action') && has_action('rt_nginx_helper_purge_all');
         $nginx_class = class_exists('Nginx_Helper') || class_exists('Nginx_Helper_Admin');
@@ -293,7 +293,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
 
         $detection = array(
             'success'    => true,
-            'schemaVersion' => 7,
+            'schemaVersion' => 9,
             'detectedAt' => time(),
             'detectedAtHuman' => gmdate('Y-m-d H:i:s') . ' UTC',
             'serverSoftware' => $server_software,
@@ -422,7 +422,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $results['litespeed'] = array(
                 'success' => true,
                 'handled' => true,
-                'message' => __('Handled by the native LiteSpeed site-tag purge hook.', 'ultracache'),
+                'message' => __('Handled by the native LiteSpeed public site-cache purge hook.', 'ultracache'),
             );
         } elseif (!empty($settings['flushAllIncludeLiteSpeed']) && !empty($layers['litespeed']['flushable'])) {
             $results['litespeed'] = self::flush_litespeed_cache();
@@ -536,8 +536,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
     {
         $payload = array(
             'schema' => 1,
-            'homeUrl' => esc_url_raw(home_url('/')),
-            'siteUrl' => esc_url_raw(site_url('/')),
+            'siteOrigin' => function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : '',
             'phpVersion' => PHP_VERSION,
             'brotliExtension' => function_exists('brotli_compress') ? (string) phpversion('brotli') : '',
             'zlibExtension' => function_exists('gzencode') ? (string) phpversion('zlib') : '',
@@ -558,6 +557,17 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             'message'       => '',
             'cachedOnly'    => false,
             'liveProbe'     => false,
+            'gzipProbeCompleted' => false,
+            'brotliProbeCompleted' => false,
+            'probeComplete' => false,
+            'requestedUrl'  => '',
+            'resolvedUrl'   => '',
+            'requestedLanguage' => '',
+            'resolvedLanguage' => '',
+            'redirected'    => false,
+            'redirectCount' => 0,
+            'resolutionError' => '',
+            'probeResults'  => array(),
             'testedAt'      => 0,
             'fingerprint'   => self::get_frontend_compression_probe_fingerprint(),
             'diagnosticStatus' => 'not-tested',
@@ -584,6 +594,12 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         $status = array_merge($default, $stored);
         $status['testedAt'] = max(0, (int) ($status['testedAt'] ?? ($payload['recordedAt'] ?? 0)));
         $status['fingerprint'] = sanitize_text_field((string) ($status['fingerprint'] ?? ($payload['fingerprint'] ?? '')));
+        $status['requestedLanguage'] = function_exists('ultracache_multilingual_normalize_language_code')
+            ? ultracache_multilingual_normalize_language_code($status['requestedLanguage'] ?? '')
+            : sanitize_key((string) ($status['requestedLanguage'] ?? ''));
+        $status['resolvedLanguage'] = function_exists('ultracache_multilingual_normalize_language_code')
+            ? ultracache_multilingual_normalize_language_code($status['resolvedLanguage'] ?? '')
+            : sanitize_key((string) ($status['resolvedLanguage'] ?? ''));
         $status['ageSeconds'] = $status['testedAt'] > 0 ? max(0, time() - $status['testedAt']) : 0;
         $status['configurationChanged'] = !hash_equals(
             (string) self::get_frontend_compression_probe_fingerprint(),
@@ -608,6 +624,12 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         $status = array_merge(self::get_default_frontend_compression_probe_status(), $status);
         $status['testedAt'] = max(0, (int) ($status['testedAt'] ?? time()));
         $status['fingerprint'] = self::get_frontend_compression_probe_fingerprint();
+        $status['requestedLanguage'] = function_exists('ultracache_multilingual_normalize_language_code')
+            ? ultracache_multilingual_normalize_language_code($status['requestedLanguage'] ?? '')
+            : sanitize_key((string) ($status['requestedLanguage'] ?? ''));
+        $status['resolvedLanguage'] = function_exists('ultracache_multilingual_normalize_language_code')
+            ? ultracache_multilingual_normalize_language_code($status['resolvedLanguage'] ?? '')
+            : sanitize_key((string) ($status['resolvedLanguage'] ?? ''));
         $status['diagnosticStatus'] = 'current';
         $status['configurationChanged'] = false;
         $status['stale'] = false;
@@ -632,11 +654,6 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         return !empty($mutation['success']);
     }
 
-    private static function get_compression_probe_signing_key()
-    {
-        return hash('sha256', (string) wp_salt('nonce') . '|' . esc_url_raw(home_url('/')) . '|ultracache-compression-probe-v1');
-    }
-
     private static function create_compression_probe_token()
     {
         try {
@@ -647,7 +664,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         }
 
         $payload = time() . '.' . $nonce;
-        return $payload . '.' . hash_hmac('sha256', $payload, self::get_compression_probe_signing_key());
+        return $payload . '.' . ultracache_internal_sign('compression-probe', $payload);
     }
 
     private static function claim_compression_probe_token($token)
@@ -664,8 +681,7 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         }
 
         $payload = $matches[1] . '.' . $matches[2];
-        $expected = hash_hmac('sha256', $payload, self::get_compression_probe_signing_key());
-        if (!hash_equals($expected, (string) $matches[3]) || !function_exists('ultracache_acquire_lock')) {
+        if (!ultracache_internal_verify('compression-probe', $payload, (string) $matches[3]) || !function_exists('ultracache_acquire_lock')) {
             return false;
         }
 
@@ -704,8 +720,42 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         $status['liveProbe'] = true;
         $status['testedAt'] = time();
 
-        $probe_base = home_url('/');
-        if ('' === (string) $probe_base) {
+        $probe_requested_url = esc_url_raw(home_url('/'));
+        $status['requestedUrl'] = $probe_requested_url;
+        $status['requestedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+            ? ultracache_multilingual_get_public_url_language($probe_requested_url)
+            : '';
+        $resolution = function_exists('ultracache_resolve_anonymous_frontend_url')
+            ? ultracache_resolve_anonymous_frontend_url($probe_requested_url, 'compression')
+            : array(
+                'success' => '' !== $probe_requested_url,
+                'requestedUrl' => $probe_requested_url,
+                'resolvedUrl' => $probe_requested_url,
+                'httpCode' => 200,
+                'redirected' => false,
+                'redirectCount' => 0,
+            );
+
+        if (is_wp_error($resolution)) {
+            $status['resolutionError'] = sanitize_key((string) $resolution->get_error_code());
+            $status['message'] = 'The live HTML compression probe could not resolve the anonymous frontend URL: ' . sanitize_text_field((string) $resolution->get_error_message());
+            self::persist_frontend_compression_probe_status($status);
+            return $status;
+        }
+
+        $probe_base = esc_url_raw((string) ($resolution['resolvedUrl'] ?? ''));
+        $status['resolvedUrl'] = $probe_base;
+        $status['resolvedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+            ? ultracache_multilingual_get_public_url_language($probe_base)
+            : '';
+        $status['redirected'] = !empty($resolution['redirected']);
+        $status['redirectCount'] = max(0, (int) ($resolution['redirectCount'] ?? 0));
+        if (empty($resolution['success']) || '' === $probe_base) {
+            $http_code = max(0, (int) ($resolution['httpCode'] ?? 0));
+            $status['resolutionError'] = 'frontend_target_http_status';
+            $status['message'] = $http_code > 0
+                ? 'The live HTML compression probe resolved the anonymous frontend URL, but that target returned HTTP ' . $http_code . '.'
+                : 'The live HTML compression probe could not resolve a usable anonymous frontend URL.';
             self::persist_frontend_compression_probe_status($status);
             return $status;
         }
@@ -714,13 +764,24 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             'brotli' => 'br',
             'gzip'   => 'gzip',
         );
+        $request_timeout = function_exists('ultracache_get_php_max_execution_time_seconds')
+            ? ultracache_get_php_max_execution_time_seconds()
+            : max(0, (int) ini_get('max_execution_time'));
         foreach ($encodings as $bucket => $accept_encoding) {
             $probe_token = self::create_compression_probe_token();
             $probe_url = add_query_arg('ultracache_probe_compression', $probe_token, $probe_base);
+            $status['probeResults'][$bucket] = array(
+                'completed' => false,
+                'httpCode' => 0,
+                'errorCode' => '',
+                'message' => '',
+                'probeHeader' => '',
+                'contentEncoding' => '',
+            );
 
             $response = ultracache_safe_loopback_remote_request($probe_url, array(
                 'method'              => 'GET',
-                'timeout'             => 5,
+                'timeout'             => $request_timeout,
                 'redirection'         => 0,
                 'decompress'          => false,
                 'limit_response_size' => 128,
@@ -731,17 +792,36 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
                 ),
             ), 'frontend_compression_probe');
 
-            if (is_wp_error($response) || 200 !== (int) wp_remote_retrieve_response_code($response)) {
+            if (is_wp_error($response)) {
+                $status['probeResults'][$bucket]['errorCode'] = sanitize_key((string) $response->get_error_code());
+                $status['probeResults'][$bucket]['message'] = sanitize_text_field((string) $response->get_error_message());
+                continue;
+            }
+
+            $probe_http_code = (int) wp_remote_retrieve_response_code($response);
+            $status['probeResults'][$bucket]['httpCode'] = $probe_http_code;
+            if (200 !== $probe_http_code) {
+                $status['probeResults'][$bucket]['message'] = 'Probe request returned HTTP ' . $probe_http_code . '.';
                 continue;
             }
 
             $headers = wp_remote_retrieve_headers($response);
             $probe_header = trim((string) ($headers['x-ultracache-compression-probe'] ?? ''));
+            $status['probeResults'][$bucket]['probeHeader'] = sanitize_text_field($probe_header);
             if ('1' !== $probe_header) {
+                $status['probeResults'][$bucket]['message'] = 'Compression probe marker header was not observed.';
                 continue;
             }
 
+            if ('brotli' === $bucket) {
+                $status['brotliProbeCompleted'] = true;
+            } elseif ('gzip' === $bucket) {
+                $status['gzipProbeCompleted'] = true;
+            }
+
+            $status['probeResults'][$bucket]['completed'] = true;
             $content_encoding = strtolower(trim((string) ($headers['content-encoding'] ?? '')));
+            $status['probeResults'][$bucket]['contentEncoding'] = sanitize_text_field($content_encoding);
             $body = (string) wp_remote_retrieve_body($response);
             $gzip_magic = (strlen($body) >= 2 && 0x1f === ord($body[0]) && 0x8b === ord($body[1]));
 
@@ -763,6 +843,8 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             }
         }
 
+        $status['probeComplete'] = !empty($status['gzipProbeCompleted']) && !empty($status['brotliProbeCompleted']);
+
         if ($status['brokenGzip']) {
             $status['message'] = 'UltraCache detected gzip-compressed output without a matching Content-Encoding header. Gzip has been disabled as a safety measure.';
         } elseif ($status['brotli'] && $status['gzip']) {
@@ -771,6 +853,8 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             $status['message'] = 'Your server is already using Brotli compression by default.';
         } elseif ($status['gzip']) {
             $status['message'] = 'Your server is already using gzip compression by default.';
+        } elseif (empty($status['probeComplete'])) {
+            $status['message'] = 'The live HTML compression probe did not complete for both gzip and Brotli requests, so UltraCache cannot safely choose a compression mode automatically.';
         }
 
         self::persist_frontend_compression_probe_status($status);
@@ -782,7 +866,13 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
         $support = self::get_compression_support_status();
         $frontend = self::get_frontend_compression_probe_status(true, (bool) $force_refresh);
         $server_managed = !empty($frontend['gzip']) || !empty($frontend['brotli']);
-        $blocked = $server_managed || !empty($frontend['brokenGzip']);
+        $probe_complete = !empty($frontend['probeComplete'])
+            || (!empty($frontend['gzipProbeCompleted']) && !empty($frontend['brotliProbeCompleted']));
+        $indeterminate = !$server_managed
+            && empty($frontend['brokenGzip'])
+            && empty($frontend['brokenBrotli'])
+            && !$probe_complete;
+        $blocked = $server_managed || !empty($frontend['brokenGzip']) || !empty($frontend['brokenBrotli']) || $indeterminate;
 
         if ($server_managed) {
             $message = isset($frontend['message']) && '' !== (string) $frontend['message']
@@ -790,6 +880,8 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
                 : self::maybe_translate('Server-managed HTML compression is active.');
         } elseif ($blocked && !empty($frontend['message'])) {
             $message = (string) $frontend['message'];
+        } elseif ($indeterminate) {
+            $message = self::maybe_translate('The live HTML compression probe did not complete, so UltraCache did not change the compression mode.');
         } elseif (!empty($support['brotli']) && !empty($support['gzip'])) {
             $message = self::maybe_translate('Gzip and Brotli compression are available.');
         } elseif (!empty($support['brotli'])) {
@@ -807,8 +899,18 @@ trait Ultra_Cache_WP_Runtime_Cache_Services_Trait
             'gzipAvailable'   => !empty($support['gzip']),
             'brotliAvailable' => !empty($support['brotli']),
             'blocked'         => $blocked,
+            'probeComplete'   => $probe_complete,
+            'indeterminate'   => $indeterminate,
+            'gzipProbeCompleted' => !empty($frontend['gzipProbeCompleted']),
+            'brotliProbeCompleted' => !empty($frontend['brotliProbeCompleted']),
             'brokenGzip'      => !empty($frontend['brokenGzip']),
             'brokenBrotli'    => !empty($frontend['brokenBrotli']),
+            'requestedUrl'    => esc_url_raw((string) ($frontend['requestedUrl'] ?? '')),
+            'resolvedUrl'     => esc_url_raw((string) ($frontend['resolvedUrl'] ?? '')),
+            'redirected'      => !empty($frontend['redirected']),
+            'redirectCount'   => max(0, (int) ($frontend['redirectCount'] ?? 0)),
+            'resolutionError' => sanitize_key((string) ($frontend['resolutionError'] ?? '')),
+            'probeResults'    => is_array($frontend['probeResults'] ?? null) ? $frontend['probeResults'] : array(),
             'message'         => $message,
         );
     }

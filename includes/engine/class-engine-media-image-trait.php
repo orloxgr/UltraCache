@@ -277,9 +277,18 @@ trait Ultra_Cache_Engine_Media_Image_Trait
 
             $absolute = $this->absolutize_public_resource_url($url, home_url('/'));
             $host = (string) wp_parse_url($absolute, PHP_URL_HOST);
-            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-            if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+            if ('' === $host) {
                 return false;
+            }
+            if (function_exists('ultracache_is_local_site_url')) {
+                if (!ultracache_is_local_site_url($absolute)) {
+                    return false;
+                }
+            } else {
+                $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+                if ('' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                    return false;
+                }
             }
 
             $path = (string) wp_parse_url($absolute, PHP_URL_PATH);

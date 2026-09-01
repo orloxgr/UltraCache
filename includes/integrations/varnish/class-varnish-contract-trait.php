@@ -293,8 +293,14 @@ trait Ultra_Cache_WP_Varnish_Contract_Trait
                 'capabilities' => array(),
             );
         }
-        $home = wp_parse_url(home_url('/'));
-        $site_host = !empty($home['host']) ? strtolower((string) $home['host']) : (string) $endpoint['host'];
+        $site_host = strtolower(trim((string) $public_host));
+        if ('' === $site_host) {
+            $stable_origin = function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : home_url('/');
+            $site_host = strtolower((string) wp_parse_url($stable_origin, PHP_URL_HOST));
+        }
+        if ('' === $site_host) {
+            $site_host = (string) $endpoint['host'];
+        }
         $target_url = self::build_varnish_target_url($endpoint, '/__ultracache-vcl-contract-v2');
 
         return self::send_varnish_http_contract_request(
@@ -406,7 +412,7 @@ trait Ultra_Cache_WP_Varnish_Contract_Trait
      * @param bool   $diagnostic_probe Whether to bypass behavior proof gates for this diagnostic command.
      * @return array<string,mixed>
      */
-    private static function send_varnish_http_contract_ban($endpoint_label, $timeout, $expression, array $settings = array(), $diagnostic_probe = false)
+    private static function send_varnish_http_contract_ban($endpoint_label, $timeout, $expression, array $settings = array(), $diagnostic_probe = false, $public_host = '')
     {
         if (empty($settings)) {
             $settings = self::get_varnish_cli_settings();
@@ -492,8 +498,14 @@ trait Ultra_Cache_WP_Varnish_Contract_Trait
                 'code' => 0,
             );
         }
-        $home = wp_parse_url(home_url('/'));
-        $site_host = !empty($home['host']) ? strtolower((string) $home['host']) : (string) $endpoint['host'];
+        $site_host = strtolower(trim((string) $public_host));
+        if ('' === $site_host) {
+            $stable_origin = function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : home_url('/');
+            $site_host = strtolower((string) wp_parse_url($stable_origin, PHP_URL_HOST));
+        }
+        if ('' === $site_host) {
+            $site_host = (string) $endpoint['host'];
+        }
         $target_url = self::build_varnish_target_url($endpoint, '/__ultracache-vcl-contract-v2');
 
         return self::send_varnish_http_contract_request(

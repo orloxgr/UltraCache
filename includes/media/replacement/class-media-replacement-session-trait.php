@@ -217,6 +217,9 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
         if (in_array($active_step, array('delete_originals', 'delete_failed'), true)) {
             return 'delete';
         }
+        if (in_array($active_step, array('rollback_database', 'rollback_theme_css', 'rollback_metadata', 'rollback_files', 'rollback_failed'), true)) {
+            return 'rollback';
+        }
 
         return '';
     }
@@ -224,6 +227,9 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
     private function media_replacement_has_destructive_progress(array $state)
     {
         $state = $this->normalize_media_replacement_workflow_state($state);
+        if ('rollback_complete' === (string) $state['active_step']) {
+            return false;
+        }
         if ('' !== $state['do_started_at'] || '' !== $state['do_completed_at'] || '' !== $state['verify_started_at'] || '' !== $state['delete_started_at']) {
             return true;
         }
@@ -247,6 +253,11 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
             'delete_originals',
             'delete_failed',
             'delete_complete',
+            'rollback_database',
+            'rollback_theme_css',
+            'rollback_metadata',
+            'rollback_files',
+            'rollback_failed',
         ), true);
     }
 
@@ -551,6 +562,33 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
         $this->update_media_replacement_workflow_state($saved);
     }
 
+    private function update_media_replacement_rollback_run_status($run_status)
+    {
+        $saved = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
+        if (!$this->media_replacement_workflow_exists($saved)) {
+            return;
+        }
+
+        $rollback_steps = array('rollback_database', 'rollback_theme_css', 'rollback_metadata', 'rollback_files', 'rollback_failed');
+        if (!in_array($saved['active_step'], $rollback_steps, true) && 'rollback_complete' !== $saved['active_step']) {
+            return;
+        }
+        if ('rollback_complete' === $saved['active_step']) {
+            return;
+        }
+
+        $run_status = in_array((string) $run_status, array('running', 'paused', 'failed', 'completed'), true) ? (string) $run_status : 'idle';
+        $saved['run_status'] = $run_status;
+        if ('running' === $run_status) {
+            $saved['heartbeat_at'] = current_time('mysql', true);
+            $saved['paused_at'] = '';
+        } elseif ('paused' === $run_status) {
+            $saved['paused_at'] = current_time('mysql', true);
+        }
+        $saved['updated_at'] = current_time('mysql', true);
+        $this->update_media_replacement_workflow_state($saved);
+    }
+
     private function update_media_replacement_session_run_status($run_status, $active_step)
     {
         if ('readiness' === $active_step) {
@@ -575,6 +613,11 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
 
         if ('delete' === $active_step) {
             $this->update_media_replacement_delete_run_status($run_status);
+            return;
+        }
+
+        if ('rollback' === $active_step) {
+            $this->update_media_replacement_rollback_run_status($run_status);
         }
     }
 
@@ -609,7 +652,7 @@ trait Ultra_Cache_Media_Replacement_Session_Trait
         if (!in_array($owner, array('dashboard', 'cli'), true)) {
             $owner = 'dashboard';
         }
-        if (!in_array($active_step, array('readiness', 'prepare', 'do', 'verify', 'delete'), true)) {
+        if (!in_array($active_step, array('readiness', 'prepare', 'do', 'verify', 'delete', 'rollback'), true)) {
             $active_step = 'readiness';
         }
 

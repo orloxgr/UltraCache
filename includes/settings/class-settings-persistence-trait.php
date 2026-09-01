@@ -46,7 +46,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         return $current_settings;
     }
 
-    private static function rollback_dashboard_settings_after_failed_critical_save(array $previous_settings, $sync_wp_config = true)
+    private static function rollback_dashboard_settings_after_failed_critical_save(array $previous_settings, $sync_wp_config = true, $preserve_configured_infrastructure = false)
     {
         $restore = self::sanitize_dashboard_settings($previous_settings, false);
         $restore['redisPassword'] = '';
@@ -58,21 +58,23 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         self::sync_apache_static_html_delivery_rules();
         self::sync_litespeed_cache_rules();
 
-        if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
-            Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
-        }
-        if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
-            Ultra_Cache_Object_Cache_Manager::sync_dropin();
-        }
-        if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
-            Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
+        if (!$preserve_configured_infrastructure) {
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
+                Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
+            }
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'sync_dropin')) {
+                Ultra_Cache_Object_Cache_Manager::sync_dropin();
+            }
+            if (class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
+                Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
+            }
         }
     }
 
-    private static function rollback_failed_settings_transaction(array $previous_settings, array $wp_config_transaction)
+    private static function rollback_failed_settings_transaction(array $previous_settings, array $wp_config_transaction, $preserve_configured_infrastructure = false)
     {
         $wp_config_restored = self::rollback_wp_config_transaction($wp_config_transaction);
-        self::rollback_dashboard_settings_after_failed_critical_save($previous_settings, false);
+        self::rollback_dashboard_settings_after_failed_critical_save($previous_settings, false, $preserve_configured_infrastructure);
 
         if (!$wp_config_restored) {
             return new WP_Error(
@@ -111,13 +113,6 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             'redisConnectTimeoutMs',
             'redisReadTimeoutMs',
             'liteSpeedCacheEnabled',
-            'liteSpeedRefillAfterTargetedInvalidation',
-            'liteSpeedWarmDuringSiteWarmup',
-            'liteSpeedStalePurgeEnabled',
-            'liteSpeedRefreshAheadEnabled',
-            'liteSpeedRefreshAheadThresholdPercent',
-            'liteSpeedRefreshAheadMaxPages',
-            'liteSpeedRefreshAheadPinnedUrls',
             'flushAllIncludeLiteSpeed',
             'varnishCliEnabled',
             'varnishConnectionConfigured',
@@ -186,8 +181,9 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         );
     }
 
-    public static function persist_dashboard_settings(array $settings)
+    public static function persist_dashboard_settings(array $settings, array $context = array())
     {
+        $preserve_configured_infrastructure = !empty($context['preserveConfiguredInfrastructure']);
         $settings = self::normalize_page_delivery_mode_patch($settings);
         $force_redis_validation = !empty($settings['validateRedisSettings']);
         $configure_varnish_connection = !empty($settings['configureVarnishConnection']);
@@ -201,6 +197,42 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         $secret_change_requested = self::secret_constant_patch_has_changes($secret_patch);
 
         $current_settings = self::sanitize_dashboard_settings(self::merge_protected_dashboard_settings($settings, $previous_settings));
+        if ($preserve_configured_infrastructure) {
+            $infrastructure_keys = array(
+                'objectCacheEnabled',
+                'objectCacheBackend',
+                'objectCacheFallbackBackend',
+                'sqliteDatabaseSizeMb',
+                'redisHost',
+                'redisPort',
+                'redisUsername',
+                'redisDatabase',
+                'redisPrefix',
+                'redisUseTls',
+                'redisPersistent',
+                'redisConnectTimeoutMs',
+                'redisReadTimeoutMs',
+                'varnishCliEnabled',
+                'varnishConnectionConfigured',
+                'varnishCliMode',
+                'varnishCliServers',
+                'varnishCliTimeoutSeconds',
+                'varnishInvalidationsPerMinute',
+                'varnishCliMethod',
+                'varnishInvalidationStrategy',
+                'varnishFlushScope',
+                'flushAllIncludeVarnish',
+            );
+            foreach ($infrastructure_keys as $key) {
+                if (($current_settings[$key] ?? null) !== ($previous_settings[$key] ?? null)) {
+                    $preserve_configured_infrastructure = false;
+                    break;
+                }
+            }
+            if ($force_redis_validation || $secret_change_requested || $configure_varnish_connection) {
+                $preserve_configured_infrastructure = false;
+            }
+        }
         $replacement_format_lock = self::get_media_replacement_format_save_lock();
         if (!empty($replacement_format_lock['locked'])
             && (string) ($current_settings['mediaReplacementFormat'] ?? 'webp') !== (string) ($replacement_format_lock['targetFormat'] ?? 'webp')
@@ -232,9 +264,11 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         if (is_wp_error($critical_validation)) {
             return $critical_validation;
         }
-        $varnish_validation = self::validate_varnish_settings($current_settings);
-        if (is_wp_error($varnish_validation)) {
-            return $varnish_validation;
+        if (!$preserve_configured_infrastructure) {
+            $varnish_validation = self::validate_varnish_settings($current_settings);
+            if (is_wp_error($varnish_validation)) {
+                return $varnish_validation;
+            }
         }
 
         $redis_validation = null;
@@ -294,7 +328,9 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         $html_delivery_changed =
             !empty($current_settings['gzipEnabled']) !== !empty($previous_settings['gzipEnabled'])
             || !empty($current_settings['brotliEnabled']) !== !empty($previous_settings['brotliEnabled'])
-            || !empty($current_settings['apacheStaticHtmlDeliveryEnabled']) !== !empty($previous_settings['apacheStaticHtmlDeliveryEnabled']);
+            || !empty($current_settings['apacheStaticHtmlDeliveryEnabled']) !== !empty($previous_settings['apacheStaticHtmlDeliveryEnabled'])
+            || !empty($current_settings['realCookieBannerCompatibilityEnabled']) !== !empty($previous_settings['realCookieBannerCompatibilityEnabled'])
+            || !empty($current_settings['complianzCompatibilityEnabled']) !== !empty($previous_settings['complianzCompatibilityEnabled']);
 
         if ($html_delivery_changed) {
             $engine = self::get_engine_instance();
@@ -322,6 +358,20 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             }
         }
 
+        $page_cache_takeover_requested = !empty($current_settings['pageCacheEnabled'])
+            && empty($previous_settings['pageCacheEnabled']);
+        $object_cache_takeover_requested = !empty($current_settings['objectCacheEnabled'])
+            && (
+                empty($previous_settings['objectCacheEnabled'])
+                || (string) ($current_settings['objectCacheBackend'] ?? '') !== (string) ($previous_settings['objectCacheBackend'] ?? '')
+            );
+        if ($page_cache_takeover_requested || $object_cache_takeover_requested) {
+            $cache_takeover_preflight = self::preflight_cache_takeover($page_cache_takeover_requested, $object_cache_takeover_requested);
+            if (is_wp_error($cache_takeover_preflight)) {
+                return $cache_takeover_preflight;
+            }
+        }
+
         $wp_config_transaction = self::update_wp_config_managed_constants(
             !empty($current_settings['pageCacheEnabled']),
             $secret_patch
@@ -341,7 +391,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
 
         $page_cache_sync = self::sync_page_cache_bootstrap(!empty($current_settings['pageCacheEnabled']), false);
         if (is_wp_error($page_cache_sync)) {
-            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction, $preserve_configured_infrastructure);
             return is_wp_error($rollback) ? $rollback : $page_cache_sync;
         }
 
@@ -371,7 +421,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         self::sync_scheduled_events();
         $browser_cache_sync = self::sync_browser_cache_rules();
         if (false === $browser_cache_sync) {
-            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction, $preserve_configured_infrastructure);
             if (is_wp_error($rollback)) {
                 return $rollback;
             }
@@ -379,7 +429,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         }
         $apache_static_sync = self::sync_apache_static_html_delivery_rules();
         if (false === $apache_static_sync) {
-            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction, $preserve_configured_infrastructure);
             if (is_wp_error($rollback)) {
                 return $rollback;
             }
@@ -387,7 +437,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         }
         $litespeed_sync = self::sync_litespeed_cache_rules();
         if (false === $litespeed_sync) {
-            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction, $preserve_configured_infrastructure);
             if (is_wp_error($rollback)) {
                 return $rollback;
             }
@@ -395,7 +445,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
         }
 
         $object_cache_sync = null;
-        if (class_exists('Ultra_Cache_Object_Cache_Manager')) {
+        if (!$preserve_configured_infrastructure && class_exists('Ultra_Cache_Object_Cache_Manager')) {
             if (method_exists('Ultra_Cache_Object_Cache_Manager', 'reset_plugin_settings_cache')) {
                 Ultra_Cache_Object_Cache_Manager::reset_plugin_settings_cache();
             }
@@ -407,8 +457,8 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             }
         }
 
-        if (!empty($current_settings['objectCacheEnabled']) && true !== $object_cache_sync) {
-            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction);
+        if (!$preserve_configured_infrastructure && !empty($current_settings['objectCacheEnabled']) && true !== $object_cache_sync) {
+            $rollback = self::rollback_failed_settings_transaction($previous_settings, $wp_config_transaction, $preserve_configured_infrastructure);
             if (is_wp_error($rollback)) {
                 return $rollback;
             }
@@ -419,7 +469,7 @@ trait Ultra_Cache_WP_Settings_Persistence_Trait
             self::sync_warm_rate_limit(max(0, (int) $current_settings['cronWarmPagesPerMinute']), time());
         }
 
-        if (method_exists(static::class, 'sync_varnish_invalidation_rate_limit')) {
+        if (!$preserve_configured_infrastructure && method_exists(static::class, 'sync_varnish_invalidation_rate_limit')) {
             self::sync_varnish_invalidation_rate_limit(
                 max(1, min(600, (int) ($current_settings['varnishInvalidationsPerMinute'] ?? 10))),
                 time()

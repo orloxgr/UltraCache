@@ -894,9 +894,7 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
         list($target_format, $fallback_format) = $this->get_media_replacement_current_output_policy();
         $limit = isset($args['limit']) && absint($args['limit']) > 0 ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $lock_token = $this->acquire_media_replacement_readiness_lock($target_format, (int) ceil($time_budget) + 15);
+        $lock_token = $this->acquire_media_replacement_readiness_lock($target_format);
         if ('' === $lock_token) {
             $locked = $this->get_media_library_replacement_readiness_status();
             $locked['success'] = false;
@@ -924,16 +922,11 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
                 $state = $this->update_media_replacement_readiness_state($state);
             }
 
-            $deadline = microtime(true) + $time_budget;
             $attachment_ids = $this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], $limit);
             $queue_statuses = $this->get_media_replacement_readiness_queue_status_map($attachment_ids, $target_format);
             $queue_attachment_ids = array();
 
             foreach ($attachment_ids as $attachment_id) {
-                if ($batch_scanned > 0 && microtime(true) >= $deadline) {
-                    break;
-                }
-
                 $variants = $this->get_media_replacement_required_source_variants($attachment_id);
                 $attachment_ready = true;
                 $attachment_eligible = false;
@@ -1004,12 +997,10 @@ trait Ultra_Cache_Media_Replacement_Readiness_Trait
             }
 
             if (!empty($queue_attachment_ids) && method_exists($this, 'process_media_queue_batch')) {
-                $remaining_budget = max(1, (int) floor($deadline - microtime(true)));
                 $queue_result = $this->process_media_queue_batch(array(
                     'limit'          => min(count($queue_attachment_ids), max(1, $limit)),
                     'format'         => $target_format,
                     'only_missing'   => true,
-                    'time_budget'    => min(10, $remaining_budget),
                     'auto_rebuild'   => false,
                     'attachment_ids' => array_values($queue_attachment_ids),
                 ));

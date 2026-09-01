@@ -633,7 +633,16 @@ trait Ultra_Cache_WP_Varnish_Batch_Invalidation_Trait
             $batch_count = count($batches);
             foreach ($batches as $batch_index => $batch) {
                 foreach ($targets as $server) {
-                    $res = self::varnish_command_for_expr($server, $settings['key'], $settings['timeout'], (string) $batch['expression'], 'BAN');
+                    $res = self::varnish_command_for_expr(
+                        $server,
+                        $settings['key'],
+                        $settings['timeout'],
+                        (string) $batch['expression'],
+                        'BAN',
+                        false,
+                        !empty($runtime_plan['capabilityProbeAuthorized']) ? 3 : 1,
+                        (string) ($batch['host'] ?? '')
+                    );
                     ++$request_count;
                     $success = !empty($res['ok']);
                     if ($success) {

@@ -5,18 +5,6 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Rest_Media_Trait
 {
-    private function media_library_replacement_runner_unavailable_response($extra = array())
-    {
-        $extra = is_array($extra) ? $extra : array();
-        return new WP_REST_Response(array_merge(array(
-            'success'              => false,
-            'blocked'              => true,
-            'status'               => 'replacement_runner_unavailable',
-            'orchestrationVersion' => 2,
-            'message'              => __('The legacy Media Library replacement mutation endpoints are disabled while the shared resumable runner is connected.', 'ultracache'),
-        ), $extra), 409);
-    }
-
     public function get_media_ids(WP_REST_Request $request)
     {
         $media = $this->get_media();
@@ -237,6 +225,20 @@ trait Ultra_Cache_Rest_Media_Trait
         return new WP_REST_Response($result, $this->get_media_queue_result_http_status($result));
     }
 
+    public function media_homepage_process(WP_REST_Request $request)
+    {
+        $media = $this->get_media();
+        if (!$media || !method_exists($media, 'process_homepage_affected_media_batch')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Homepage media processing is not available.', 'ultracache')), 500);
+        }
+
+        $result = $media->process_homepage_affected_media_batch(
+            home_url('/'),
+            sanitize_text_field((string) $request->get_param('manual_token'))
+        );
+        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 409);
+    }
+
     public function media_manual_session_control(WP_REST_Request $request)
     {
         $media = $this->get_media();
@@ -251,7 +253,8 @@ trait Ultra_Cache_Rest_Media_Trait
         } elseif ('renew' === $action) {
             $result = $media->renew_manual_media_conversion_session($token);
         } elseif ('stop' === $action) {
-            $result = $media->end_manual_media_conversion_session($token);
+            $resume_background = $request->get_param('resume_background');
+            $result = $media->end_manual_media_conversion_session($token, null === $resume_background ? true : rest_sanitize_boolean($resume_background));
         } else {
             return new WP_REST_Response(array('success' => false, 'message' => __('Invalid dashboard media-session action.', 'ultracache')), 400);
         }
@@ -278,7 +281,11 @@ trait Ultra_Cache_Rest_Media_Trait
         }
 
         $result = $media->set_media_background_work_paused(
-            rest_sanitize_boolean($request->get_param('paused'))
+            rest_sanitize_boolean($request->get_param('paused')),
+            array(
+                'actorUserId' => get_current_user_id(),
+                'requestUri'  => $request->get_route(),
+            )
         );
         if (method_exists($media, 'get_media_queue_status')) {
             $result = array_merge(
@@ -291,7 +298,7 @@ trait Ultra_Cache_Rest_Media_Trait
     }
 
 
-    public function media_conversion_test_latest(WP_REST_Request $request = null)
+    public function media_conversion_test_latest(?WP_REST_Request $request = null)
     {
         $media = $this->get_media();
         if (!$media || !method_exists($media, 'get_media_library_conversion_test_report')) {
@@ -397,7 +404,6 @@ trait Ultra_Cache_Rest_Media_Trait
         $result = $media->scan_media_library_replacement_readiness_inventory(array(
             'reset'       => rest_sanitize_boolean($request->get_param('reset')),
             'limit'       => absint($request->get_param('limit')),
-            'time_budget' => (float) $request->get_param('time_budget'),
         ));
 
         if (method_exists($media, 'get_media_library_replacement_start_guard')) {
@@ -405,23 +411,6 @@ trait Ultra_Cache_Rest_Media_Trait
         }
         $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
         return new WP_REST_Response($result, $status);
-    }
-
-    public function media_library_replacement_workflow_stage(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'set_media_library_replacement_workflow_stage')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement workflow stage is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->set_media_library_replacement_workflow_stage(array(
-            'stage'   => (string) $request->get_param('stage'),
-            'message' => (string) $request->get_param('message'),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
     }
 
     public function media_library_replacement_blockers(WP_REST_Request $request)
@@ -466,7 +455,6 @@ trait Ultra_Cache_Rest_Media_Trait
             'session_token'        => (string) $request->get_param('sessionToken'),
             'collision_policy'     => (string) $request->get_param('collisionPolicy'),
             'limit'                => absint($request->get_param('limit')),
-            'time_budget'          => (float) $request->get_param('time_budget'),
         ));
 
         $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
@@ -485,7 +473,6 @@ trait Ultra_Cache_Rest_Media_Trait
         $result = $media->run_media_library_replacement_do_chunk(array(
             'session_token' => (string) $request->get_param('sessionToken'),
             'limit'         => absint($request->get_param('limit')),
-            'time_budget'   => (float) $request->get_param('time_budget'),
         ));
 
         $status = !empty($result['success'])
@@ -505,10 +492,28 @@ trait Ultra_Cache_Rest_Media_Trait
         $result = $media->run_media_library_replacement_verify_chunk(array(
             'session_token' => (string) $request->get_param('sessionToken'),
             'limit'         => absint($request->get_param('limit')),
-            'time_budget'   => (float) $request->get_param('time_budget'),
         ));
 
         $status = !empty($result['success']) ? 200 : (!empty($result['blocked']) ? 409 : 500);
+        return new WP_REST_Response($result, $status);
+    }
+
+
+    public function media_library_replacement_rollback(WP_REST_Request $request)
+    {
+        $media = $this->get_media();
+        if (!$media || !method_exists($media, 'run_media_library_replacement_rollback_chunk')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement Rollback runner is not available.', 'ultracache')), 500);
+        }
+
+        $result = $media->run_media_library_replacement_rollback_chunk(array(
+            'session_token' => (string) $request->get_param('sessionToken'),
+            'limit'         => absint($request->get_param('limit')),
+        ));
+
+        $status = !empty($result['success'])
+            ? 200
+            : (isset($result['httpStatus']) ? max(400, min(599, absint($result['httpStatus']))) : (!empty($result['blocked']) ? 409 : 500));
         return new WP_REST_Response($result, $status);
     }
 
@@ -536,7 +541,6 @@ trait Ultra_Cache_Rest_Media_Trait
         $result = $media->run_media_library_replacement_delete_chunk(array(
             'session_token'     => (string) $request->get_param('sessionToken'),
             'limit'             => absint($request->get_param('limit')),
-            'time_budget'       => (float) $request->get_param('time_budget'),
             'confirmationToken' => (string) $request->get_param('confirmationToken'),
         ));
 
@@ -562,127 +566,14 @@ trait Ultra_Cache_Rest_Media_Trait
     }
 
 
-    public function media_library_replacement_copy(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'copy_media_library_replacement_files')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement file copy is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->copy_media_library_replacement_files(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
-
-
-    public function media_library_replacement_metadata_prepare(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'prepare_media_library_replacement_metadata_updates')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement metadata preparation is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->prepare_media_library_replacement_metadata_updates(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
-
-
-
-    public function media_library_replacement_metadata_apply(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'apply_media_library_replacement_metadata_updates')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement metadata switch is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->apply_media_library_replacement_metadata_updates(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
-
-
-    public function media_library_replacement_metadata_rollback(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'rollback_media_library_replacement_metadata_updates')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement metadata rollback is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->rollback_media_library_replacement_metadata_updates(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
-
-
-    public function media_library_replacement_references_scan(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'scan_media_library_replacement_database_references')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement reference scan is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->scan_media_library_replacement_database_references(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
 
 
 
 
-    public function media_library_replacement_references_match(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'match_media_library_replacement_database_references')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement reference matching is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->match_media_library_replacement_database_references(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
 
 
-    public function media_library_replacement_theme_css_scan(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
 
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'scan_media_library_replacement_theme_css_references')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement theme CSS reference scan is not available.', 'ultracache')), 500);
-        }
 
-        $result = $media->scan_media_library_replacement_theme_css_references(array(
-            'limit'  => absint($request->get_param('limit')),
-            'start'  => (bool) $request->get_param('start'),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
 
     public function media_library_replacement_theme_css_preview(WP_REST_Request $request)
     {
@@ -697,39 +588,6 @@ trait Ultra_Cache_Rest_Media_Trait
         ));
 
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : 404);
-    }
-
-    public function media_library_replacement_theme_css_apply(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'apply_media_library_replacement_theme_css_replacements')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement theme CSS apply is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->apply_media_library_replacement_theme_css_replacements(array(
-            'limit'             => absint($request->get_param('limit')),
-            'confirmationToken' => (string) $request->get_param('confirmationToken'),
-        ));
-
-        return new WP_REST_Response($result, (!empty($result['success']) || !empty($result['blocked'])) ? 200 : 500);
-    }
-
-    public function media_library_replacement_theme_css_verify(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'verify_media_library_replacement_theme_css_replacements')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement theme CSS verification is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->verify_media_library_replacement_theme_css_replacements(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
     }
 
 
@@ -749,57 +607,8 @@ trait Ultra_Cache_Rest_Media_Trait
     }
 
 
-    public function media_library_replacement_database_apply(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'apply_media_library_replacement_database_replacements')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement database replacement apply is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->apply_media_library_replacement_database_replacements(array(
-            'limit'             => absint($request->get_param('limit')),
-            'confirmationToken' => (string) $request->get_param('confirmationToken'),
-        ));
-
-        return new WP_REST_Response($result, (!empty($result['success']) || !empty($result['blocked'])) ? 200 : 500);
-    }
 
 
-
-    public function media_library_replacement_database_verify(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'verify_media_library_replacement_database_replacements')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement database replacement verification is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->verify_media_library_replacement_database_replacements(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
-
-
-    public function media_library_replacement_database_rollback(WP_REST_Request $request)
-    {
-        return $this->media_library_replacement_runner_unavailable_response();
-
-        $media = $this->get_media();
-        if (!$media || !method_exists($media, 'rollback_media_library_replacement_database_replacements')) {
-            return new WP_REST_Response(array('success' => false, 'message' => __('Media Library replacement database rollback is not available.', 'ultracache')), 500);
-        }
-
-        $result = $media->rollback_media_library_replacement_database_replacements(array(
-            'limit'  => absint($request->get_param('limit')),
-        ));
-
-        return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
-    }
 
 
 

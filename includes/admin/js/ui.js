@@ -641,7 +641,7 @@
 				},
 				{
 					question: __("Some images outside the Media Library stay as JPEG or PNG even though Image Rewrite is enabled. Can I do something?", 'ultracache'),
-					answer: __("Yes. UltraCache normally creates optimized AVIF or WebP versions of local images used by your theme or plugins in the background. If a conversion was interrupted or failed, open Media Optimization and press Retry Failed. UltraCache will recover interrupted jobs and retry failed image conversions. The original theme or plugin image remains unchanged.", 'ultracache'),
+					answer: __("Yes. UltraCache normally creates optimized AVIF or WebP versions of local images used by your theme or plugins in the background. If a conversion fails, open Media Optimization and press Retry failed media. UltraCache will explicitly retry only failed image conversions. Interrupted processing jobs are handled separately by the worker recovery system. The original theme or plugin image remains unchanged.", 'ultracache'),
 				},
 				{
 					question: __("What is the difference between Image Optimization and Media Library Replacement?", 'ultracache'),
@@ -786,7 +786,7 @@
 							' ',
 							__("Many managed hosts expose only a local HTTP purge endpoint. UltraCache can still invalidate and refill exact URLs correctly, but site-wide clearing may need known-URL purges plus TTL expiry unless the host exposes additional verified HTTP capabilities.", 'ultracache'),
 						]),
-						h('p', { key: 'meaning' }, __("Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Test Varnish to see which capabilities are Supported.", 'ultracache')),
+						h('p', { key: 'meaning' }, __("Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Redetect Varnish Capabilities to see which capabilities are Supported.", 'ultracache')),
 					]),
 				},
 				{
@@ -806,7 +806,7 @@
 							' ',
 							__("The recommended snippet requires two independent signals: the request-side ultracache_esi_optin=1 browser marker and the X-UltraCache-ESI-Shared-Parent: 1 response approval. UltraCache sets the session marker only on pages that render the verified classic mini-cart ESI adapter. Without both signals, WooCommerce requests remain PASS and normal cart behavior is preserved.", 'ultracache'),
 						]),
-						h('p', { key: 'install-note' }, __("This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Test Varnish again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations.", 'ultracache')),
+						h('p', { key: 'install-note' }, __("This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Redetect Varnish Capabilities again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations.", 'ultracache')),
 						h('pre', { className: 'uc-version-help-modal__faq-code', key: 'snippet' }, h('code', null, VARNISH_ESI_SUGGESTED_VCL)),
 						h('div', { className: 'mt-2', key: 'copy' }, h(Button, {
 							onClick: () => copyVersionHelpText(VARNISH_ESI_SUGGESTED_VCL),
@@ -822,7 +822,7 @@
 							' ',
 							__("Use the bundled fail-closed template on CWP servers. Sites without the UltraCache request marker keep normal WooCommerce PASS behavior. On verified adapter pages, UltraCache approves only cached parents that contain the classic WooCommerce mini-cart ESI fragment.", 'ultracache'),
 						]),
-						h('p', { key: 'placeholders' }, __("The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Test Varnish.", 'ultracache')),
+						h('p', { key: 'placeholders' }, __("The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Redetect Varnish Capabilities.", 'ultracache')),
 						CWP_VARNISH_TEMPLATE_URL ? h('div', { className: 'mt-2', key: 'download' }, h('a', {
 							className: 'uc-btn uc-btn--primary text-white',
 							href: CWP_VARNISH_TEMPLATE_URL,
@@ -954,60 +954,66 @@
 				}, '×'),
 				h('div', { className: 'uc-support-modal__eyebrow', key: 'eyebrow' }, currentVersion ? ('UltraCache ' + currentVersion) : 'UltraCache'),
 				h('h3', { className: 'uc-support-modal__title', id: titleId, key: 'title' }, currentVersion ? ('Help for ' + currentVersion) : __('UltraCache help', 'ultracache')),
-				h('p', { className: 'uc-version-help-modal__intro', id: descriptionId, key: 'intro' }, __('Recommended setup for most WordPress websites. Apply the profile, complete the site-specific selections below, then prepare the cache and images.', 'ultracache')),
-				h('ol', { className: 'uc-version-help-modal__steps', key: 'steps' }, [
-					h('li', { key: 'profile' }, [h('strong', null, __('Activate the Aggressive profile.', 'ultracache')), ' ', __('It enables the main performance options, Warm affected pages after save, and Apache Static HTML Delivery.', 'ultracache')]),
-					h('li', { key: 'compression' }, [h('strong', null, __('Check HTML Compression.', 'ultracache')), ' ', __('Open the dropdown under HTML Compression in Cache Engine and run the check so UltraCache can use the server result.', 'ultracache')]),
-					h('li', { key: 'menu-warm' }, [h('strong', null, __('Select the main menu for warm-up.', 'ultracache')), ' ', __('In Warm Cache, choose the primary frontend menu and the required depth. First-level menu URLs suit most websites and prepare the pages visitors are most likely to open.', 'ultracache')]),
-					h('li', { key: 'full-warm' }, [h('strong', null, __('Choose Full-site warm-up sources.', 'ultracache')), ' ', __('Homepage / blog index, Selected menu URLs, Pages, Posts, and Categories are suitable for most sites. Additional sources can add many URLs to the queue.', 'ultracache')]),
-					h('li', { key: 'uploads' }, [h('strong', null, __('Enable Convert new uploads.', 'ultracache')), ' ', __('New Media Library uploads will use the selected image conversion policy automatically.', 'ultracache')]),
-					h('li', { key: 'max-side' }, [h('strong', null, __('Set Maximum upload image side.', 'ultracache')), ' ', __('1920 pixels is appropriate for most modern websites. Increase it only when larger source images are required.', 'ultracache')]),
-					h('li', { key: 'format' }, [h('strong', null, __('Choose the image formats.', 'ultracache')), ' ', __('AVIF provides excellent compression, while WebP offers broader compatibility. AVIF with WebP fallback is a strong general-purpose configuration.', 'ultracache')]),
-					h('li', { key: 'compression-level' }, [h('strong', null, __('Choose Image compression level.', 'ultracache')), ' ', __('Compact provides a strong reduction in file size with little visible difference for normal website images.', 'ultracache')]),
-					h('li', { key: 'image-test' }, [h('strong', null, __('Test AVIF before the first batch.', 'ultracache')), ' ', __('Run Image conversion test and then Check test. UltraCache uses a Media Library sample and includes transparent PNG files when available.', 'ultracache')]),
-					h('li', { key: 'fonts' }, [h('strong', null, __('Enable the main font optimizations.', 'ultracache')), ' ', __('Turn on Local Google Fonts Optimization, Bundle Generated Font-Mix CSS, and Delay icon fonts.', 'ultracache')]),
-					h('li', { key: 'woo' }, [h('strong', null, __('For WooCommerce, enable Suppress empty-cart execution.', 'ultracache')), ' ', __('This removes unnecessary empty-cart frontend work.', 'ultracache')]),
-					h('li', { key: 'mailerlite' }, [h('strong', null, __('For MailerLite, enable Lazy MailerLite nonce refresh.', 'ultracache')), ' ', __('The option is available in Advanced Settings.', 'ultracache')]),
-					h('li', { key: 'object-cache' }, [h('strong', null, __('Confirm the detected Object Cache backend.', 'ultracache')), ' ', __('APCu is usually the fastest local option but is not persistent across PHP restarts. Redis is persistent. SQLite is available when neither is present, with performance depending on disk speed.', 'ultracache')]),
-					h('li', { key: 'varnish' }, [h('strong', null, __('Configure Varnish when present.', 'ultracache')), ' ', __('Enter the required connection and purge details in the Varnish Cache box.', 'ultracache')]),
-					h('li', { key: 'automation' }, [h('strong', null, __('Enable automatic warm-up.', 'ultracache')), ' ', __('Turn on Warm full site after Flush All Cache and/or Warm uncached URLs after first visit.', 'ultracache')]),
+				h('p', { className: 'uc-version-help-modal__intro', id: descriptionId, key: 'intro' }, __('For most WordPress websites, use Start Wizard from Overview. The same Setup Wizard is used on fresh installations and when you run it again later. If you prefer to configure UltraCache yourself, follow the Manual Setup below; every location matches the current dashboard tabs.', 'ultracache')),
+				h('div', { className: 'uc-version-help-modal__section', key: 'recommended-setup' }, [
+					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Recommended setup', 'ultracache')),
+					h('p', { className: 'uc-version-help-modal__section-copy', key: 'copy' }, __('Open Overview and use Start Wizard. UltraCache analyzes the environment, applies the recommended configuration, uses your selected Object Cache backend and warm-up scope, validates compression and image conversion, converts homepage media live, and runs deterministic JavaScript diagnostics.', 'ultracache')),
 				]),
-				h('div', { className: 'uc-version-help-modal__section', key: 'first-run' }, [
-					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Prepare the website after saving', 'ultracache')),
+				h('div', { className: 'uc-version-help-modal__section', key: 'manual-setup' }, [
+					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Manual Setup', 'ultracache')),
+					h('p', { className: 'uc-version-help-modal__section-copy', key: 'copy' }, __('Use this checklist when you want to review or configure the important setup choices manually instead of relying on the automatic setup workflow.', 'ultracache')),
+					h('ol', { className: 'uc-version-help-modal__steps', key: 'steps' }, [
+						h('li', { key: 'compression' }, [h('strong', null, __('Cache → Cache Engine: check HTML Compression.', 'ultracache')), ' ', __('Open the HTML Compression dropdown so UltraCache can run the live check. Keep Server managed when the web server already compresses HTML; otherwise select an available UltraCache Brotli or gzip mode.', 'ultracache')]),
+						h('li', { key: 'menu-warm' }, [h('strong', null, __('Cache → Warm Cache: select the main menu and depth.', 'ultracache')), ' ', __('Choose the primary frontend menu. Depth 1 is the recommended starting point for most websites.', 'ultracache')]),
+						h('li', { key: 'full-warm' }, [h('strong', null, __('Cache → Warm Cache: choose Full-site warm-up sources.', 'ultracache')), ' ', __('Homepage / blog index, Selected menu URLs, Pages, Posts, and Categories are the recommended general-purpose sources. Add extra sources only when the site needs them.', 'ultracache')]),
+						h('li', { key: 'uploads' }, [h('strong', null, __('Media → Media Optimization: configure new uploads.', 'ultracache')), ' ', __('Enable Convert new uploads only after the selected output format passes the Image conversion test.', 'ultracache')]),
+						h('li', { key: 'max-side' }, [h('strong', null, __('Media → Media Optimization: set Maximum upload image side.', 'ultracache')), ' ', __('1920 pixels is appropriate for most modern websites. Increase it only when larger source images are genuinely required.', 'ultracache')]),
+						h('li', { key: 'format' }, [h('strong', null, __('Media → Media Optimization: choose image formats.', 'ultracache')), ' ', __('Prefer AVIF with WebP fallback when both formats pass the live conversion test. Use WebP when AVIF is unavailable or fails validation.', 'ultracache')]),
+						h('li', { key: 'compression-level' }, [h('strong', null, __('Media → Media Optimization: choose Image compression level.', 'ultracache')), ' ', __('Compact provides a strong reduction in file size with little visible difference for normal website images.', 'ultracache')]),
+						h('li', { key: 'image-test' }, [h('strong', null, __('Media → AVIF / WebP Batch Conversion: run Image conversion test.', 'ultracache')), ' ', __('Run Image conversion test and then Check test before the first batch or before enabling upload conversion for a new format.', 'ultracache')]),
+						h('li', { key: 'fonts' }, [h('strong', null, __('Fonts & CSS → Fonts Optimization: enable the main font optimizations.', 'ultracache')), ' ', __('Enable Local Google Fonts Optimization, Bundle Generated Font-Mix CSS, and Delay icon fonts.', 'ultracache')]),
+						h('li', { key: 'woo' }, [h('strong', null, __('Javascript → WooCommerce: use Suppress empty-cart execution when applicable.', 'ultracache')), ' ', __('Use the empty-cart suppression strategy on WooCommerce sites to avoid unnecessary cart-fragment work for anonymous empty-cart pages.', 'ultracache')]),
+						h('li', { key: 'mailerlite' }, [h('strong', null, __('Advanced → Advanced settings: enable Lazy MailerLite nonce refresh when applicable.', 'ultracache')), ' ', __('Enable it only when the website uses MailerLite forms.', 'ultracache')]),
+						h('li', { key: 'object-cache' }, [h('strong', null, __('Server → Object Cache: select and verify the backend.', 'ultracache')), ' ', __('Test the available backend before keeping it active. Redis is the preferred persistent backend when available; APCu is local and non-persistent; SQLite and Disk are fallbacks.', 'ultracache')]),
+						h('li', { key: 'varnish' }, [h('strong', null, __('Server → Varnish Cache: configure Varnish when present.', 'ultracache')), ' ', __('Enter the required connection and purge details, save them, and run the Varnish test before relying on external-cache invalidation.', 'ultracache')]),
+						h('li', { key: 'automation' }, [h('strong', null, __('Automation → Automation & Scheduling: configure automatic full-site warm-up.', 'ultracache')), ' ', __('Enable Warm full site after Flush All Cache when desired. Cache → Warm Cache also contains Warm uncached URLs after first visit.', 'ultracache')]),
+					]),
+				]),
+				h('div', { className: 'uc-version-help-modal__section', key: 'manual-prepare' }, [
+					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Manual preparation after saving', 'ultracache')),
 					h('ul', { className: 'uc-version-help-modal__actions', key: 'actions' }, [
-						h('li', { key: 'flush' }, __('Run Flush All Cache to clear previous cached output.', 'ultracache')),
-						h('li', { key: 'menu' }, __('Run Warm Up Menu HTML Cache + Separate CSS Bundles to prepare the main pages immediately.', 'ultracache')),
-						h('li', { key: 'media' }, __('Run Start / Resume Conversion in AVIF / WebP Batch Conversion to prepare existing Media Library images.', 'ultracache')),
-						h('li', { key: 'full' }, __('Use Full-site warm-up when the complete selected URL set should be cached.', 'ultracache')),
+						h('li', { key: 'flush' }, __('Overview → Flush All Cache clears the previous cached output.', 'ultracache')),
+						h('li', { key: 'homepage' }, __('Cache → Warm Cache → Warm Up Homepage prepares the front page immediately; Also warm CSS bundles controls whether the configured CSS bundle scope is included.', 'ultracache')),
+						h('li', { key: 'menu' }, __('Cache → Warm Cache → Warm Up Configured Menu prepares the selected menu URLs; Also warm CSS bundles controls whether the configured CSS bundle scope is included.', 'ultracache')),
+						h('li', { key: 'media' }, __('Media → AVIF / WebP Batch Conversion → Start / Resume Conversion prepares existing Media Library images.', 'ultracache')),
+						h('li', { key: 'full' }, __('Overview → Warm Site starts or resumes the configured full-site warm-up.', 'ultracache')),
 					]),
 				]),
 				h('div', { className: 'uc-version-help-modal__section', key: 'post-install-check' }, [
-					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Must-do post-install JavaScript check', 'ultracache')),
-					h('p', { className: 'uc-version-help-modal__section-copy', key: 'intro' }, __('Run this check after the first setup and after major JavaScript optimization changes. Use a private browser window so you test the public cached page rather than a logged-in administration session.', 'ultracache')),
+					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('Post-install JavaScript verification', 'ultracache')),
+					h('p', { className: 'uc-version-help-modal__section-copy', key: 'intro' }, __('The Setup Wizard runs the same Browser Runtime Scan and JavaScript Error Fixer repair cycle used in Javascript diagnostics on the frontend probe URL. It can run up to ten repair cycles and stops early when zero runtime errors remain or no further deterministic repair is available.', 'ultracache')),
 					h('ol', { className: 'uc-version-help-modal__steps', key: 'steps' }, [
-						h('li', { key: 'private-window' }, [h('strong', null, __('Open the website in a private window.', 'ultracache')), ' ', __('Use Ctrl+Shift+N in Chrome or Edge, or Ctrl+Shift+P in Firefox.', 'ultracache')]),
-						h('li', { key: 'console' }, [h('strong', null, __('Open the browser Console.', 'ultracache')), ' ', __('Press F12, select Console, and reload the page.', 'ultracache')]),
-						h('li', { key: 'interact' }, [h('strong', null, __('Check the visible page functions.', 'ultracache')), ' ', __('Open the menu and use the main slider, form, popup, search, cart, or other interactive elements present on that page.', 'ultracache')]),
-						h('li', { key: 'copy-errors' }, [h('strong', null, __('Copy any JavaScript errors.', 'ultracache')), ' ', __('If no red JavaScript errors appear, the post-install check is complete. Otherwise copy the full error lines and their stack traces.', 'ultracache')]),
-						h('li', { key: 'open-diagnostics' }, [h('strong', null, __('Open JS Defer / Delay Safeguards & Diagnostics.', 'ultracache')), ' ', __('Return to the UltraCache dashboard and expand that accordion.', 'ultracache')]),
-						h('li', { key: 'extract' }, [h('strong', null, __('Analyze the copied errors.', 'ultracache')), ' ', __('Paste them into Console Error Handler and click Extract Console Error Suggestions.', 'ultracache')]),
-						h('li', { key: 'append' }, [h('strong', null, __('Append the proposed fixes.', 'ultracache')), ' ', __('Use Append to Defer Instead for the normal compatibility fix. Use Append to “Do Not Defer or Delay” for suggestions placed in that fallback group or when the same error remains after the first pass.', 'ultracache')]),
-						h('li', { key: 'save' }, [h('strong', null, __('Save the safeguard lists.', 'ultracache')), ' ', __('Click Save Both Lists after appending the required suggestions.', 'ultracache')]),
-						h('li', { key: 'flush-warm' }, [h('strong', null, __('Flush and warm the cache again.', 'ultracache')), ' ', __('Run Flush All Cache, then warm the front page. Front-page warm-up is enough during this testing loop.', 'ultracache')]),
-						h('li', { key: 'repeat' }, [h('strong', null, __('Repeat until the Console is clear.', 'ultracache')), ' ', __('Reload the anonymous page and repeat the same process until no JavaScript errors remain.', 'ultracache')]),
+						h('li', { key: 'visual' }, [h('strong', null, __('Verify the visible interactions.', 'ultracache')), ' ', __('Open the public website and check the menu, mobile navigation, sliders, popups, forms, search, and cart/checkout/account flows when applicable. This visual/functional check cannot be proven by backend analysis.', 'ultracache')]),
+						h('li', { key: 'runtime' }, [h('strong', null, __('Use Browser Runtime Errors when a problem remains.', 'ultracache')), ' ', __('If an interaction still fails after the Setup Wizard, open Javascript → JS Defer / Delay Safeguards & Diagnostics and run Runtime Scan for that exact page. Runtime errors are page-specific, and setup only adds safeguards proven by the JavaScript Error Fixer.', 'ultracache')]),
+						h('li', { key: 'residual' }, [h('strong', null, __('Review residual Strong Suggestions only when reported.', 'ultracache')), ' ', __('The setup assistant can stop with residual runtime errors when no deterministic automatic fix can be proven. In that case review the affected page in Javascript → JS Defer / Delay Safeguards & Diagnostics.', 'ultracache')]),
 					]),
-					h('h5', { className: 'uc-version-help-modal__section-title', key: 'silent-title' }, __('I completed all the steps above and there are no JavaScript errors, but something still does not work. What should I do?', 'ultracache')),
-					h('p', { className: 'uc-version-help-modal__section-copy', key: 'silent-intro' }, __('Open JS Defer / Delay Safeguards & Diagnostics and click Analyze HTML JS Dependencies. Some JavaScript problems do not produce console errors. A script may load successfully but execute too late, miss an initialization event, or run in the wrong order relative to another script it depends on.', 'ultracache')),
-					h('p', { className: 'uc-version-help-modal__section-copy', key: 'silent-guidance' }, __('UltraCache will analyze the scripts used on the page and look for strong signs of dependency and execution-order conflicts. Do not add every suggested script blindly. Start with the page element or functionality that is not working, identify which plugin, theme, or component it belongs to, and compare that with the findings. Apply the most relevant safeguard first, then test the page again.', 'ultracache')),
+					h('h5', { className: 'uc-version-help-modal__section-title', key: 'manual-js-title' }, __('Manual JavaScript verification', 'ultracache')),
+					h('ol', { className: 'uc-version-help-modal__steps', key: 'manual-js-steps' }, [
+						h('li', { key: 'private-window' }, [h('strong', null, __('Open the public website in a private window.', 'ultracache')), ' ', __('Use an anonymous/private browser session so you test the public cached page instead of a logged-in administration session.', 'ultracache')]),
+						h('li', { key: 'console' }, [h('strong', null, __('Open the browser Console and reload.', 'ultracache')), ' ', __('Use the main interactive elements on the page and copy any red JavaScript errors together with their stack traces.', 'ultracache')]),
+						h('li', { key: 'console-handler' }, [h('strong', null, __('Javascript → JS Defer / Delay Safeguards & Diagnostics: analyze Console errors.', 'ultracache')), ' ', __('Paste the errors into Console Error Handler and extract the proposed safeguards. When a delayed provider and deferred consumer are proven, test Delay first; if that same error persists on a new scan, escalate to Defer Instead and finally Do Not Defer or Delay.', 'ultracache')]),
+						h('li', { key: 'save-retest' }, [h('strong', null, __('Save, flush, warm, and retest.', 'ultracache')), ' ', __('Save the safeguard lists, run Overview → Flush All Cache, then Cache → Warm Cache → Warm Up Homepage HTML Cache and repeat the anonymous browser test.', 'ultracache')]),
+						h('li', { key: 'silent-failure' }, [h('strong', null, __('If there are no Console errors but something still fails, analyze HTML JS dependencies.', 'ultracache')), ' ', __('Open Javascript → JS Defer / Delay Safeguards & Diagnostics and run Analyze HTML JS Dependencies. Review Strong Suggestions that match the broken component instead of adding every suggestion blindly.', 'ultracache')]),
+					]),
 				]),
 
 				h('div', { className: 'uc-version-help-modal__section', key: 'performance-scores' }, [
 					h('h4', { className: 'uc-version-help-modal__section-title', key: 'title' }, __('How to Improve Performance and PageSpeed Scores', 'ultracache')),
 					h('ol', { className: 'uc-version-help-modal__steps', key: 'steps' }, [
-						h('li', { key: 'css-sources' }, [h('strong', null, __('Review the largest CSS bundle sources.', 'ultracache')), ' ', __('Open CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure.', 'ultracache')]),
-						h('li', { key: 'delay-local-js' }, [h('strong', null, __('Enable Delay non-critical/local JS.', 'ultracache')), ' ', __('This can provide a significant PageSpeed/Lighthouse boost, but it can break JavaScript without visible errors, making problems difficult to find and fix.', 'ultracache')]),
-						h('li', { key: 'query-string-caching' }, [h('strong', null, __('Cache query-string URLs.', 'ultracache')), ' ', __('Open Query-string args caching and enable it. Under Query-string args whitelist, click Populate, then click Save Query-string Whitelist. UltraCache can then cache eligible query URLs such as /YourProductURL?color=red.', 'ultracache')]),
-						h('li', { key: 'selective-options' }, [h('strong', null, __('Do not enable options blindly.', 'ultracache')), ' ', __('The Aggressive profile usually provides the best starting point for higher performance scores. Some options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems.', 'ultracache')]),
+						h('li', { key: 'css-sources' }, [h('strong', null, __('Review the largest CSS bundle sources.', 'ultracache')), ' ', __('Open Fonts & CSS → CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure.', 'ultracache')]),
+						h('li', { key: 'delay-local-js' }, [h('strong', null, __('Enable Delay non-critical/local JS.', 'ultracache')), ' ', __('The Setup Wizard enables Delay non-critical/local JS automatically. You can also control it manually in Javascript → Javascript manipulation.', 'ultracache')]),
+						h('li', { key: 'query-string-caching' }, [h('strong', null, __('Cache query-string URLs.', 'ultracache')), ' ', __('Open Cache → Query-string args caching and enable it. Under Query-string args whitelist, click Populate, then click Save Query-string Whitelist. UltraCache can then cache eligible query URLs such as /YourProductURL?color=red.', 'ultracache')]),
+						h('li', { key: 'selective-options' }, [h('strong', null, __('Do not enable options blindly.', 'ultracache')), ' ', __('The Setup Wizard provides the recommended starting configuration. Some additional options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems.', 'ultracache')]),
 					]),
 				]),
 
@@ -1043,8 +1049,8 @@
 		]);
 	}
 
-	function Card({ title, description, children, footer }) {
-		return h('div', { className: 'uc-card' }, [
+	function Card({ title, description, children, footer, hidden, className, style }) {
+		return h('div', { className: classNames('uc-card', className), hidden: !!hidden, style: style || undefined }, [
 			h('div', { className: 'mb-5', key: 'head' }, [
 				h('h3', { className: 'text-lg font-bold m-0 text-white', key: 'title' }, title),
 				description
@@ -1062,8 +1068,8 @@
 		]);
 	}
 
-	function AccordionBox({ title, description, children, keyName }) {
-		return h('details', { className: 'uc-accordion uc-accordion--card', key: keyName || String(title || '') }, [
+	function AccordionBox({ title, description, children, keyName, defaultOpen }) {
+		return h('details', { className: 'uc-accordion uc-accordion--card', open: !!defaultOpen, key: keyName || String(title || '') }, [
 			h('summary', { className: 'uc-accordion__summary' }, [
 				h('div', { className: 'uc-accordion__summary-copy', key: 'copy' }, [
 					h('div', { className: 'uc-accordion__title' }, title),
@@ -1075,9 +1081,9 @@
 		]);
 	}
 
-	function SettingsAccordionCard({ title, description, children, keyName }) {
-		return h('div', { className: 'uc-card', key: (keyName || String(title || 'settings-accordion')) + '-card' }, [
-			AccordionBox({ title, description, children, keyName }),
+	function SettingsAccordionCard({ title, description, children, keyName, hidden, defaultOpen, className }) {
+		return h('div', { className: classNames('uc-card', className), hidden: !!hidden, key: (keyName || String(title || 'settings-accordion')) + '-card' }, [
+			AccordionBox({ title, description, children, keyName, defaultOpen }),
 		]);
 	}
 
@@ -1383,41 +1389,58 @@
 		]);
 	}
 
-	function TextRow({ label, description, value, onChange, disabled, placeholder, type, className, autoComplete, inputMode, tooltip }) {
+	function TextRow({ label, description, value, onChange, disabled, placeholder, type, className, autoComplete, inputMode, name, tooltip }) {
 		const helpText = getOptionHelpText(label, description, tooltip);
+		const inputProps = {
+			type: type || 'text',
+			className: 'uc-field-input uc-number-row-input',
+			value: value || '',
+			disabled: !!disabled,
+			placeholder: placeholder || '',
+			autoComplete: autoComplete || ('password' === type ? 'off' : undefined),
+			inputMode: inputMode || undefined,
+			name: name || undefined,
+			onChange: (e) => onChange(e.target.value),
+		};
 		return h('div', { className: classNames('uc-number-row flex items-center justify-between gap-4 py-4', className || '') }, [
 			h('div', { key: 'left', className: 'min-w-0 pr-4' }, [
 				label ? h('div', { className: 'text-sm font-medium text-white' }, renderLabelWithHelp(label, helpText)) : null,
 				description ? h('div', { className: 'text-xs text-zinc-500 mt-1' }, description) : null,
 			]),
-			h('input', {
-				key: 'right',
-				type: type || 'text',
-				className: 'uc-field-input uc-number-row-input',
-				value: value || '',
-				disabled: !!disabled,
-				placeholder: placeholder || '',
-				autoComplete: autoComplete || undefined,
-				inputMode: inputMode || undefined,
-				onChange: (e) => onChange(e.target.value),
-			}),
+			'password' === type
+				? h('form', {
+					key: 'right',
+					style: { display: 'contents' },
+					autoComplete: 'off',
+					onSubmit: (event) => event.preventDefault(),
+				}, h('input', inputProps))
+				: h('input', Object.assign({ key: 'right' }, inputProps)),
 		]);
 	}
 
-	function TextField({ label, description, value, onChange, disabled, placeholder, onKeyDown, type, tooltip }) {
+	function TextField({ label, description, value, onChange, disabled, placeholder, onKeyDown, type, autoComplete, name, tooltip }) {
 		const helpText = getOptionHelpText(label, description, tooltip);
+		const inputProps = {
+			type: type || 'text',
+			className: 'uc-field-input',
+			value: value || '',
+			disabled: !!disabled,
+			placeholder: placeholder || '',
+			autoComplete: autoComplete || ('password' === type ? 'off' : undefined),
+			name: name || undefined,
+			onChange: (e) => onChange(e.target.value),
+			onKeyDown: onKeyDown,
+		};
 		return h('div', { className: 'uc-field-wrap' }, [
 			label ? h('label', { className: 'uc-field-label' }, renderLabelWithHelp(label, helpText)) : null,
 			description ? h('div', { className: 'text-xs text-zinc-500 mb-2' }, description) : null,
-			h('input', {
-				type: type || 'text',
-				className: 'uc-field-input',
-				value: value || '',
-				disabled: !!disabled,
-				placeholder: placeholder || '',
-				onChange: (e) => onChange(e.target.value),
-				onKeyDown: onKeyDown,
-			}),
+			'password' === type
+				? h('form', {
+					style: { display: 'contents' },
+					autoComplete: 'off',
+					onSubmit: (event) => event.preventDefault(),
+				}, h('input', inputProps))
+				: h('input', inputProps),
 		]);
 	}
 
@@ -1587,7 +1610,7 @@
 		}, text);
 	}
 
-	function ProgressPanel({ process, etaText, onCancel, showWhenInactive }) {
+	function ProgressPanel({ process, etaText, onCancel, showWhenInactive, inline }) {
 		const [dismissed, setDismissed] = useState(false);
 
 		useEffect(() => {
@@ -1636,7 +1659,7 @@
 			|| successCount > 0 || skippedCount > 0 || failedCount > 0 || avifCount > 0 || webpCount > 0 || varnishWarmedCount > 0 || liteSpeedWarmedCount > 0 || Number(process.unitCount || 0) > 0;
 
 
-		return h('div', { className: 'uc-process-popup', role: 'status', 'aria-live': 'polite' }, [
+		return h('div', { className: classNames('uc-process-popup', inline ? 'uc-process-popup--inline' : ''), role: 'status', 'aria-live': 'polite' }, [
 			h('div', { className: 'uc-process-popup__card bg-emerald-500/5 p-6 rounded' }, [
 			h('div', { className: 'flex justify-between items-center mb-3 gap-3', key: 'head' }, [
 				h(
@@ -1736,6 +1759,7 @@
 		SupportModal,
 		VersionHelpModal,
 		Card,
+		AccordionBox,
 		SettingsAccordionCard,
 		IntegrationAccordionCard,
 		StatCard,

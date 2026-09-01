@@ -117,6 +117,10 @@ trait Ultra_Cache_Profiler_Queue_Trait
             }
             if (isset($item['source']) && 'page-dependency-analysis' === (string) $item['source']) {
                 $buckets['suggestions'][] = $item;
+            } elseif (isset($item['source']) && 'browser-runtime-error' === (string) $item['source']) {
+                // Error-scoped registry/provider findings belong to the Error
+                // Fixer even when the preferred action is the fallback list.
+                $buckets['confirmedErrorFixes'][] = $item;
             } elseif (isset($scan['source']) && 'browser-runtime' === (string) $scan['source']) {
                 $buckets['confirmedErrorFixes'][] = $item;
             } elseif (isset($item['category']) && in_array((string) $item['category'], array('browser-runtime-error', 'appendable-fix'), true)) {
@@ -468,7 +472,11 @@ trait Ultra_Cache_Profiler_Queue_Trait
                 ));
                 return new WP_REST_Response($this->runtime_js_diagnostic_queue_response($job), 400);
             }
-            $scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($target_url);
+            $fetched_scripts = $this->runtime_js_scan_fetch_script_inventory_for_url($target_url);
+            $runtime_scripts = isset($params['runtimeScripts']) && is_array($params['runtimeScripts'])
+                ? $this->runtime_js_scan_normalize_script_inventory((array) $params['runtimeScripts'])
+                : array();
+            $scripts = $this->runtime_js_scan_merge_script_inventories($fetched_scripts, $runtime_scripts);
             $errors = $this->runtime_js_scan_console_text_to_errors($console_text);
             $scan = $this->build_runtime_js_scan_suggestions($errors, $scripts);
             $dashboard_scan = array_merge(array(

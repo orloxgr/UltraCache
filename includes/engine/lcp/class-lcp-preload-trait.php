@@ -365,12 +365,15 @@ private function is_same_origin_public_resource_url($url)
         }
 
         $url_host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-        if ('' === $url_host || '' === $home_host) {
+        if ('' === $url_host) {
             return 0 === strpos($url, '/');
         }
+        if (function_exists('ultracache_is_public_site_url')) {
+            return ultracache_is_public_site_url($url);
+        }
 
-        return $url_host === $home_host;
+        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        return '' !== $home_host && $url_host === $home_host;
     }
 
 private function get_lcp_preload_image_type($url)

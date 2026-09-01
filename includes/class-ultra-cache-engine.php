@@ -7,7 +7,8 @@ require_once __DIR__ . '/core/html-variant-functions.php';
 require_once __DIR__ . '/core/srcset-functions.php';
 require_once __DIR__ . '/core/html-tag-scanner-functions.php';
 require_once __DIR__ . '/engine/class-engine-response-headers-trait.php';
-require_once __DIR__ . '/esi/class-esi-rendering-trait.php';
+require_once __DIR__ . '/integrations/varnish/esi/class-varnish-esi-rendering-trait.php';
+require_once __DIR__ . '/integrations/litespeed/esi/class-litespeed-esi-rendering-trait.php';
 require_once __DIR__ . '/engine/class-engine-litespeed-response-trait.php';
 require_once __DIR__ . '/engine/class-engine-conditional-response-trait.php';
 require_once __DIR__ . '/engine/class-engine-storage-trait.php';
@@ -26,14 +27,18 @@ require_once __DIR__ . '/engine/class-engine-hot-page-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-analytics-trait.php';
 require_once __DIR__ . '/engine/class-engine-async-css-trait.php';
 require_once __DIR__ . '/engine/class-engine-frontend-assets-trait.php';
-require_once __DIR__ . '/integrations/woocommerce/class-woocommerce-esi-trait.php';
+require_once __DIR__ . '/integrations/woocommerce/class-woocommerce-varnish-esi-trait.php';
+require_once __DIR__ . '/integrations/woocommerce/class-woocommerce-litespeed-esi-trait.php';
 require_once __DIR__ . '/integrations/elementor/class-elementor-page-css-dependency-trait.php';
+require_once __DIR__ . '/integrations/elementor/class-elementor-js-compatibility-trait.php';
+require_once __DIR__ . '/integrations/translatepress/class-translatepress-mutation-trait.php';
 require_once __DIR__ . '/maintenance/class-update-cache-purge-trait.php';
 
 class Ultra_Cache_Engine
 {
     use Ultra_Cache_Engine_Response_Headers_Trait;
-    use Ultra_Cache_Engine_ESI_Rendering_Trait;
+    use Ultra_Cache_Engine_Varnish_ESI_Rendering_Trait;
+    use Ultra_Cache_Engine_LiteSpeed_ESI_Rendering_Trait;
     use Ultra_Cache_Engine_LiteSpeed_Response_Trait;
     use Ultra_Cache_Engine_Conditional_Response_Trait;
     use Ultra_Cache_Engine_Storage_Trait;
@@ -52,8 +57,11 @@ class Ultra_Cache_Engine
     use Ultra_Cache_Engine_Analytics_Trait;
     use Ultra_Cache_Engine_Async_CSS_Trait;
     use Ultra_Cache_Engine_Frontend_Assets_Trait;
-    use Ultra_Cache_Engine_WooCommerce_ESI_Trait;
+    use Ultra_Cache_Engine_WooCommerce_Varnish_ESI_Trait;
+    use Ultra_Cache_Engine_WooCommerce_LiteSpeed_ESI_Trait;
     use Ultra_Cache_Engine_Elementor_Page_CSS_Dependency_Trait;
+    use Ultra_Cache_Engine_Elementor_JS_Compatibility_Trait;
+    use Ultra_Cache_Engine_TranslatePress_Mutation_Trait;
     use Ultra_Cache_Engine_Update_Cache_Purge_Trait;
 
     /** @var Ultra_Cache_Engine|null */
@@ -78,10 +86,22 @@ class Ultra_Cache_Engine
     private $template_enhancement_esi_callback_registered = false;
 
     /** @var bool */
+    private $template_enhancement_litespeed_esi_callback_registered = false;
+
+    /** @var bool */
+    private $litespeed_esi_parent_response_enabled = false;
+
+    /** @var bool */
+    private $litespeed_woocommerce_esi_provisional_request = false;
+
+    /** @var bool */
     private $template_enhancement_google_fonts_callback_registered = false;
 
     /** @var bool */
     private $template_enhancement_esi_late_registration_compatibility = false;
+
+    /** @var bool */
+    private $template_enhancement_litespeed_esi_late_registration_compatibility = false;
 
     /** @var bool */
     private $diagnostic_fallback_output_buffer_active = false;
@@ -106,6 +126,15 @@ class Ultra_Cache_Engine
 
     /** @var string */
     private $last_bypass_reason = '';
+
+    /** @var array<string, mixed> */
+    private $last_cache_eligibility = array(
+        'state' => 'BYPASS',
+        'cacheable' => false,
+        'reason' => 'not-evaluated',
+        'reasonLabel' => 'Not evaluated',
+        'context' => 'request',
+    );
 
     /** @var array<string, resource> */
     private $runtime_locks = array();
@@ -210,6 +239,12 @@ class Ultra_Cache_Engine
         // Cache invalidation hooks are required in both frontend and admin
         // contexts. They do not mutate rendered admin assets or output.
         add_action('save_post', array($this, 'handle_post_update'), 20);
+        add_action('wpml_after_save_post', array($this, 'handle_wpml_after_save_post'), 20, 4);
+        add_action('trp_save_editor_translations_regular_strings', array($this, 'handle_translatepress_regular_translation_save'), 20, 2);
+        add_action('trp_save_editor_translations_gettext_strings', array($this, 'handle_translatepress_gettext_translation_save'), 20, 2);
+        foreach (array('trp_update_post_slug', 'trp_update_term_slug', 'trp_update_taxonomy_slug', 'trp_update_post-type-base_slug', 'trp_update_other-slug_slug') as $translatepress_slug_hook) {
+            add_action($translatepress_slug_hook, array($this, 'handle_translatepress_slug_update'), 20, 4);
+        }
         add_action('before_delete_post', array($this, 'ultracache_delete_lcp_observations_for_post'), 10);
         add_action('before_delete_post', array($this, 'handle_post_deletion'), 20);
         add_action('wp_trash_post', array($this, 'ultracache_delete_lcp_observations_for_post'), 10);
@@ -222,6 +257,7 @@ class Ultra_Cache_Engine
         add_action('woocommerce_product_set_stock_status', array($this, 'handle_woocommerce_object_update'), 20);
         add_action('edited_term', array($this, 'handle_term_update'), 20, 3);
         add_action('created_term', array($this, 'handle_term_update'), 20, 3);
+        add_action('pre_delete_term', array($this, 'handle_term_deletion'), 20, 2);
         add_action('set_object_terms', array($this, 'handle_object_terms_set'), 20, 6);
         add_action('wp_update_nav_menu', array($this, 'handle_navigation_update'), 20, 2);
         add_action('customize_save_after', array($this, 'handle_global_frontend_change'), 20);
@@ -238,8 +274,12 @@ class Ultra_Cache_Engine
         add_action('pmxi_saved_post', array($this, 'handle_wp_all_import_record_saved'), 20, 3);
         add_action('pmxi_after_xml_import', array($this, 'handle_wp_all_import_complete'), 10, 2);
         add_action('ultracache_flush_affected_url_batch', array($this, 'process_persisted_affected_url_batch'));
+        add_action('shutdown', array($this, 'flush_translatepress_mutation_warm_hints'), PHP_INT_MAX - 30);
         add_action('shutdown', array($this, 'flush_request_affected_url_batch'), PHP_INT_MAX - 20);
-        $this->register_woocommerce_esi_hooks();
+        $this->register_woocommerce_varnish_esi_hooks();
+        $this->register_woocommerce_litespeed_esi_hooks();
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_woocommerce_variable_product_interaction_guard'), 99);
+        add_filter('wp_preload_resources', array($this, 'filter_woocommerce_variable_product_preloads'), 20);
 
         if (!$is_frontend_request) {
             return;
@@ -252,7 +292,6 @@ class Ultra_Cache_Engine
         // engine from affecting third-party admin script dependency graphs or
         // partially generated admin output.
         add_action('init', array($this, 'maybe_start_translatepress_final_output_buffer'), -1000);
-        add_action('init', array($this, 'maybe_apply_runtime_js_scan_anonymous_context'), -999);
         add_action('init', array($this, 'profile_init_checkpoint'), 0);
         add_action('wp_loaded', array($this, 'profile_wp_loaded_checkpoint'), 0);
         add_action('template_redirect', array($this, 'profile_template_redirect_checkpoint'), -1000);
@@ -262,6 +301,7 @@ class Ultra_Cache_Engine
         add_filter('wp_should_output_buffer_template_for_enhancement', array($this, 'should_force_template_enhancement_output_buffer'), PHP_INT_MAX);
         add_action('wp_template_enhancement_output_buffer_started', array($this, 'template_enhancement_output_buffer_started_checkpoint'), 0);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_script_loader'), -998);
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_elementor_compatibility_runtime_helper'), -997);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_runtime_font_helpers'), -997);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_lcp_observer_runtime_helper'), -996);
         add_action('wp_enqueue_scripts', array($this, 'profile_wp_enqueue_scripts_start_checkpoint'), -1000);
@@ -270,6 +310,7 @@ class Ultra_Cache_Engine
         add_action('wp_enqueue_scripts', array($this, 'enqueue_mailerlite_lazy_nonce_helper'), 0);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_async_css_runtime_helper'), -994);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_lazy_third_party_iframe_runtime_helper'), -993);
+        add_action('wp_enqueue_scripts', array($this, 'ultracache_finalize_frontend_runtime_bundles'), PHP_INT_MAX - 100);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_page_css_bundle_stylesheet'), 9999);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_delayed_icon_font_stylesheets'), 10000);
         add_action('wp_enqueue_scripts', array($this, 'enqueue_local_font_display_patch_stylesheet'), 10001);
@@ -284,6 +325,7 @@ class Ultra_Cache_Engine
         add_action('shutdown', array($this, 'release_page_generation_lock_on_shutdown'), PHP_INT_MAX - 1);
         add_action('shutdown', array($this, 'update_store_profile_after_shutdown'), PHP_INT_MAX);
         add_filter('script_loader_tag', array($this, 'defer_scripts'), 10, 3);
+        add_filter('script_loader_tag', array($this, 'ultracache_finalize_runtime_bundle_activation_script_tag'), PHP_INT_MAX - 1, 3);
         add_filter('script_loader_tag', array($this, 'annotate_runtime_js_inventory_script_tag'), PHP_INT_MAX, 3);
         add_filter('style_loader_src', array($this, 'add_display_swap_to_google_fonts'), 20, 2);
         add_filter('style_loader_tag', array($this, 'add_local_font_display_patch_style_attributes'), 20, 4);
@@ -514,16 +556,23 @@ class Ultra_Cache_Engine
         $this->profile_request_checkpoint('maybe_start_buffering_after_reentry_check');
 
         $this->profile_request_checkpoint('maybe_start_buffering_before_should_bypass');
-        $should_bypass = $this->should_bypass_cache();
+        $eligibility = $this->get_cache_eligibility_decision();
+        $should_bypass = empty($eligibility['cacheable']);
+        $eligibility_reason = (string) ($eligibility['reason'] ?? '');
+        $eligibility_state = (string) ($eligibility['state'] ?? 'BYPASS');
         $this->profile_request_checkpoint('maybe_start_buffering_after_should_bypass', array(
             'result' => $should_bypass ? 'true' : 'false',
-            'reason' => (string) $this->last_bypass_reason,
+            'state' => $eligibility_state,
+            'reason' => $eligibility_reason,
         ));
         if ($should_bypass) {
-            $this->profile_request_checkpoint('bypass_selected', array('reason' => (string) $this->last_bypass_reason));
-            $this->record_analytics_bypass($this->last_bypass_reason);
+            $this->profile_request_checkpoint('bypass_selected', array(
+                'state' => $eligibility_state,
+                'reason' => $eligibility_reason,
+            ));
+            $this->record_analytics_bypass($eligibility_reason);
             $this->send_shared_html_cache_headers(false);
-            $this->send_debug_headers('BYPASS', $this->last_bypass_reason);
+            $this->send_debug_headers('BYPASS', $eligibility_reason);
             return;
         }
 
@@ -693,17 +742,38 @@ class Ultra_Cache_Engine
         }
         $this->template_enhancement_callbacks_registered = true;
 
+        if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+            return;
+        }
+
         $google_fonts_required = $this->should_force_template_buffer_for_google_fonts_cleanup();
         if ($google_fonts_required) {
             add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_live_google_fonts_output_cleanup'), 90);
             $this->template_enhancement_google_fonts_callback_registered = true;
         }
 
-        $esi_enabled = function_exists('ultracache_esi_is_enabled') && ultracache_esi_is_enabled();
+        /*
+         * Browser Runtime Scan must execute the same final frontend rewrite
+         * pipeline as a real anonymous optimized visitor. The scan request is
+         * intentionally cache-bypassed, so maybe_start_buffering() does not
+         * register cache_output_callback(). Register a transform-only callback
+         * on WordPress' template-enhancement buffer instead: it applies the
+         * normal frontend transformations but never reads or writes page cache.
+         */
+        $runtime_js_scan_required = method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request();
+        if ($runtime_js_scan_required) {
+            $cache_callback_registered = function_exists('has_filter')
+                && false !== has_filter('wp_template_enhancement_output_buffer', array($this, 'cache_output_callback'));
+            if (!$cache_callback_registered) {
+                add_filter('wp_template_enhancement_output_buffer', array($this, 'runtime_js_scan_transform_output_callback'), 100);
+            }
+        }
+
+        $esi_enabled = function_exists('ultracache_varnish_esi_is_enabled') && ultracache_varnish_esi_is_enabled();
         $esi_diagnostics = array();
         $esi_has_fragments = false;
-        if ($esi_enabled && class_exists('Ultra_Cache_ESI_Registry')) {
-            $registry = Ultra_Cache_ESI_Registry::instance();
+        if ($esi_enabled && class_exists('Ultra_Cache_Varnish_ESI_Registry')) {
+            $registry = Ultra_Cache_Varnish_ESI_Registry::instance();
             if (method_exists($registry, 'get_template_buffer_diagnostics')) {
                 $candidate_diagnostics = $registry->get_template_buffer_diagnostics();
                 if (is_array($candidate_diagnostics)) {
@@ -727,12 +797,32 @@ class Ultra_Cache_Engine
                 $esi_diagnostics
             );
 
+        $litespeed_esi_enabled = function_exists('ultracache_litespeed_esi_is_enabled') && ultracache_litespeed_esi_is_enabled();
+        $litespeed_esi_diagnostics = array();
+        $litespeed_esi_has_fragments = false;
+        if ($litespeed_esi_enabled && class_exists('Ultra_Cache_LiteSpeed_ESI_Registry')) {
+            $litespeed_registry = Ultra_Cache_LiteSpeed_ESI_Registry::instance();
+            if (method_exists($litespeed_registry, 'get_template_buffer_diagnostics')) {
+                $candidate_litespeed_diagnostics = $litespeed_registry->get_template_buffer_diagnostics();
+                if (is_array($candidate_litespeed_diagnostics)) {
+                    $litespeed_esi_diagnostics = $candidate_litespeed_diagnostics;
+                }
+            }
+            $litespeed_esi_has_fragments = method_exists($litespeed_registry, 'has_fragments') && $litespeed_registry->has_fragments();
+        }
+        $this->template_enhancement_litespeed_esi_late_registration_compatibility = $litespeed_esi_enabled
+            && (bool) apply_filters(
+                'ultracache_litespeed_esi_force_template_buffer_for_late_registration',
+                false,
+                $litespeed_esi_diagnostics
+            );
+
         $output_filter_registered = function_exists('has_filter')
             && false !== has_filter('wp_template_enhancement_output_buffer');
         $finalized_action_registered = function_exists('has_action')
             && false !== has_action('wp_finalized_template_enhancement_output_buffer');
         $other_buffer_required = $this->template_enhancement_buffer_required
-            || (method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request())
+            || $runtime_js_scan_required
             || $google_fonts_required
             || $output_filter_registered
             || $finalized_action_registered;
@@ -745,8 +835,20 @@ class Ultra_Cache_Engine
                 || $other_buffer_required
             )
         ) {
-            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_esi_template_output_buffer'), PHP_INT_MAX - 1);
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_varnish_esi_template_output_buffer'), PHP_INT_MAX - 1);
             $this->template_enhancement_esi_callback_registered = true;
+        }
+
+        if (
+            $litespeed_esi_enabled
+            && (
+                $litespeed_esi_has_fragments
+                || $this->template_enhancement_litespeed_esi_late_registration_compatibility
+                || $other_buffer_required
+            )
+        ) {
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_litespeed_esi_template_output_buffer'), PHP_INT_MAX - 2);
+            $this->template_enhancement_litespeed_esi_callback_registered = true;
         }
 
         $this->profile_request_checkpoint('template_enhancement_callbacks_registered', array(
@@ -755,6 +857,9 @@ class Ultra_Cache_Engine
             'esi_has_fragments' => $esi_has_fragments ? 'yes' : 'no',
             'esi_callback' => $this->template_enhancement_esi_callback_registered ? 'yes' : 'no',
             'esi_late_registration_compatibility' => $this->template_enhancement_esi_late_registration_compatibility ? 'yes' : 'no',
+            'litespeed_esi_enabled' => $litespeed_esi_enabled ? 'yes' : 'no',
+            'litespeed_esi_has_fragments' => $litespeed_esi_has_fragments ? 'yes' : 'no',
+            'litespeed_esi_callback' => $this->template_enhancement_litespeed_esi_callback_registered ? 'yes' : 'no',
             'other_buffer_required' => $other_buffer_required ? 'yes' : 'no',
         ));
     }
@@ -762,6 +867,10 @@ class Ultra_Cache_Engine
     public function should_force_template_enhancement_output_buffer($should_buffer)
     {
         $this->register_template_enhancement_output_callbacks();
+
+        if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+            return $should_buffer;
+        }
 
         $esi_diagnostics = array(
             'has_fragments' => false,
@@ -771,12 +880,30 @@ class Ultra_Cache_Engine
             'decision_observed' => false,
             'registered_after_init_started_count' => 0,
         );
-        if (class_exists('Ultra_Cache_ESI_Registry')) {
-            $registry = Ultra_Cache_ESI_Registry::instance();
+        if (class_exists('Ultra_Cache_Varnish_ESI_Registry')) {
+            $registry = Ultra_Cache_Varnish_ESI_Registry::instance();
             if (method_exists($registry, 'note_template_buffer_decision')) {
                 $candidate_diagnostics = $registry->note_template_buffer_decision();
                 if (is_array($candidate_diagnostics)) {
                     $esi_diagnostics = array_merge($esi_diagnostics, $candidate_diagnostics);
+                }
+            }
+        }
+
+        $litespeed_esi_diagnostics = array(
+            'has_fragments' => false,
+            'fragment_count' => 0,
+            'fragment_count_at_decision' => 0,
+            'late_fragment_count' => 0,
+            'decision_observed' => false,
+            'registered_after_init_started_count' => 0,
+        );
+        if (class_exists('Ultra_Cache_LiteSpeed_ESI_Registry')) {
+            $litespeed_registry = Ultra_Cache_LiteSpeed_ESI_Registry::instance();
+            if (method_exists($litespeed_registry, 'note_template_buffer_decision')) {
+                $candidate_litespeed_diagnostics = $litespeed_registry->note_template_buffer_decision();
+                if (is_array($candidate_litespeed_diagnostics)) {
+                    $litespeed_esi_diagnostics = array_merge($litespeed_esi_diagnostics, $candidate_litespeed_diagnostics);
                 }
             }
         }
@@ -800,8 +927,8 @@ class Ultra_Cache_Engine
         }
 
         if (
-            function_exists('ultracache_esi_is_enabled')
-            && ultracache_esi_is_enabled()
+            function_exists('ultracache_varnish_esi_is_enabled')
+            && ultracache_varnish_esi_is_enabled()
             && (
                 !empty($esi_diagnostics['has_fragments'])
                 || $this->template_enhancement_esi_late_registration_compatibility
@@ -820,13 +947,38 @@ class Ultra_Cache_Engine
         }
 
         if (
+            function_exists('ultracache_litespeed_esi_is_enabled')
+            && ultracache_litespeed_esi_is_enabled()
+            && (
+                !empty($litespeed_esi_diagnostics['has_fragments'])
+                || $this->template_enhancement_litespeed_esi_late_registration_compatibility
+            )
+        ) {
+            $reason = !empty($litespeed_esi_diagnostics['has_fragments'])
+                ? 'litespeed-esi-fragments'
+                : 'litespeed-esi-late-registration';
+            $this->record_template_enhancement_buffer_decision($reason, true, $litespeed_esi_diagnostics);
+            return true;
+        }
+
+        if (
             $should_buffer
-            && function_exists('ultracache_esi_is_enabled')
-            && ultracache_esi_is_enabled()
+            && function_exists('ultracache_varnish_esi_is_enabled')
+            && ultracache_varnish_esi_is_enabled()
             && !$this->template_enhancement_esi_callback_registered
         ) {
-            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_esi_template_output_buffer'), PHP_INT_MAX - 1);
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_varnish_esi_template_output_buffer'), PHP_INT_MAX - 1);
             $this->template_enhancement_esi_callback_registered = true;
+        }
+
+        if (
+            $should_buffer
+            && function_exists('ultracache_litespeed_esi_is_enabled')
+            && ultracache_litespeed_esi_is_enabled()
+            && !$this->template_enhancement_litespeed_esi_callback_registered
+        ) {
+            add_filter('wp_template_enhancement_output_buffer', array($this, 'apply_litespeed_esi_template_output_buffer'), PHP_INT_MAX - 2);
+            $this->template_enhancement_litespeed_esi_callback_registered = true;
         }
 
         $this->record_template_enhancement_buffer_decision(
@@ -881,10 +1033,16 @@ class Ultra_Cache_Engine
     {
         $this->template_enhancement_buffer_started = true;
         if (
-            class_exists('Ultra_Cache_ESI_Registry')
-            && method_exists(Ultra_Cache_ESI_Registry::instance(), 'note_template_buffer_started')
+            class_exists('Ultra_Cache_Varnish_ESI_Registry')
+            && method_exists(Ultra_Cache_Varnish_ESI_Registry::instance(), 'note_template_buffer_started')
         ) {
-            Ultra_Cache_ESI_Registry::instance()->note_template_buffer_started();
+            Ultra_Cache_Varnish_ESI_Registry::instance()->note_template_buffer_started();
+        }
+        if (
+            class_exists('Ultra_Cache_LiteSpeed_ESI_Registry')
+            && method_exists(Ultra_Cache_LiteSpeed_ESI_Registry::instance(), 'note_template_buffer_started')
+        ) {
+            Ultra_Cache_LiteSpeed_ESI_Registry::instance()->note_template_buffer_started();
         }
         $decision = is_array($this->template_enhancement_buffer_decision)
             ? $this->template_enhancement_buffer_decision
@@ -1114,6 +1272,52 @@ class Ultra_Cache_Engine
     }
 
 
+    /**
+     * Apply the normal frontend transformation pipeline to an authorized
+     * Browser Runtime Scan response without participating in page-cache
+     * lookup/store semantics.
+     *
+     * @param string $html Full frontend HTML captured by WordPress' template
+     *                     enhancement output buffer.
+     * @return string
+     */
+    public function runtime_js_scan_transform_output_callback($html)
+    {
+        if (!method_exists($this, 'is_runtime_js_scan_request') || !$this->is_runtime_js_scan_request()) {
+            return $html;
+        }
+
+        if (!is_string($html) || '' === $html) {
+            return $html;
+        }
+
+        $target_url = function_exists('ultracache_runtime_js_scan_current_request_url')
+            ? ultracache_runtime_js_scan_current_request_url()
+            : $this->get_current_request_url();
+        if ('' === (string) $target_url) {
+            $target_url = $this->get_current_request_url();
+        }
+
+        $this->profile_request_checkpoint('runtime_js_scan_transform_start', array(
+            'html_bytes' => strlen($html),
+            'target_url' => (string) $target_url,
+        ));
+
+        $transformed = $this->process_final_html_for_cache_storage($html, false, array(
+            'accept'      => ultracache_server_value('HTTP_ACCEPT'),
+            'source'      => 'runtime-js-scan',
+            'url'         => $target_url,
+            'request_url' => $target_url,
+        ));
+
+        $this->profile_request_checkpoint('runtime_js_scan_transform_end', array(
+            'html_bytes' => is_string($transformed) ? strlen($transformed) : 0,
+        ));
+
+        return is_string($transformed) ? $transformed : $html;
+    }
+
+
     public function cache_output_callback($html)
     {
         $this->cache_output_callback_ran = true;
@@ -1135,25 +1339,66 @@ class Ultra_Cache_Engine
             return $html;
         }
 
+        $current_request_url = $this->get_current_request_url();
+        if ($this->is_warm_raw_source_loopback_request()) {
+            // warm_url() owns final cache transformation for authenticated source-render
+            // loopbacks. Return the rendered document untouched so one source render can
+            // be finalized independently for orig/WebP/AVIF without a second JS rewrite.
+            if (!headers_sent()) {
+                header('X-UltraCache-Warm-Body-Contract: raw-v1');
+                header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
+                header('Pragma: no-cache');
+            }
+            if ($this->is_internal_revalidate_request()) {
+                $this->clear_revalidate_lock($current_request_url);
+                if (!headers_sent()) {
+                    header('X-Ultra-Cache-Revalidate: source-rendered');
+                }
+            }
+            $this->release_page_generation_lock();
+            return $html;
+        }
+
         $this->start_store_profile($html);
 
-        $current_request_url = $this->get_current_request_url();
         $html = $this->process_final_html_for_cache_storage($html, true, array(
             'accept'      => ultracache_server_value('HTTP_ACCEPT'),
             'source'      => 'store',
             'url'         => $current_request_url,
             'request_url' => $current_request_url,
         ));
-        $esi_metadata = method_exists($this, 'get_esi_parent_metadata_from_html')
-            ? $this->get_esi_parent_metadata_from_html($html)
+        $esi_metadata = method_exists($this, 'get_varnish_esi_parent_metadata_from_html')
+            ? $this->get_varnish_esi_parent_metadata_from_html($html)
             : array();
-        $skip_reason = $this->get_skip_store_reason($html);
+        $litespeed_esi_metadata = method_exists($this, 'get_litespeed_esi_parent_metadata_from_html')
+            ? $this->get_litespeed_esi_parent_metadata_from_html($html)
+            : array();
+
+        $skip_reason = '';
+        if (!empty($this->litespeed_woocommerce_esi_provisional_request)) {
+            $verified_woo_esi_parent = !empty($litespeed_esi_metadata)
+                && !empty($litespeed_esi_metadata['woocommerceMiniCart']);
+            if (!$verified_woo_esi_parent) {
+                $skip_reason = 'litespeed-woo-esi-parent-required';
+            }
+        }
+        if ('' === $skip_reason) {
+            $skip_reason = $this->get_skip_store_reason($html);
+        }
+        if (
+            '' !== $skip_reason
+            && method_exists($this, 'can_store_anonymous_litespeed_woocommerce_esi_parent_with_response_cookie')
+            && $this->can_store_anonymous_litespeed_woocommerce_esi_parent_with_response_cookie($skip_reason, $litespeed_esi_metadata)
+        ) {
+            $this->profile_request_checkpoint('store_allowed_litespeed_woo_esi_anonymous_response_cookie');
+            $skip_reason = '';
+        }
+        $this->send_response_cookie_diagnostic_headers($skip_reason);
         if ('' !== $skip_reason) {
             $this->record_analytics_store_skip($skip_reason);
             if ($this->is_internal_revalidate_request()) {
                 $this->clear_revalidate_lock($current_request_url);
             }
-            $this->send_set_cookie_skip_diagnostic_header($skip_reason);
             $this->send_shared_html_cache_headers(false, null, '', $esi_metadata);
             $this->send_debug_headers('SKIP', $skip_reason);
             $this->finalize_store_profile('SKIP', $skip_reason, '');
@@ -1284,9 +1529,28 @@ class Ultra_Cache_Engine
             $html = $this->profile_store_stage('remove-hrefless-link-placeholders', $html, function ($html) {
                 return $this->remove_hrefless_ultracache_link_placeholders($html);
             });
+            if (method_exists($this, 'apply_woocommerce_varnish_esi_auto_mini_cart_placeholders')) {
+                $html = $this->profile_store_stage('woocommerce-auto-esi-placeholder-preparation', $html, function ($html) {
+                    return $this->apply_woocommerce_varnish_esi_auto_mini_cart_placeholders($html);
+                });
+            }
+            if (method_exists($this, 'apply_woocommerce_litespeed_esi_auto_mini_cart_placeholders')) {
+                $html = $this->profile_store_stage('woocommerce-litespeed-auto-esi-placeholder-preparation', $html, function ($html) {
+                    return $this->apply_woocommerce_litespeed_esi_auto_mini_cart_placeholders($html);
+                });
+            }
             $html = $this->profile_store_stage('final-esi-placeholder-conversion', $html, function ($html) {
-                return $this->apply_esi_placeholders_before_cache_store($html);
+                return $this->apply_varnish_esi_placeholders_before_cache_store($html);
             });
+            if (
+                function_exists('ultracache_litespeed_esi_is_enabled')
+                && ultracache_litespeed_esi_is_enabled()
+                && method_exists($this, 'apply_litespeed_esi_template_output_buffer')
+            ) {
+                $html = $this->profile_store_stage('final-litespeed-esi-placeholder-conversion', $html, function ($html) {
+                    return $this->apply_litespeed_esi_template_output_buffer($html);
+                });
+            }
 
             return is_string($html) ? $html : '';
         }
@@ -1299,7 +1563,20 @@ class Ultra_Cache_Engine
         $html = $this->normalize_generated_asset_urls_to_root_relative($html, $context);
         $html = $this->strip_internal_control_query_args_from_cached_html($html);
         $html = $this->remove_hrefless_ultracache_link_placeholders($html);
-        $html = $this->apply_esi_placeholders_before_cache_store($html);
+        if (method_exists($this, 'apply_woocommerce_varnish_esi_auto_mini_cart_placeholders')) {
+            $html = $this->apply_woocommerce_varnish_esi_auto_mini_cart_placeholders($html);
+        }
+        if (method_exists($this, 'apply_woocommerce_litespeed_esi_auto_mini_cart_placeholders')) {
+            $html = $this->apply_woocommerce_litespeed_esi_auto_mini_cart_placeholders($html);
+        }
+        $html = $this->apply_varnish_esi_placeholders_before_cache_store($html);
+        if (
+            function_exists('ultracache_litespeed_esi_is_enabled')
+            && ultracache_litespeed_esi_is_enabled()
+            && method_exists($this, 'apply_litespeed_esi_template_output_buffer')
+        ) {
+            $html = $this->apply_litespeed_esi_template_output_buffer($html);
+        }
 
         return is_string($html) ? $html : '';
     }
@@ -1336,7 +1613,9 @@ class Ultra_Cache_Engine
             'ultracache_profile_run',
             'ultracache_runtime_js_scan',
             'ultracache_runtime_js_scan_id',
+            'ultracache_runtime_js_scan_token',
             'ultracache_runtime_js_scan_nonce',
+            'ultracache_runtime_js_scan_mode',
             'ultracache_runtime_js_scan_context',
         );
 
@@ -1629,25 +1908,19 @@ class Ultra_Cache_Engine
             return 'fragile-revslider-shell';
         }
 
-        $response_cookie_names = array();
-        $checked_response_cookies = false;
-        foreach (headers_list() as $header) {
-            if (0 === stripos($header, 'Set-Cookie:')) {
-                if (!$checked_response_cookies) {
-                    $response_cookie_names = $this->get_response_set_cookie_names();
-                    $checked_response_cookies = true;
+        $response_cookie_names = $this->get_response_set_cookie_names();
+        if (!empty($response_cookie_names)) {
+            $response_cookie_policy = $this->get_response_cookie_cache_policy($response_cookie_names, $settings);
+            if ('reject' === (string) ($response_cookie_policy['decision'] ?? '')) {
+                $matched_cookies = array_values((array) ($response_cookie_policy['matchedCookies'] ?? array()));
+                if ('private-response-cookie' === (string) ($response_cookie_policy['reason'] ?? '') && !empty($matched_cookies)) {
+                    return 'set-cookie-private:' . implode(',', array_slice($matched_cookies, 0, 6));
                 }
-
-                if (!empty($settings['cache_safe_tracking_cookies']) && !empty($response_cookie_names) && $this->all_cookie_names_match_patterns($response_cookie_names, $this->get_safe_tracking_cookie_patterns($settings))) {
-                    continue;
-                }
-
-                if (!empty($response_cookie_names)) {
-                    return 'set-cookie:' . implode(',', array_slice($response_cookie_names, 0, 6));
-                }
-                return 'set-cookie';
+                return 'set-cookie:' . implode(',', array_slice($response_cookie_names, 0, 6));
             }
+        }
 
+        foreach (headers_list() as $header) {
             if (0 === stripos($header, 'Cache-Control:')) {
                 $cache_control_value = strtolower(trim(substr((string) $header, strlen('Cache-Control:'))));
                 if (1 === preg_match('/(?:^|[,\s])(private|no-store|no-cache)(?:$|[,=\s])/', $cache_control_value, $cache_control_match)) {
@@ -1683,9 +1956,9 @@ class Ultra_Cache_Engine
         return array_values(array_unique($names));
     }
 
-    private function send_set_cookie_skip_diagnostic_header($skip_reason)
+    private function send_response_cookie_diagnostic_headers($skip_reason = '')
     {
-        if (headers_sent() || 0 !== strpos((string) $skip_reason, 'set-cookie')) {
+        if (headers_sent()) {
             return;
         }
 
@@ -1694,10 +1967,24 @@ class Ultra_Cache_Engine
             return;
         }
 
+        $is_set_cookie_rejection = 0 === strpos((string) $skip_reason, 'set-cookie');
+        if (!$is_set_cookie_rejection && !$this->is_internal_revalidate_request() && !$this->should_send_source_debug_header()) {
+            return;
+        }
+
         $value = implode(',', array_slice($cookie_names, 0, 12));
         $value = substr((string) preg_replace('/[^A-Za-z0-9_,.\-]/', '', $value), 0, 180);
         if ('' !== $value) {
             header('X-Ultra-Cache-Set-Cookie-Names: ' . $value);
+        }
+
+        $settings = $this->get_settings();
+        $policy = $this->get_response_cookie_cache_policy($cookie_names, $settings);
+        $decision = sanitize_key((string) ($policy['decision'] ?? ''));
+        $reason = sanitize_key((string) ($policy['reason'] ?? ''));
+        $policy_header = trim($decision . ('' !== $reason ? '-' . $reason : ''), '-');
+        if ('' !== $policy_header) {
+            header('X-Ultra-Cache-Response-Cookie-Policy: ' . substr($policy_header, 0, 120));
         }
     }
 
@@ -1723,6 +2010,12 @@ class Ultra_Cache_Engine
         }
 
         $this->send_html_variant_headers();
+
+        $eligibility = $this->get_last_cache_eligibility_decision();
+        $eligibility_state = strtoupper((string) ($eligibility['state'] ?? ''));
+        if (in_array($eligibility_state, array('CACHEABLE', 'BYPASS', 'PRIVATE'), true)) {
+            header('X-Ultra-Cache-Eligibility: ' . $eligibility_state);
+        }
 
         if ('' !== $reason) {
             $reason = substr((string) preg_replace('/[^A-Za-z0-9_. -]/', '-', (string) $reason), 0, 120);

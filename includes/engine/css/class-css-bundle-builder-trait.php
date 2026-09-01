@@ -29,29 +29,75 @@ private function is_frontpage_request_url($url = '')
     {
         $current_url = '' !== (string) $url ? (string) $url : $this->get_current_request_url();
         $normalized_current = $this->normalize_url($current_url);
-        $normalized_home = $this->normalize_url(home_url('/'));
+        if ('' === $normalized_current) {
+            return false;
+        }
 
-        return '' !== $normalized_current && '' !== $normalized_home && $normalized_current === $normalized_home;
+        $targets = function_exists('ultracache_get_frontpage_warm_targets')
+            ? ultracache_get_frontpage_warm_targets()
+            : array(home_url('/'));
+        foreach ((array) $targets as $target) {
+            $normalized_target = $this->normalize_url((string) $target);
+            if ('' !== $normalized_target && $normalized_current === $normalized_target) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 public function warm_frontpage_html(array $args = array())
     {
-        $frontpage_url = home_url('/');
-        $result = $this->warm_url($frontpage_url, $args);
+        $targets = function_exists('ultracache_get_frontpage_warm_targets')
+            ? ultracache_get_frontpage_warm_targets()
+            : array(home_url('/'));
+        $results = array();
+        foreach ((array) $targets as $frontpage_url) {
+            $frontpage_url = esc_url_raw((string) $frontpage_url);
+            if ('' === $frontpage_url) {
+                continue;
+            }
 
-        if (!empty($result['success'])) {
-            $result['message'] = 'Front page HTML cache warmed.';
-            if (!empty($result['files']) && is_array($result['files'])) {
-                $result['message'] .= ' Generated ' . count($result['files']) . ' cache file(s).';
+            $result = $this->warm_url($frontpage_url, $args);
+            if (!empty($result['success'])) {
+                $result['message'] = 'Front page HTML cache warmed.';
+                if (!empty($result['files']) && is_array($result['files'])) {
+                    $result['message'] .= ' Generated ' . count($result['files']) . ' cache file(s).';
+                }
+            }
+            $results[] = $result;
+
+            if (!empty($result['ownershipLost'])) {
+                break;
             }
         }
 
-        return $result;
+        return function_exists('ultracache_summarize_frontpage_warm_results')
+            ? ultracache_summarize_frontpage_warm_results($results, 'Front page HTML warm')
+            : (isset($results[0]) ? $results[0] : array('success' => false, 'message' => 'No front page warm target was available.'));
     }
 
 public function warm_frontpage_html_with_css(array $args = array())
     {
-        return $this->build_frontpage_css_bundle(home_url('/'), $args);
+        $targets = function_exists('ultracache_get_frontpage_warm_targets')
+            ? ultracache_get_frontpage_warm_targets()
+            : array(home_url('/'));
+        $results = array();
+        foreach ((array) $targets as $frontpage_url) {
+            $frontpage_url = esc_url_raw((string) $frontpage_url);
+            if ('' === $frontpage_url) {
+                continue;
+            }
+            $result = $this->build_frontpage_css_bundle($frontpage_url, $args);
+            $results[] = $result;
+            if (!empty($result['ownershipLost'])) {
+                break;
+            }
+        }
+
+        return function_exists('ultracache_summarize_frontpage_warm_results')
+            ? ultracache_summarize_frontpage_warm_results($results, 'Front page HTML + CSS warm')
+            : (isset($results[0]) ? $results[0] : array('success' => false, 'message' => 'No front page CSS warm target was available.'));
     }
 
 public function build_frontpage_css_bundle($url = '', array $args = array())
@@ -72,9 +118,14 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
                 return false;
             }
         };
+        $source_html = isset($args['source_html']) && is_string($args['source_html']) ? (string) $args['source_html'] : '';
+        unset($args['source_html']);
         $skip_final_warm = !empty($args['skip_final_warm']);
         $ignore_runtime_bypass = !empty($args['ignore_runtime_bypass']);
-        $request_timeout = isset($args['request_timeout']) ? max(5, min(120, (int) $args['request_timeout'])) : 10;
+        $default_request_timeout = function_exists('ultracache_get_php_max_execution_time_seconds')
+            ? ultracache_get_php_max_execution_time_seconds()
+            : max(0, (int) ini_get('max_execution_time'));
+        $request_timeout = isset($args['request_timeout']) ? max(0, (int) $args['request_timeout']) : $default_request_timeout;
         $frontpage_url = '' !== (string) $url ? esc_url_raw((string) $url) : home_url('/');
         $result = array(
             'success' => false,
@@ -104,7 +155,9 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
         }
 
         try {
-            $scan = $this->fetch_frontpage_css_source_html($frontpage_url, $request_timeout);
+            $scan = '' !== $source_html
+                ? array('success' => true, 'message' => '', 'html' => $source_html, 'source' => 'captured-warm-html')
+                : $this->fetch_frontpage_css_source_html($frontpage_url, $request_timeout);
             if (empty($scan['success']) || empty($scan['html'])) {
                 $result['message'] = !empty($scan['message']) ? (string) $scan['message'] : 'Could not fetch page HTML.';
                 $result['retryable'] = !empty($scan['retryable']);
@@ -198,6 +251,7 @@ public function build_frontpage_css_bundle($url = '', array $args = array())
             $result['sourceUrls'] = array_values(array_unique(array_map('strval', (array) ($prepared['sourceUrls'] ?? array()))));
             $result['sourceDetails'] = isset($prepared['sourceDetails']) && is_array($prepared['sourceDetails']) ? $prepared['sourceDetails'] : array();
             $result['sourceBytesTotal'] = isset($prepared['sourceBytesTotal']) ? (int) $prepared['sourceBytesTotal'] : 0;
+            $result['sourceHtmlReused'] = '' !== $source_html;
             $result['warmResult'] = is_array($warm_result) ? $warm_result : array();
             $result['warmVerification'] = is_array($verification) ? $verification : array();
 
@@ -432,9 +486,9 @@ private function collect_css_bundle_link_tags_from_html($html, $head_only = true
         return $result;
     }
 
-private function fetch_frontpage_css_source_html($url, $request_timeout = 10)
+private function fetch_frontpage_css_source_html($url, $request_timeout = 0)
     {
-        $request_timeout = max(5, min(120, (int) $request_timeout));
+        $request_timeout = max(0, (int) $request_timeout);
         $scan_url = add_query_arg(
             array(
                 'ultracache_frontpage_css_scan' => 1,
@@ -675,9 +729,14 @@ private function get_safe_frontpage_stylesheet_asset($tag_html, $page_url = '', 
         }
 
         $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+        if ('' === $host || (function_exists('ultracache_is_local_site_url') && !ultracache_is_local_site_url($absolute_url))) {
             return array();
+        }
+        if (!function_exists('ultracache_is_local_site_url')) {
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array();
+            }
         }
 
         $path = (string) wp_parse_url($absolute_url, PHP_URL_PATH);
@@ -1613,9 +1672,14 @@ private function get_leftover_css_bundle_candidate_from_tag($tag_html, $page_url
         }
 
         $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+        if ('' === $host || (function_exists('ultracache_is_local_site_url') && !ultracache_is_local_site_url($absolute_url))) {
             return array('asset' => array(), 'skip' => 'nonlocal');
+        }
+        if (!function_exists('ultracache_is_local_site_url')) {
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
         }
 
         $path = (string) wp_parse_url($absolute_url, PHP_URL_PATH);
@@ -1695,9 +1759,14 @@ private function get_leftover_css_bundle_candidate_from_link_processor($processo
         }
 
         $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+        if ('' === $host || (function_exists('ultracache_is_local_site_url') && !ultracache_is_local_site_url($absolute_url))) {
             return array('asset' => array(), 'skip' => 'nonlocal');
+        }
+        if (!function_exists('ultracache_is_local_site_url')) {
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
         }
 
         $path = (string) wp_parse_url($absolute_url, PHP_URL_PATH);
@@ -1816,9 +1885,14 @@ private function get_font_mix_css_bundle_candidate_from_link_processor($processo
         }
 
         $host = (string) wp_parse_url($absolute_url, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $host || '' === $home_host || strtolower($host) !== strtolower($home_host)) {
+        if ('' === $host || (function_exists('ultracache_is_local_site_url') && !ultracache_is_local_site_url($absolute_url))) {
             return array('asset' => array(), 'skip' => 'nonlocal');
+        }
+        if (!function_exists('ultracache_is_local_site_url')) {
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $home_host || strtolower($host) !== strtolower($home_host)) {
+                return array('asset' => array(), 'skip' => 'nonlocal');
+            }
         }
 
         $url_path = strtolower((string) wp_parse_url($absolute_url, PHP_URL_PATH));

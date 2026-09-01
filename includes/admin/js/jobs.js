@@ -293,6 +293,7 @@
 			});
 			let exclusiveToken = '';
 			let completed = false;
+			let outcome = { completed: false, paused: false, failed: false, state: null };
 			let batchIterationCount = 0;
 			let noProgressCount = 0;
 			let noProgressStartedAt = null;
@@ -443,7 +444,8 @@
 								}
 							}
 							onPaused(state, exclusiveToken);
-							return;
+							outcome = { completed: false, paused: true, failed: false, state };
+							return outcome;
 						}
 						const applied = applyJobItemResult(state, itemResult, Math.max(0, Date.now() - itemStartedAt), {
 							shouldMeasureEta,
@@ -489,6 +491,7 @@
 					pushToast(finalNotice);
 					markProcessComplete(state);
 					persistJobState(null);
+					outcome = { completed: true, paused: false, failed: false, state };
 				}
 			} catch (error) {
 				const failureText = error && error.message ? error.message : getFailureText(state.type);
@@ -507,6 +510,7 @@
 					}
 				}
 				pushToast({ type: 'error', text: failureText });
+				outcome = { completed: false, paused: false, failed: true, state };
 			} finally {
 				resetCancel();
 				if (shouldAcquireExclusiveSession(state.type) && exclusiveToken && shouldReleaseExclusiveSessionOnExit(state, completed)) {
@@ -535,6 +539,7 @@
 				}
 				setBusy(false);
 			}
+			return outcome;
 		};
 	}
 

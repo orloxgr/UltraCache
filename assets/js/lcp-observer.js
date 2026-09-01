@@ -60,8 +60,13 @@
     var inFlight = false;
     var observer = null;
     var fallbackTimer = 0;
-    var runtimeImageRequestModes = Object.create(null);
-    var restoreRuntimeImageObserver = null;
+    var requestCredentialsBridge = window.__ultracacheLcpRequestCredentialsV124 || null;
+    var runtimeImageRequestModes = requestCredentialsBridge && requestCredentialsBridge.modes
+        ? requestCredentialsBridge.modes
+        : Object.create(null);
+    var restoreRuntimeImageObserver = requestCredentialsBridge && typeof requestCredentialsBridge.restore === "function"
+        ? function () { requestCredentialsBridge.restore(); }
+        : null;
 
     function absoluteUrl(url) {
         var value = String(url || "").trim();
@@ -93,91 +98,6 @@
         return "none";
     }
 
-    function rememberRuntimeImageRequest(url, image) {
-        if (!observeRequestCredentials) {
-            return;
-        }
-        var normalizedUrl = absoluteUrl(url);
-        if (!normalizedUrl) {
-            return;
-        }
-        var mode = normalizeRequestCredentialsMode(image ? image.crossOrigin : null, image);
-        var existing = runtimeImageRequestModes[normalizedUrl];
-        if (!existing) {
-            runtimeImageRequestModes[normalizedUrl] = mode;
-        } else if (existing !== mode) {
-            runtimeImageRequestModes[normalizedUrl] = "conflict";
-        }
-    }
-
-    function installRuntimeImageObserver() {
-        if (!observeRequestCredentials || !window.HTMLImageElement || !window.HTMLImageElement.prototype) {
-            return;
-        }
-
-        var prototype = window.HTMLImageElement.prototype;
-        var srcDescriptor;
-        try {
-            srcDescriptor = Object.getOwnPropertyDescriptor(prototype, "src");
-        } catch (error) {
-            srcDescriptor = null;
-        }
-        var originalSetAttribute = prototype.setAttribute;
-        var setAttributeDescriptor;
-        try {
-            setAttributeDescriptor = Object.getOwnPropertyDescriptor(prototype, "setAttribute");
-        } catch (error) {
-            setAttributeDescriptor = null;
-        }
-        var srcPatched = false;
-        var setAttributePatched = false;
-
-        if (srcDescriptor && srcDescriptor.configurable && typeof srcDescriptor.set === "function") {
-            try {
-                Object.defineProperty(prototype, "src", {
-                    configurable: srcDescriptor.configurable,
-                    enumerable: srcDescriptor.enumerable,
-                    get: srcDescriptor.get,
-                    set: function (value) {
-                        rememberRuntimeImageRequest(value, this);
-                        return srcDescriptor.set.call(this, value);
-                    }
-                });
-                srcPatched = true;
-            } catch (error) {}
-        }
-
-        if (typeof originalSetAttribute === "function") {
-            try {
-                prototype.setAttribute = function (name, value) {
-                    if (String(name || "").toLowerCase() === "src") {
-                        rememberRuntimeImageRequest(value, this);
-                    }
-                    return originalSetAttribute.call(this, name, value);
-                };
-                setAttributePatched = true;
-            } catch (error) {}
-        }
-
-        restoreRuntimeImageObserver = function () {
-            if (srcPatched) {
-                try {
-                    Object.defineProperty(prototype, "src", srcDescriptor);
-                } catch (error) {}
-            }
-            if (setAttributePatched) {
-                try {
-                    if (setAttributeDescriptor) {
-                        Object.defineProperty(prototype, "setAttribute", setAttributeDescriptor);
-                    } else {
-                        delete prototype.setAttribute;
-                    }
-                } catch (error) {}
-            }
-            restoreRuntimeImageObserver = null;
-        };
-    }
-
     function requestCredentialsModeForObservation(element, resourceUrl, resourceType) {
         if (!observeRequestCredentials || ["image", "background", "poster"].indexOf(resourceType) === -1) {
             return "unknown";
@@ -195,8 +115,6 @@
 
         return "unavailable";
     }
-
-    installRuntimeImageObserver();
 
     function extractCssUrl(value) {
         var match = String(value || "").match(/url\(\s*["']?([^"')]+)["']?\s*\)/i);

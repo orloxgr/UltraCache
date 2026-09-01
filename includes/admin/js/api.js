@@ -10,12 +10,12 @@
 	const DEFAULT_QUEUE_BATCH_SIZE = 100;
 	let ultracacheRestBase = '';
 	let ultracacheRestNonce = '';
+	let ultracacheRestNonceUrl = '';
+	let ultracacheRestNonceRefreshPromise = null;
 	let ultracacheFetch = null;
 	let mediaReplacementConfirmationTokens = {};
 
 	const mediaReplacementDestructiveTokenKeys = {
-		media_library_replacement_db_apply: 'databaseApply',
-		media_library_replacement_theme_css_apply: 'themeCssApply',
 		media_library_replacement_delete: 'cleanupApply',
 	};
 
@@ -36,7 +36,121 @@
 		const source = config && typeof config === 'object' ? config : {};
 		ultracacheRestBase = String(source.restBase || '');
 		ultracacheRestNonce = String(source.restNonce || '');
+		ultracacheRestNonceUrl = String(source.restNonceUrl || '');
 		ultracacheFetch = typeof source.fetch === 'function' ? source.fetch : null;
+	}
+
+	function captureRestNonceFromResponse(response) {
+		if (!response || !response.headers || typeof response.headers.get !== 'function') {
+			return;
+		}
+
+		const refreshedNonce = String(response.headers.get('X-WP-Nonce') || '').trim();
+		if (refreshedNonce) {
+			ultracacheRestNonce = refreshedNonce;
+		}
+	}
+
+	function getUrlOrigin(url) {
+		try {
+			return new URL(String(url || ''), window.location.href).origin;
+		} catch (error) {
+			return '';
+		}
+	}
+
+	function addNonceRefreshCacheBuster(url) {
+		try {
+			const parsed = new URL(String(url || ''), window.location.href);
+			parsed.searchParams.set('_ultracache_nonce_refresh', String(Date.now()));
+			return parsed.toString();
+		} catch (error) {
+			const separator = String(url || '').indexOf('?') === -1 ? '?' : '&';
+			return String(url || '') + separator + '_ultracache_nonce_refresh=' + encodeURIComponent(String(Date.now()));
+		}
+	}
+
+	function getRestAuthContext(requestUrl) {
+		const adminOrigin = getUrlOrigin(ultracacheRestNonceUrl) || getUrlOrigin(window.location.href);
+		const restOrigin = getUrlOrigin(requestUrl || ultracacheRestBase);
+		return {
+			adminOrigin: adminOrigin,
+			restOrigin: restOrigin,
+			sameOrigin: !!adminOrigin && !!restOrigin && adminOrigin === restOrigin,
+		};
+	}
+
+	function getRestNonceFailureDetail(requestUrl, refreshSucceeded, refreshError) {
+		const context = getRestAuthContext(requestUrl);
+		const originDetail = context.adminOrigin && context.restOrigin
+			? (' Admin origin: ' + context.adminOrigin + '; REST origin: ' + context.restOrigin + (context.sameOrigin ? ' (same origin).' : ' (different origins).'))
+			: '';
+
+		if (refreshError) {
+			return ' Automatic WordPress REST nonce refresh also failed: ' + String(refreshError.message || refreshError) + originDetail;
+		}
+
+		if (refreshSucceeded) {
+			return ' Automatic WordPress REST nonce refresh succeeded, but the fresh nonce was rejected on retry.' + originDetail +
+				(context.sameOrigin
+					? ' The authenticated WordPress session/cookie context changed or is being modified before the REST request reaches WordPress.'
+					: ' The admin page and REST API are not using the same origin; their authenticated cookie context may not match.');
+		}
+
+		return originDetail;
+	}
+
+	async function refreshRestNonce() {
+		if (ultracacheRestNonceRefreshPromise) {
+			return ultracacheRestNonceRefreshPromise;
+		}
+
+		if (!ultracacheFetch || !ultracacheRestNonceUrl) {
+			throw new Error('WordPress REST nonce refresh is unavailable.');
+		}
+
+		ultracacheRestNonceRefreshPromise = (async () => {
+			const refreshUrl = addNonceRefreshCacheBuster(ultracacheRestNonceUrl);
+			let response;
+
+			try {
+				response = await ultracacheFetch(refreshUrl, {
+					method: 'GET',
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						'Cache-Control': 'no-cache, no-store, max-age=0',
+						'Pragma': 'no-cache',
+					},
+				});
+			} catch (error) {
+				throw new Error('WordPress REST nonce refresh request failed: ' + (error && error.message ? error.message : 'network error') + '.');
+			}
+
+			let nonce = '';
+			try {
+				nonce = String(await response.text()).trim();
+			} catch (error) {
+				throw new Error('WordPress REST nonce refresh returned HTTP ' + Number(response.status || 0) + ' but its response body could not be read.');
+			}
+
+			if (!response.ok || !nonce || nonce === '0' || nonce === '-1') {
+				const bodyPreview = getRestBodyPreview(nonce);
+				throw new Error(
+					'WordPress REST nonce refresh returned HTTP ' + Number(response.status || 0) +
+					(bodyPreview ? (' with response "' + bodyPreview + '"') : ' with an empty response') + '.'
+				);
+			}
+
+			ultracacheRestNonce = nonce;
+			return nonce;
+		})();
+
+		try {
+			return await ultracacheRestNonceRefreshPromise;
+		} finally {
+			ultracacheRestNonceRefreshPromise = null;
+		}
 	}
 
 	function getRestErrorMessage(subAction, route, requestUrl, response, data, fallbackMessage) {
@@ -152,6 +266,10 @@
 			lcp_observation_manual_selector: { path: 'lcp-observations/manual-selector', method: 'POST' },
 			lcp_observation_action: { path: 'lcp-observations/action', method: 'POST' },
 			compression_capabilities: { path: 'compression/capabilities', method: 'POST' },
+			setup_plan: { path: 'setup/plan', method: 'GET' },
+			setup_apache_static_capability: { path: 'setup/apache-static-capability', method: 'POST' },
+			setup_wizard_status: { path: 'setup/wizard', method: 'GET' },
+			setup_wizard_update: { path: 'setup/wizard', method: 'POST' },
 			get_crawl_urls: { path: 'crawl-urls', method: 'GET' },
 			inspect_url: { path: 'inspect-url', method: 'POST' },
 			crawl_page: { path: 'crawl-page', method: 'POST' },
@@ -169,33 +287,21 @@
 			media_library_replacement_recover: { path: 'media/library-replacement/recover', method: 'POST' },
 			media_library_replacement_readiness_status: { path: 'media/library-replacement/readiness', method: 'GET' },
 			media_library_replacement_readiness_scan: { path: 'media/library-replacement/readiness', method: 'POST' },
-			media_library_replacement_workflow_stage: { path: 'media/library-replacement/workflow-stage', method: 'POST' },
 			media_library_replacement_blockers: { path: 'media/library-replacement/blockers', method: 'GET' },
 			media_library_replacement_blocker_decisions: { path: 'media/library-replacement/blockers', method: 'POST' },
 			media_library_replacement_prepare: { path: 'media/library-replacement/prepare', method: 'POST' },
 			media_library_replacement_do: { path: 'media/library-replacement/do', method: 'POST' },
 			media_library_replacement_verify: { path: 'media/library-replacement/verify', method: 'POST' },
+			media_library_replacement_rollback: { path: 'media/library-replacement/rollback', method: 'POST' },
 			media_library_replacement_delete_confirm: { path: 'media/library-replacement/delete/confirm', method: 'POST' },
 			media_library_replacement_delete: { path: 'media/library-replacement/delete', method: 'POST' },
 			media_library_replacement_preview: { path: 'media/library-replacement/preview', method: 'GET' },
-			media_library_replacement_copy: { path: 'media/library-replacement/copy', method: 'POST' },
-			media_library_replacement_metadata_prepare: { path: 'media/library-replacement/metadata/prepare', method: 'POST' },
-			media_library_replacement_metadata_apply: { path: 'media/library-replacement/metadata/apply', method: 'POST' },
-			media_library_replacement_metadata_rollback: { path: 'media/library-replacement/metadata/rollback', method: 'POST' },
-			media_library_replacement_refs_scan: { path: 'media/library-replacement/references/scan', method: 'POST' },
-			media_library_replacement_refs_match: { path: 'media/library-replacement/references/match', method: 'POST' },
 			media_library_replacement_db_preview: { path: 'media/library-replacement/replacements/preview', method: 'GET' },
-			media_library_replacement_db_apply: { path: 'media/library-replacement/replacements/apply', method: 'POST' },
-			media_library_replacement_db_verify: { path: 'media/library-replacement/replacements/verify', method: 'POST' },
-			media_library_replacement_db_rollback: { path: 'media/library-replacement/replacements/rollback', method: 'POST' },
-			media_library_replacement_theme_css_scan: { path: 'media/library-replacement/theme-css/scan', method: 'POST' },
-			media_library_replacement_theme_css_preview: { path: 'media/library-replacement/theme-css/preview', method: 'GET' },
-			media_library_replacement_theme_css_apply: { path: 'media/library-replacement/theme-css/apply', method: 'POST' },
-			media_library_replacement_theme_css_verify: { path: 'media/library-replacement/theme-css/verify', method: 'POST' },
 			media_library_replacement_cleanup_preview: { path: 'media/library-replacement/cleanup/preview', method: 'GET' },
 			media_queue_status: { path: 'media-queue/status', method: 'GET' },
 			media_queue_rebuild: { path: 'media-queue/rebuild', method: 'POST' },
 			media_queue_process: { path: 'media-queue/process', method: 'POST' },
+			media_homepage_process: { path: 'media-queue/homepage-process', method: 'POST' },
 			media_manual_session: { path: 'media-queue/manual-session', method: 'POST' },
 			media_background_control: { path: 'media-queue/background-work', method: 'POST' },
 			media_queue_retry_failed: { path: 'media-queue/retry-failed', method: 'POST' },
@@ -208,15 +314,18 @@
 			varnish_flush_all: { path: 'varnish/flush-all', method: 'POST' },
 			opcache_flush: { path: 'opcache/flush', method: 'POST' },
 			apcu_flush: { path: 'apcu/flush', method: 'POST' },
-			litespeed_behavior_test: { path: 'litespeed/test-behavior', method: 'POST' },
 			litespeed_flush: { path: 'litespeed/flush', method: 'POST' },
 			nginx_flush: { path: 'nginx/flush', method: 'POST' },
 			external_caches_redetect: { path: 'external-caches/redetect', method: 'POST' },
 			object_cache_test: { path: 'object-cache/backend-test', method: 'POST' },
 			object_cache_flush: { path: 'object-cache/flush', method: 'POST' },
+			cache_conflicts_status: { path: 'cache-conflicts/status', method: 'POST' },
 			remove_conflicting_cache_dropins: { path: 'cache-conflicts/remove-dropins', method: 'POST' },
 			performance_profile_last: { path: 'performance-profile/last', method: 'GET' },
 			performance_profile_clear: { path: 'performance-profile/clear', method: 'POST' },
+			runtime_js_scan_targets: { path: 'runtime-js-scan/targets', method: 'GET' },
+			runtime_js_scan_strategy_state: { path: 'runtime-js-scan/strategy-state', method: 'POST' },
+			runtime_js_scan_token: { path: 'runtime-js-scan/token', method: 'POST' },
 			runtime_js_scan_report: { path: 'runtime-js-scan/report', method: 'GET' },
 			runtime_js_scan_submit: { path: 'runtime-js-scan/report', method: 'POST' },
 			runtime_js_scan_parse_console: { path: 'runtime-js-scan/parse-console', method: 'POST' },
@@ -300,57 +409,43 @@
 		let response = null;
 		let data = null;
 		let responseText = '';
-		try {
-			response = await ultracacheFetch(requestUrl, {
-				method: route.method,
-				credentials: 'same-origin',
-				cache: 'no-store',
-				headers: {
-					'X-WP-Nonce': ultracacheRestNonce || '',
-					'Cache-Control': 'no-cache, no-store, max-age=0',
-					'Pragma': 'no-cache',
-					...(route.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
-				},
-				...(route.method !== 'GET' ? { body: JSON.stringify(payload) } : {}),
-			});
-		} catch (error) {
-			const wrapped = new Error(getRestErrorMessage(subAction, route, requestUrl, { status: 0 }, null, error && error.message ? error.message : 'Network request failed.'));
-			wrapped.data = null;
-			wrapped.rest = { action: subAction, method: route.method, path: route.path, url: requestUrl, status: 0, code: 'network_error' };
-			throw wrapped;
-		}
-	
-		try {
-			responseText = await response.text();
-		} catch (error) {
-			const wrapped = new Error(getRestErrorMessage(subAction, route, requestUrl, response, null, error && error.message ? error.message : 'Could not read response body.'));
-			wrapped.data = null;
-			wrapped.rest = {
-				action: subAction,
-				method: route.method,
-				path: route.path,
-				url: requestUrl,
-				status: response.status,
-				code: 'response_body_unreadable',
-			};
-			throw wrapped;
-		}
-	
-		const trimmedResponseText = String(responseText || '').trim();
-		if (trimmedResponseText) {
-			const parsedResponse = parseRestJsonText(responseText);
-			data = parsedResponse.data;
-	
-			if (!data) {
-				const preview = getRestBodyPreview(trimmedResponseText);
-				const wrapped = new Error(getRestErrorMessage(
-					subAction,
-					route,
-					requestUrl,
-					response,
-					null,
-					'Invalid JSON response. Response preview: ' + (preview || '[empty]')
-				));
+		let trimmedResponseText = '';
+		let nonceRetryAttempted = false;
+		let nonceRefreshSucceeded = false;
+		let nonceRefreshError = null;
+
+		while (true) {
+			response = null;
+			data = null;
+			responseText = '';
+			trimmedResponseText = '';
+
+			try {
+				response = await ultracacheFetch(requestUrl, {
+					method: route.method,
+					credentials: 'include',
+					cache: 'no-store',
+					headers: {
+						'X-WP-Nonce': ultracacheRestNonce || '',
+						'Cache-Control': 'no-cache, no-store, max-age=0',
+						'Pragma': 'no-cache',
+						...(route.method !== 'GET' ? { 'Content-Type': 'application/json' } : {}),
+					},
+					...(route.method !== 'GET' ? { body: JSON.stringify(payload) } : {}),
+				});
+			} catch (error) {
+				const wrapped = new Error(getRestErrorMessage(subAction, route, requestUrl, { status: 0 }, null, error && error.message ? error.message : 'Network request failed.'));
+				wrapped.data = null;
+				wrapped.rest = { action: subAction, method: route.method, path: route.path, url: requestUrl, status: 0, code: 'network_error' };
+				throw wrapped;
+			}
+
+			captureRestNonceFromResponse(response);
+
+			try {
+				responseText = await response.text();
+			} catch (error) {
+				const wrapped = new Error(getRestErrorMessage(subAction, route, requestUrl, response, null, error && error.message ? error.message : 'Could not read response body.'));
 				wrapped.data = null;
 				wrapped.rest = {
 					action: subAction,
@@ -358,37 +453,90 @@
 					path: route.path,
 					url: requestUrl,
 					status: response.status,
-					code: 'invalid_json',
-					bodyPreview: preview,
+					code: 'response_body_unreadable',
 				};
 				throw wrapped;
 			}
-	
-			if (parsedResponse.noisy) {
-				if (data && typeof data === 'object') {
-					try {
-						Object.defineProperty(data, '__ultracacheNoisyRestResponse', {
-							value: {
-								action: subAction,
-								method: route.method,
-								path: route.path,
-								status: response.status,
-								preview: parsedResponse.noisePreview || '',
-							},
-							enumerable: false,
-						});
-					} catch (propertyError) {
-						data.__ultracacheNoisyRestResponse = { action: subAction, method: route.method, path: route.path, status: response.status, preview: parsedResponse.noisePreview || '' };
+
+			trimmedResponseText = String(responseText || '').trim();
+			if (trimmedResponseText) {
+				const parsedResponse = parseRestJsonText(responseText);
+				data = parsedResponse.data;
+
+				if (!data) {
+					const preview = getRestBodyPreview(trimmedResponseText);
+					const wrapped = new Error(getRestErrorMessage(
+						subAction,
+						route,
+						requestUrl,
+						response,
+						null,
+						'Invalid JSON response. Response preview: ' + (preview || '[empty]')
+					));
+					wrapped.data = null;
+					wrapped.rest = {
+						action: subAction,
+						method: route.method,
+						path: route.path,
+						url: requestUrl,
+						status: response.status,
+						code: 'invalid_json',
+						bodyPreview: preview,
+					};
+					throw wrapped;
+				}
+
+				if (parsedResponse.noisy) {
+					if (data && typeof data === 'object') {
+						try {
+							Object.defineProperty(data, '__ultracacheNoisyRestResponse', {
+								value: {
+									action: subAction,
+									method: route.method,
+									path: route.path,
+									status: response.status,
+									preview: parsedResponse.noisePreview || '',
+								},
+								enumerable: false,
+							});
+						} catch (propertyError) {
+							data.__ultracacheNoisyRestResponse = { action: subAction, method: route.method, path: route.path, status: response.status, preview: parsedResponse.noisePreview || '' };
+						}
 					}
 				}
-	
 			}
+
+			if (
+				!nonceRetryAttempted &&
+				response.status === 403 &&
+				data &&
+				String(data.code || '') === 'rest_cookie_invalid_nonce'
+			) {
+				nonceRetryAttempted = true;
+				try {
+					await refreshRestNonce();
+					nonceRefreshSucceeded = true;
+				} catch (nonceError) {
+					nonceRefreshError = nonceError instanceof Error ? nonceError : new Error(String(nonceError || 'Unknown nonce refresh failure.'));
+					break;
+				}
+				continue;
+			}
+
+			break;
 		}
 	
 		captureMediaReplacementConfirmationTokens(data);
 
 		if (!response.ok) {
-			const message = getRestErrorMessage(subAction, route, requestUrl, response, data, '');
+			let message = getRestErrorMessage(subAction, route, requestUrl, response, data, '');
+			if (
+				response.status === 403 &&
+				data &&
+				String(data.code || '') === 'rest_cookie_invalid_nonce'
+			) {
+				message += getRestNonceFailureDetail(requestUrl, nonceRefreshSucceeded, nonceRefreshError);
+			}
 			const error = new Error(message);
 			error.data = data;
 			error.rest = {
@@ -399,6 +547,10 @@
 				status: response.status,
 				code: data && data.code ? String(data.code) : '',
 				message: data && data.message ? String(data.message) : '',
+				nonceRefreshAttempted: nonceRetryAttempted,
+				nonceRefreshSucceeded: nonceRefreshSucceeded,
+				nonceRefreshError: nonceRefreshError ? String(nonceRefreshError.message || nonceRefreshError) : '',
+				authContext: getRestAuthContext(requestUrl),
 			};
 			throw error;
 		}
@@ -417,7 +569,7 @@
 			throw error;
 		}
 	
-		if (data && data.success === false && !data.skipped) {
+		if (data && data.success === false && !data.skipped && !route.allowFailureResult) {
 			const responseMessage =
 				(data.data && data.data.message) ||
 				data.message ||

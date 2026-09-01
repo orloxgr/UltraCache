@@ -23,12 +23,84 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             if (!empty($safe_async_css_result['safe'])) {
                 $this->record_analytics_safe_async_css($stats);
                 $this->record_store_profile_async_css_diagnostics($stats);
-                return isset($safe_async_css_result['html']) && is_string($safe_async_css_result['html']) ? $safe_async_css_result['html'] : $html;
+                $rewritten_html = isset($safe_async_css_result['html']) && is_string($safe_async_css_result['html']) ? $safe_async_css_result['html'] : $html;
+                return $this->inject_async_consent_css_auto_runtime_if_needed($rewritten_html);
             }
 
             $stats['safe'] = false;
             $this->record_store_profile_async_css_diagnostics($stats);
             return $html;
+        }
+
+
+        /**
+         * Whether finalized HTML contains a stylesheet rewritten specifically by
+         * the auto-detect static Consent CSS policy.
+         *
+         * @param string $html Finalized HTML after Async CSS rewriting.
+         * @return bool
+         */
+        private function html_has_async_consent_css_auto_rewrite($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return false;
+            }
+
+            return false !== stripos($html, 'data-ultracache-css-async-reason="async_consent_css_auto_')
+                || false !== stripos($html, "data-ultracache-css-async-reason='async_consent_css_auto_");
+        }
+
+        /**
+         * Print the existing generic Async CSS runtime only after Auto mode has
+         * actually rewritten a recognized static CMP stylesheet. Manual mode and
+         * other Async CSS features keep their existing normal enqueue path.
+         *
+         * @param string $html Finalized HTML after Async CSS rewriting.
+         * @return string
+         */
+        private function inject_async_consent_css_auto_runtime_if_needed($html)
+        {
+            if (!is_string($html) || '' === $html) {
+                return $html;
+            }
+
+            $settings = $this->get_settings();
+            if (
+                empty($settings['async_consent_css_auto'])
+                || !empty($settings['async_consent_css'])
+                || !$this->html_has_async_consent_css_auto_rewrite($html)
+                || false !== stripos($html, 'data-ultracache-runtime-activation="async-css-runtime"')
+                || false !== stripos($html, "data-ultracache-runtime-activation='async-css-runtime'")
+            ) {
+                return $html;
+            }
+
+            $handle = 'ultracache-async-css-runtime';
+            if (method_exists($this, 'ultracache_is_frontend_runtime_module_requested')
+                && $this->ultracache_is_frontend_runtime_module_requested($handle)) {
+                return $html;
+            }
+
+            if (!method_exists($this, 'ultracache_render_frontend_runtime_module_activation')) {
+                return $html;
+            }
+
+            $markup = $this->ultracache_render_frontend_runtime_module_activation($handle);
+            if (!is_string($markup) || '' === trim($markup)) {
+                return $html;
+            }
+
+            $body_close = stripos($html, '</body');
+            if (false !== $body_close) {
+                return substr($html, 0, $body_close) . $markup . "\n" . substr($html, $body_close);
+            }
+
+            $html_close = stripos($html, '</html');
+            if (false !== $html_close) {
+                return substr($html, 0, $html_close) . $markup . "\n" . substr($html, $html_close);
+            }
+
+            return $html . "\n" . $markup;
         }
 
 
@@ -227,6 +299,8 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
                 'enabled' => !empty($settings['async_css']),
                 'aggressive_enabled' => !empty($settings['aggressive_async_css']),
                 'external_enabled' => !empty($settings['async_external_css']),
+                'consent_enabled' => !empty($settings['async_consent_css']),
+                'consent_auto_enabled' => !empty($settings['async_consent_css_auto']),
                 'font_mix_bundle_async_enabled' => !empty($settings['font_mix_css_bundle_async']),
                 'safe' => true,
                 'scanned' => 0,
@@ -412,6 +486,71 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             }));
         }
 
+        /**
+         * Return the deliberately narrow CMP stylesheet fingerprints used by the
+         * static final-HTML Async Consent Banner CSS policy. Keep this list explicit
+         * so benchmark tuning can change one vendor fingerprint at a time.
+         *
+         * @return array<string,array<int,string>>
+         */
+        private function get_async_consent_css_vendor_patterns()
+        {
+            return array(
+                'complianz' => array(
+                    '/wp-content/uploads/complianz/',
+                    '/complianz-gdpr/',
+                    '/complianz/',
+                ),
+                'cookieyes' => array(
+                    '/cookie-law-info/',
+                    '/cookieyes/',
+                    '/cookie-law-info-public/',
+                ),
+                'cookiebot' => array(
+                    'consent.cookiebot.com',
+                    '/cookiebot/',
+                    '/cookiebot-cmp/',
+                ),
+                'real-cookie-banner' => array(
+                    '/real-cookie-banner/',
+                    '/devowl-wp/',
+                ),
+                'onetrust' => array(
+                    'cdn.cookielaw.org',
+                    'optanon.blob.core.windows.net',
+                    '/onetrust/',
+                    '/optanon/',
+                ),
+            );
+        }
+
+        /**
+         * Identify only known CMP stylesheet URLs/tag contexts. Unknown consent
+         * implementations intentionally stay on their existing CSS delivery path.
+         *
+         * @param string $url Absolute stylesheet URL.
+         * @param string $tag Optional tag context.
+         * @return string Vendor key or empty string.
+         */
+        private function get_async_consent_css_vendor($url, $tag = '')
+        {
+            $haystack = strtolower((string) $url . ' ' . (string) $tag);
+            if ('' === trim($haystack)) {
+                return '';
+            }
+
+            foreach ($this->get_async_consent_css_vendor_patterns() as $vendor => $fragments) {
+                foreach ((array) $fragments as $fragment) {
+                    $fragment = strtolower(trim((string) $fragment));
+                    if ('' !== $fragment && false !== strpos($haystack, $fragment)) {
+                        return sanitize_key((string) $vendor);
+                    }
+                }
+            }
+
+            return '';
+        }
+
         private function get_css_same_site_compare_host($url)
         {
             $host = strtolower((string) wp_parse_url((string) $url, PHP_URL_HOST));
@@ -429,8 +568,15 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
             }
 
             $host = $this->get_css_same_site_compare_host($absolute);
+            if ('' === $host) {
+                return false;
+            }
+            if (function_exists('ultracache_is_local_site_url')) {
+                return !ultracache_is_local_site_url($absolute);
+            }
+
             $home_host = $this->get_css_same_site_compare_host(home_url('/'));
-            return '' !== $host && '' !== $home_host && $host !== $home_host;
+            return '' !== $home_host && $host !== $home_host;
         }
 
         private function should_async_external_css_win_bundle_for_url($url)
@@ -477,9 +623,18 @@ trait Ultra_Cache_Engine_Async_CSS_Trait
 
             $absolute = $this->absolutize_public_resource_url($url, home_url('/'));
             $host = $this->get_css_same_site_compare_host($absolute);
-            $home_host = $this->get_css_same_site_compare_host(home_url('/'));
-            if ('' === $host || '' === $home_host || $host !== $home_host) {
+            if ('' === $host) {
                 return false;
+            }
+            if (function_exists('ultracache_is_local_site_url')) {
+                if (!ultracache_is_local_site_url($absolute)) {
+                    return false;
+                }
+            } else {
+                $home_host = $this->get_css_same_site_compare_host(home_url('/'));
+                if ('' === $home_host || $host !== $home_host) {
+                    return false;
+                }
             }
 
             $path = (string) wp_parse_url($absolute, PHP_URL_PATH);
@@ -609,6 +764,30 @@ private function get_async_css_stylesheet_decision($url, $tag = '')
             $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
             if ('' === $path) {
                 return array('eligible' => false, 'reason' => 'missing_path');
+            }
+
+            $consent_manual_enabled = !empty($settings['async_consent_css']);
+            $consent_auto_enabled = !empty($settings['async_consent_css_auto']);
+            $consent_css_vendor = ($consent_manual_enabled || $consent_auto_enabled)
+                ? $this->get_async_consent_css_vendor($url, $tag)
+                : '';
+            if ('' !== $consent_css_vendor) {
+                $consent_exclude_fragments = $this->is_external_public_stylesheet_url($url)
+                    ? $this->get_async_external_css_exclude_fragments()
+                    : $this->get_async_css_exclude_fragments();
+                if ($this->should_exclude_stylesheet_url_by_fragments($url, $consent_exclude_fragments)) {
+                    return array(
+                        'eligible' => false,
+                        'reason' => 'async_consent_css_excluded',
+                        'role' => 'consent-css-' . $consent_css_vendor,
+                    );
+                }
+
+                return array(
+                    'eligible' => true,
+                    'reason' => ($consent_manual_enabled ? 'async_consent_css_' : 'async_consent_css_auto_') . $consent_css_vendor,
+                    'role' => 'consent-css-' . $consent_css_vendor,
+                );
             }
 
             if ($this->is_external_public_stylesheet_url($url)) {

@@ -350,8 +350,11 @@ trait Ultra_Cache_WP_Warm_Coordination_Access_Trait
      */
     private static function get_manual_warm_session_lease_seconds()
     {
-        $seconds = (int) apply_filters('ultracache_manual_warm_session_lease_seconds', 600);
-        return max(120, min(3600, $seconds));
+        $seconds = max(120, (int) apply_filters('ultracache_manual_warm_session_lease_seconds', 600));
+        $max_execution = function_exists('ultracache_get_php_max_execution_time_seconds')
+            ? ultracache_get_php_max_execution_time_seconds()
+            : max(0, (int) ini_get('max_execution_time'));
+        return $max_execution > 0 ? max($seconds, $max_execution) : $seconds;
     }
 
     /**

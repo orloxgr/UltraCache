@@ -188,6 +188,8 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
             $capability = array();
         }
         $capability = self::bind_varnish_capability_contracts($capability, array('esi'));
+        $capability['proofExpiresAt'] = 0;
+        unset($capability['proofExpired']);
 
         // A transport-incomplete observation is not evidence that an existing
         // current capability disappeared. Keep the verified proof and attach
@@ -196,15 +198,10 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         if ('observation-incomplete' === sanitize_key((string) ($capability['status'] ?? ''))) {
             $current = self::read_persisted_varnish_esi_capability();
             $current_tested_at = absint($current['testedAt'] ?? 0);
-            $current_expires_at = absint($current['proofExpiresAt'] ?? 0);
-            if ($current_expires_at <= 0 && !empty($current['supported']) && !empty($current['verified']) && $current_tested_at > 0) {
-                $current_expires_at = $current_tested_at + WEEK_IN_SECONDS;
-            }
             if (!empty($current['supported'])
                 && !empty($current['verified'])
-                && self::varnish_capability_contracts_match($current, array('esi'))
-                && $current_expires_at > time()) {
-                $current['proofExpiresAt'] = $current_expires_at;
+                && self::varnish_capability_contracts_match($current, array('esi'))) {
+                $current['proofExpiresAt'] = 0;
                 $current['lastProbeStatus'] = 'observation-incomplete';
                 $current['lastProbeMessage'] = self::sanitize_varnish_string((string) ($capability['message'] ?? ''));
                 $current['lastProbeTestedAt'] = absint($capability['testedAt'] ?? time());
@@ -233,7 +230,7 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         if (!is_array($value) || empty($value)) {
             $capability = self::get_unverified_varnish_esi_capability(
                 'not-tested',
-                __('Run Test Varnish to verify end-to-end ESI processing.', 'ultracache')
+                self::maybe_translate('Run Redetect Varnish Capabilities to verify end-to-end ESI processing.')
             );
             $capability['configured'] = $configured;
             return $capability;
@@ -242,7 +239,7 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         if (!self::varnish_capability_contracts_match($value, array('esi'))) {
             $capability = self::get_unverified_varnish_esi_capability(
                 'configuration-changed',
-                __('The ESI capability contract changed. Run Test Varnish again.', 'ultracache'),
+                self::maybe_translate('The ESI capability contract changed. Run Redetect Varnish Capabilities again.'),
                 (int) ($value['testedAt'] ?? 0)
             );
             $capability['configurationChanged'] = true;
@@ -252,31 +249,17 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         }
 
         $tested_at = max(0, (int) ($value['testedAt'] ?? 0));
-        $proof_expires_at = max(0, (int) ($value['proofExpiresAt'] ?? 0));
-        if ($proof_expires_at <= 0 && !empty($value['supported']) && !empty($value['verified']) && $tested_at > 0) {
-            $proof_expires_at = $tested_at + WEEK_IN_SECONDS;
-        }
-        if ($proof_expires_at > 0 && $proof_expires_at <= time()) {
-            $capability = self::get_unverified_varnish_esi_capability(
-                'proof-expired',
-                __('The stored public-path ESI behavior proof expired. Run Test Varnish again.', 'ultracache'),
-                $tested_at
-            );
-            $capability['proofExpired'] = true;
-            $capability['proofExpiresAt'] = $proof_expires_at;
-            $capability['configured'] = $configured;
-            return $capability;
-        }
 
         $value['configured'] = $configured;
-        $value['proofExpiresAt'] = $proof_expires_at;
+        $value['proofExpiresAt'] = 0;
+        unset($value['proofExpired']);
         $value['woocommerceAdapterAvailable'] = class_exists('WooCommerce') || defined('WC_VERSION');
         $value['supported'] = !empty($value['supported']) && !empty($value['verified']);
         $value['effective'] = $configured && !empty($value['supported']);
         if (!$configured) {
             $value['effective'] = false;
             if (!empty($value['supported'])) {
-                $value['message'] = __('ESI proof is stored, but no active Varnish connection is configured. Registered fragments render inline fallback HTML.', 'ultracache');
+                $value['message'] = self::maybe_translate('ESI proof is stored, but no active Varnish connection is configured. Registered fragments render inline fallback HTML.');
             }
         }
 
@@ -375,7 +358,7 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         }
 
         $encoded = rtrim(strtr(base64_encode($json), '+/', '-_'), '=');
-        $signature = hash_hmac('sha256', $encoded, self::get_varnish_esi_probe_signing_key());
+        $signature = ultracache_internal_sign('varnish-esi-probe', $encoded);
         return $encoded . '.' . $signature;
     }
 
@@ -398,8 +381,7 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         }
 
         $encoded = (string) $matches[1];
-        $expected_signature = hash_hmac('sha256', $encoded, self::get_varnish_esi_probe_signing_key());
-        if (!hash_equals($expected_signature, (string) $matches[2])) {
+        if (!ultracache_internal_verify('varnish-esi-probe', $encoded, (string) $matches[2])) {
             return new WP_Error('ultracache_esi_probe_signature_invalid', __('The ESI probe signature is invalid.', 'ultracache'));
         }
 
@@ -422,17 +404,6 @@ trait Ultra_Cache_WP_Varnish_ESI_Capability_Trait
         }
 
         return $payload;
-    }
-
-    /**
-     * Return the site-specific ESI probe signing key.
-     *
-     * @return string
-     */
-    private static function get_varnish_esi_probe_signing_key()
-    {
-        $blog_id = function_exists('get_current_blog_id') ? (string) get_current_blog_id() : '0';
-        return hash('sha256', wp_salt('nonce') . '|ultracache-varnish-esi-probe-v1|' . $blog_id . '|' . home_url('/'));
     }
 
     /**

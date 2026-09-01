@@ -19,6 +19,218 @@ trait Ultra_Cache_WP_Admin_Trait
         );
     }
 
+    /**
+     * Register the server-rendered deactivation choice screen without adding
+     * another visible admin menu item.
+     *
+     * @return void
+     */
+    public function register_plugin_deactivation_page()
+    {
+        $capability = (function_exists('is_network_admin') && is_network_admin())
+            ? 'manage_network_plugins'
+            : 'activate_plugins';
+
+        add_submenu_page(
+            null,
+            __('UltraCache deactivation', 'ultracache'),
+            __('UltraCache deactivation', 'ultracache'),
+            $capability,
+            'ultracache-deactivation',
+            array($this, 'render_plugin_deactivation_page')
+        );
+    }
+
+    /**
+     * Return the cleanup choices shared by the deactivation screen.
+     *
+     * @return array<int,array<string,string>>
+     */
+    private static function get_plugin_deactivation_cleanup_options()
+    {
+        return array(
+            array(
+                'value'       => 'plugin_only',
+                'label'       => __('Only deactivate/delete the plugin', 'ultracache'),
+                'description' => __('Keep settings, custom tables, runtime/cache files, and converted media.', 'ultracache'),
+            ),
+            array(
+                'value'       => 'keep_settings',
+                'label'       => __('Keep plugin settings', 'ultracache'),
+                'description' => __('Keep settings. Remove custom tables and runtime/cache files when the plugin is deleted.', 'ultracache'),
+            ),
+            array(
+                'value'       => 'keep_settings_tables',
+                'label'       => __('Keep plugin settings and tables', 'ultracache'),
+                'description' => __('Keep settings and UltraCache custom tables. Remove runtime/cache files when the plugin is deleted.', 'ultracache'),
+            ),
+            array(
+                'value'       => 'delete_everything',
+                'label'       => __('Delete everything', 'ultracache'),
+                'description' => __('Remove UltraCache settings, custom tables, and runtime/cache files. Converted AVIF/WebP media folders remain.', 'ultracache'),
+            ),
+        );
+    }
+
+    /**
+     * Persist one uninstall cleanup policy and verify the stored value.
+     *
+     * @param string $policy Cleanup policy.
+     * @return bool
+     */
+    private static function persist_uninstall_cleanup_policy($policy)
+    {
+        $policy = self::sanitize_uninstall_cleanup_policy($policy);
+        $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
+        if (!is_array($settings)) {
+            $settings = array();
+        }
+
+        $settings['uninstallCleanupPolicy'] = $policy;
+        update_option(ULTRACACHE_SETTINGS_KEY, $settings, false);
+        self::reset_settings_cache();
+
+        $stored_settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
+        $stored_policy = is_array($stored_settings) && isset($stored_settings['uninstallCleanupPolicy'])
+            ? self::sanitize_uninstall_cleanup_policy($stored_settings['uninstallCleanupPolicy'])
+            : '';
+
+        return $policy === $stored_policy;
+    }
+
+    /**
+     * Intercept the standard WordPress Deactivate request before plugins.php
+     * reaches deactivate_plugins(). The first request is redirected to a
+     * server-rendered cleanup choice screen. The confirmed request stores the
+     * policy and then falls through to the untouched WordPress core flow.
+     *
+     * @return void
+     */
+    public function maybe_intercept_plugin_deactivation_request()
+    {
+        global $pagenow;
+
+        if ('plugins.php' !== (string) $pagenow) {
+            return;
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The WordPress deactivation nonce is verified below before any redirect or write.
+        $action = isset($_REQUEST['action']) ? sanitize_key(wp_unslash($_REQUEST['action'])) : '';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- The WordPress deactivation nonce is verified below before any redirect or write.
+        $plugin = isset($_REQUEST['plugin']) ? plugin_basename(sanitize_text_field(wp_unslash($_REQUEST['plugin']))) : '';
+        if ('deactivate' !== $action || ULTRACACHE_BASENAME !== $plugin) {
+            return;
+        }
+
+        if (!current_user_can('deactivate_plugin', ULTRACACHE_BASENAME)) {
+            wp_die(esc_html__('Sorry, you are not allowed to deactivate this plugin.', 'ultracache'));
+        }
+
+        check_admin_referer('deactivate-plugin_' . ULTRACACHE_BASENAME);
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Own confirmation nonce is verified immediately below.
+        $confirmed = isset($_REQUEST['ultracache_cleanup_confirmed'])
+            && '1' === sanitize_text_field(wp_unslash($_REQUEST['ultracache_cleanup_confirmed']));
+        if ($confirmed) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Explicitly verified with wp_verify_nonce().
+            $cleanup_nonce = isset($_REQUEST['ultracache_cleanup_nonce']) ? sanitize_text_field(wp_unslash($_REQUEST['ultracache_cleanup_nonce'])) : '';
+            if (!wp_verify_nonce($cleanup_nonce, 'ultracache_confirm_deactivation')) {
+                wp_die(esc_html__('The UltraCache deactivation confirmation expired. Please return to Plugins and try again.', 'ultracache'));
+            }
+
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Both WordPress and UltraCache nonces have already been verified.
+            $policy = isset($_REQUEST['policy'])
+                ? self::sanitize_uninstall_cleanup_policy(sanitize_text_field(wp_unslash($_REQUEST['policy'])))
+                : 'delete_everything';
+
+            if (!self::persist_uninstall_cleanup_policy($policy)) {
+                wp_die(esc_html__('The uninstall cleanup policy could not be saved. UltraCache was not deactivated.', 'ultracache'));
+            }
+
+            // Do not call deactivate_plugins() here. Returning lets the current
+            // plugins.php request continue into the normal WordPress switch,
+            // which re-checks the core nonce and performs the deactivation.
+            return;
+        }
+
+        $screen_url = add_query_arg(
+            array(
+                'page' => 'ultracache-deactivation',
+                'uc_deactivation_nonce' => wp_create_nonce('ultracache_deactivation_screen'),
+            ),
+            self_admin_url('admin.php')
+        );
+        wp_safe_redirect($screen_url);
+        exit;
+    }
+
+    /**
+     * Render the guaranteed server-side cleanup choice before deactivation.
+     *
+     * @return void
+     */
+    public function render_plugin_deactivation_page()
+    {
+        $capability = (function_exists('is_network_admin') && is_network_admin())
+            ? 'manage_network_plugins'
+            : 'activate_plugins';
+        if (!current_user_can($capability) || !current_user_can('deactivate_plugin', ULTRACACHE_BASENAME)) {
+            wp_die(esc_html__('Sorry, you are not allowed to deactivate this plugin.', 'ultracache'));
+        }
+
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only screen nonce validation.
+        $screen_nonce = isset($_GET['uc_deactivation_nonce']) ? sanitize_text_field(wp_unslash($_GET['uc_deactivation_nonce'])) : '';
+        if (!wp_verify_nonce($screen_nonce, 'ultracache_deactivation_screen')) {
+            wp_die(esc_html__('The UltraCache deactivation request expired. Please return to Plugins and try again.', 'ultracache'));
+        }
+
+        $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
+        $current_policy = is_array($settings) && isset($settings['uninstallCleanupPolicy'])
+            ? self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy'])
+            : 'delete_everything';
+        $theme = self::get_ultracache_admin_theme_preference();
+        $action_url = self_admin_url('plugins.php');
+        $cancel_url = self_admin_url('plugins.php');
+        ?>
+        <div class="ultracache-deactivation-overlay" data-uc-theme="<?php echo esc_attr($theme); ?>" role="presentation">
+            <form class="ultracache-deactivation-dialog" method="post" action="<?php echo esc_url($action_url); ?>">
+                <h1 id="ultracache-deactivation-title" class="ultracache-deactivation-title"><?php esc_html_e('UltraCache deactivation', 'ultracache'); ?></h1>
+                <p id="ultracache-deactivation-intro" class="ultracache-deactivation-intro"><?php esc_html_e('Choose what UltraCache should remove if you delete the plugin after deactivation.', 'ultracache'); ?></p>
+                <fieldset class="ultracache-deactivation-options" aria-labelledby="ultracache-deactivation-title" aria-describedby="ultracache-deactivation-intro">
+                    <legend class="screen-reader-text"><?php esc_html_e('UltraCache deactivation', 'ultracache'); ?></legend>
+                    <?php foreach (self::get_plugin_deactivation_cleanup_options() as $index => $option) : ?>
+                        <?php $input_id = 'ultracache-uninstall-policy-' . (int) $index; ?>
+                        <label class="ultracache-deactivation-option" for="<?php echo esc_attr($input_id); ?>">
+                            <input
+                                id="<?php echo esc_attr($input_id); ?>"
+                                type="radio"
+                                name="policy"
+                                value="<?php echo esc_attr($option['value']); ?>"
+                                <?php checked($current_policy, $option['value']); ?>
+                            />
+                            <span class="ultracache-deactivation-option-copy">
+                                <span class="ultracache-deactivation-option-label"><?php echo esc_html($option['label']); ?></span>
+                                <span class="ultracache-deactivation-option-description"><?php echo esc_html($option['description']); ?></span>
+                            </span>
+                        </label>
+                    <?php endforeach; ?>
+                </fieldset>
+
+                <input type="hidden" name="action" value="deactivate" />
+                <input type="hidden" name="plugin" value="<?php echo esc_attr(ULTRACACHE_BASENAME); ?>" />
+                <input type="hidden" name="ultracache_cleanup_confirmed" value="1" />
+                <input type="hidden" name="ultracache_cleanup_nonce" value="<?php echo esc_attr(wp_create_nonce('ultracache_confirm_deactivation')); ?>" />
+                <input type="hidden" name="_wpnonce" value="<?php echo esc_attr(wp_create_nonce('deactivate-plugin_' . ULTRACACHE_BASENAME)); ?>" />
+
+                <div class="ultracache-deactivation-actions">
+                    <a class="button ultracache-deactivation-cancel" href="<?php echo esc_url($cancel_url); ?>"><?php esc_html_e('Cancel', 'ultracache'); ?></a>
+                    <button type="submit" class="button button-primary ultracache-deactivation-confirm"><?php esc_html_e('Save choice and deactivate', 'ultracache'); ?></button>
+                </div>
+            </form>
+        </div>
+        <?php
+    }
+
 
     public static function is_ultracache_admin_dashboard_request()
     {
@@ -399,7 +611,7 @@ trait Ultra_Cache_WP_Admin_Trait
         $ultracache_runtime_config = array(
             'restBase'     => esc_url_raw(rest_url('ultracache/v1/')),
             'restNonce'    => wp_create_nonce('wp_rest'),
-            'runtimeJsScanNonce' => wp_create_nonce('ultracache_runtime_js_scan'),
+            'restNonceUrl' => esc_url_raw(admin_url('admin-ajax.php?action=rest-nonce')),
             'frontendProbeUrl' => esc_url_raw(home_url('/')),
             'version'      => ULTRACACHE_VERSION,
             'cwpVarnishTemplateUrl' => esc_url_raw(ultracache_plugin_url('resources/varnish/control-web-panel/ultracache-cwp-varnish.tpl')),
@@ -436,24 +648,20 @@ trait Ultra_Cache_WP_Admin_Trait
     }
 
     /**
-     * Enqueue the lightweight plugin-list deactivation dialog.
-     *
-     * The dialog only stores the uninstall cleanup policy, then resumes the
-     * standard WordPress deactivation URL. WordPress performs the actual
-     * plugin deletion later through uninstall.php.
+     * Enqueue styling for the server-rendered deactivation choice screen.
      *
      * @param string $hook Current admin page hook suffix.
      * @return void
      */
     public function enqueue_plugin_deactivation_assets($hook)
     {
-        if ('plugins.php' !== (string) $hook) {
-            return;
-        }
-
-        $network_admin = function_exists('is_network_admin') && is_network_admin();
-        $required_capability = $network_admin ? 'manage_network_plugins' : 'activate_plugins';
-        if (!current_user_can($required_capability)) {
+        // The deactivation flow is intentionally server-rendered. JavaScript
+        // interception on plugins.php is not authoritative because admin DOM
+        // markup and third-party event handlers can change independently of
+        // WordPress' core deactivation request.
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only page routing for stylesheet enqueueing.
+        $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
+        if ('ultracache-deactivation' !== $page) {
             return;
         }
 
@@ -464,112 +672,8 @@ trait Ultra_Cache_WP_Admin_Trait
             ULTRACACHE_VERSION
         );
         wp_enqueue_style('ultracache-plugin-deactivation');
-
-        wp_register_script(
-            'ultracache-plugin-deactivation',
-            ultracache_plugin_url('includes/admin/js/plugin-deactivation.js'),
-            array(),
-            ULTRACACHE_VERSION,
-            array('in_footer' => true)
-        );
-        wp_enqueue_script('ultracache-plugin-deactivation');
-
-        $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
-        $current_policy = is_array($settings) && isset($settings['uninstallCleanupPolicy'])
-            ? self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy'])
-            : 'delete_everything';
-
-        $config = array(
-            'ajaxUrl'        => admin_url('admin-ajax.php'),
-            'nonce'          => wp_create_nonce('ultracache_save_uninstall_cleanup_policy'),
-            'pluginBasename' => ULTRACACHE_BASENAME,
-            'currentPolicy'  => $current_policy,
-            'adminTheme'     => self::get_ultracache_admin_theme_preference(),
-            'title'          => __('UltraCache deactivation', 'ultracache'),
-            'intro'          => __('Choose what UltraCache should remove if you delete the plugin after deactivation.', 'ultracache'),
-            'cancelLabel'    => __('Cancel', 'ultracache'),
-            'confirmLabel'   => __('Save choice and deactivate', 'ultracache'),
-            'savingLabel'    => __('Saving…', 'ultracache'),
-            'errorLabel'     => __('The uninstall cleanup policy could not be saved. UltraCache was not deactivated.', 'ultracache'),
-            'options'        => array(
-                array(
-                    'value'       => 'plugin_only',
-                    'label'       => __('Only deactivate/delete the plugin', 'ultracache'),
-                    'description' => __('Keep settings, custom tables, runtime/cache files, and converted media.', 'ultracache'),
-                ),
-                array(
-                    'value'       => 'keep_settings',
-                    'label'       => __('Keep plugin settings', 'ultracache'),
-                    'description' => __('Keep settings. Remove custom tables and runtime/cache files when the plugin is deleted.', 'ultracache'),
-                ),
-                array(
-                    'value'       => 'keep_settings_tables',
-                    'label'       => __('Keep plugin settings and tables', 'ultracache'),
-                    'description' => __('Keep settings and UltraCache custom tables. Remove runtime/cache files when the plugin is deleted.', 'ultracache'),
-                ),
-                array(
-                    'value'       => 'delete_everything',
-                    'label'       => __('Delete everything', 'ultracache'),
-                    'description' => __('Remove UltraCache settings, custom tables, and runtime/cache files. Converted AVIF/WebP media folders remain.', 'ultracache'),
-                ),
-            ),
-        );
-
-        $config_json = wp_json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-        if (false === $config_json) {
-            $config_json = '{}';
-        }
-
-        wp_add_inline_script(
-            'ultracache-plugin-deactivation',
-            'window.UltraCachePluginDeactivation = ' . $config_json . ';',
-            'before'
-        );
     }
 
-    /**
-     * Save the selected uninstall cleanup policy before normal deactivation.
-     *
-     * @return void
-     */
-    public function handle_save_uninstall_cleanup_policy()
-    {
-        check_ajax_referer('ultracache_save_uninstall_cleanup_policy', 'nonce');
-
-        if (!current_user_can('activate_plugins') && !current_user_can('manage_network_plugins')) {
-            wp_send_json_error(
-                array('message' => __('You are not allowed to deactivate plugins.', 'ultracache')),
-                403
-            );
-        }
-
-        $policy = isset($_POST['policy'])
-            ? self::sanitize_uninstall_cleanup_policy(sanitize_text_field(wp_unslash($_POST['policy'])))
-            : 'delete_everything';
-
-        $settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
-        if (!is_array($settings)) {
-            $settings = array();
-        }
-
-        $settings['uninstallCleanupPolicy'] = $policy;
-        update_option(ULTRACACHE_SETTINGS_KEY, $settings, false);
-        self::reset_settings_cache();
-
-        $stored_settings = get_option(ULTRACACHE_SETTINGS_KEY, array());
-        $stored_policy = is_array($stored_settings) && isset($stored_settings['uninstallCleanupPolicy'])
-            ? self::sanitize_uninstall_cleanup_policy($stored_settings['uninstallCleanupPolicy'])
-            : '';
-
-        if ($policy !== $stored_policy) {
-            wp_send_json_error(
-                array('message' => __('The uninstall cleanup policy could not be saved.', 'ultracache')),
-                500
-            );
-        }
-
-        wp_send_json_success(array('cleanupPolicy' => $stored_policy));
-    }
 
     public function suppress_conflicting_admin_assets($hook = '')
     {

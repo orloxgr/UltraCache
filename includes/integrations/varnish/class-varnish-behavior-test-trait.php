@@ -760,6 +760,12 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
     {
         $endpoint = self::normalize_varnish_registry_endpoint($endpoint);
         $settings = self::get_varnish_cli_settings();
+        if ('admin' === self::sanitize_varnish_mode($settings['mode'] ?? 'http')) {
+            // Capability detection is an administrator-triggered diagnostic operation.
+            // Give the Varnish admin socket enough time to complete without changing
+            // the user's normal production invalidation timeout.
+            $settings['timeout'] = 20;
+        }
         $probe_endpoints = '' !== $endpoint
             ? array($endpoint)
             : (array) ($settings['servers'] ?? array());
@@ -860,8 +866,13 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
                 return $result;
             }
 
-            $settings = self::get_varnish_cli_settings();
-            $result = self::varnish_flush_url_hard($url);
+            $result = self::varnish_flush_url_batch(
+                array($url),
+                'behavior-hard',
+                'hard',
+                array(),
+                $settings
+            );
             $tested_capability = 'exact-purge' === $probe_strategy ? 'exactPurge' : 'exactBan';
             $result['testedExactCapabilities'] = array($tested_capability);
             if (!empty($result['success']) && empty($result['verifiedExactCapability'])) {
@@ -1559,7 +1570,7 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
             'url' => $url,
             'activeBuckets' => $buckets,
             'verifiedBucketCount' => $verified_count,
-            'proofExpiresAt' => $supported ? $tested_at + WEEK_IN_SECONDS : 0,
+            'proofExpiresAt' => 0,
             'warmPipeline' => array(
                 'success' => !empty($warm_result['success']),
                 'message' => self::sanitize_varnish_string((string) ($warm_result['message'] ?? '')),
@@ -3512,6 +3523,24 @@ trait Ultra_Cache_WP_Varnish_Behavior_Test_Trait
             $message = 'authentication-failed' === $status
                 ? __('Varnish transport or authentication failed during the exact canary invalidation.', 'ultracache')
                 : __('Varnish accepted no successful exact invalidation request for the cached canary.', 'ultracache');
+            $transport_detail_added = false;
+            foreach ((array) ($invalidation['details'] ?? array()) as $failure_detail) {
+                if (!is_array($failure_detail) || !empty($failure_detail['success'])) {
+                    continue;
+                }
+                $detail_text = self::sanitize_varnish_string((string) ($failure_detail['detail'] ?? ''));
+                if ('' !== $detail_text) {
+                    $message .= ' ' . self::maybe_translate_sprintf('Last transport result: %s', $detail_text);
+                    $transport_detail_added = true;
+                    break;
+                }
+            }
+            if (!$transport_detail_added) {
+                $planner_detail = self::sanitize_varnish_string((string) ($invalidation['message'] ?? ''));
+                if ('' !== $planner_detail) {
+                    $message .= ' ' . self::maybe_translate_sprintf('Planner result: %s', $planner_detail);
+                }
+            }
             $success = false;
         } elseif (!$after_matches) {
             $status = $observation_mismatch ? 'invalidation-not-observed' : 'observation-incomplete';

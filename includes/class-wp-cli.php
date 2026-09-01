@@ -437,7 +437,7 @@ if (defined('WP_CLI') && WP_CLI && class_exists('WP_CLI_Command')) {
                     'commands' => array(
                         array(
                             'command' => 'wp ultracache varnish test',
-                            'description' => __('Test Varnish integration.', 'ultracache'),
+                            'description' => __('Redetect Varnish Capabilities integration.', 'ultracache'),
                         ),
                         array(
                             'command' => 'wp ultracache varnish flush-all',

@@ -361,16 +361,32 @@ trait Ultra_Cache_WP_Config_Manager_Trait
         }
 
         $wp_cache_status = 'missing';
-        if (!empty($external_matches['WP_CACHE'])) {
-            $wp_cache_status = 'other';
-            foreach ($external_matches['WP_CACHE'] as $match) {
-                $classified = self::classify_wp_config_boolean_value($match['value_raw'] ?? '');
-                if ('true' === $classified) {
-                    $wp_cache_status = 'true';
-                    break;
-                }
-                if ('false' === $classified) {
-                    $wp_cache_status = 'false';
+        $wp_cache_state = 'missing';
+        $wp_cache_matches = isset($external_matches['WP_CACHE']) && is_array($external_matches['WP_CACHE'])
+            ? array_values($external_matches['WP_CACHE'])
+            : array();
+        if (!empty($wp_cache_matches)) {
+            $classified_values = array();
+            foreach ($wp_cache_matches as $match) {
+                $classified_values[] = self::classify_wp_config_boolean_value($match['value_raw'] ?? '');
+            }
+
+            if (1 === count($classified_values)) {
+                $wp_cache_status = (string) $classified_values[0];
+                $wp_cache_state = 'true' === $wp_cache_status
+                    ? 'single_true'
+                    : ('false' === $wp_cache_status ? 'single_false' : 'single_nonstandard');
+            } else {
+                $unique_values = array_values(array_unique($classified_values));
+                $wp_cache_status = 'other';
+                if (in_array('other', $unique_values, true)) {
+                    $wp_cache_state = 'duplicate_nonstandard';
+                } elseif (1 === count($unique_values) && 'true' === $unique_values[0]) {
+                    $wp_cache_state = 'duplicate_same_true';
+                } elseif (1 === count($unique_values) && 'false' === $unique_values[0]) {
+                    $wp_cache_state = 'duplicate_same_false';
+                } else {
+                    $wp_cache_state = 'duplicate_conflicting';
                 }
             }
         }
@@ -381,8 +397,33 @@ trait Ultra_Cache_WP_Config_Manager_Trait
             'managed_values'  => $managed_values,
             'external_matches'=> $external_matches,
             'external_wp_cache_status' => $wp_cache_status,
+            'external_wp_cache_state' => $wp_cache_state,
         );
     }
+
+    private static function remove_wp_config_define_matches($contents, array $matches)
+    {
+        $contents = (string) $contents;
+        if ('' === $contents || empty($matches)) {
+            return $contents;
+        }
+
+        usort($matches, static function ($a, $b) {
+            return ((int) ($b['start'] ?? 0)) <=> ((int) ($a['start'] ?? 0));
+        });
+
+        foreach ($matches as $match) {
+            $start = isset($match['start']) ? (int) $match['start'] : -1;
+            $end = isset($match['end']) ? (int) $match['end'] : -1;
+            if ($start < 0 || $end <= $start || $end > strlen($contents)) {
+                return new WP_Error('ultracache_wp_config_statement_bounds_invalid', __('UltraCache could not safely normalize the existing WP_CACHE declaration in wp-config.php.', 'ultracache'));
+            }
+            $contents = substr($contents, 0, $start) . substr($contents, $end);
+        }
+
+        return $contents;
+    }
+
 
     private static function insert_managed_constants_block($contents, $block)
     {
@@ -451,6 +492,10 @@ trait Ultra_Cache_WP_Config_Manager_Trait
         }
 
         if ($verified) {
+            clearstatcache(true, $config);
+            if (function_exists('opcache_invalidate')) {
+                opcache_invalidate($config, true);
+            }
             return true;
         }
 
@@ -516,6 +561,44 @@ trait Ultra_Cache_WP_Config_Manager_Trait
 
         return false;
     }
+
+    private static function validate_wp_cache_takeover_preflight()
+    {
+        $config = self::get_wp_config_path();
+        if (!$config) {
+            return new WP_Error('ultracache_wp_config_not_found', __('wp-config.php could not be located.', 'ultracache'));
+        }
+
+        $filesystem = ultracache_get_wp_filesystem();
+        if (!$filesystem || !method_exists($filesystem, 'get_contents')) {
+            return new WP_Error('ultracache_wp_filesystem_unavailable', __('The WordPress Filesystem API is unavailable for reading wp-config.php.', 'ultracache'));
+        }
+        if (method_exists($filesystem, 'is_writable') && !$filesystem->is_writable($config)) {
+            return new WP_Error('ultracache_wp_config_not_writable', __('wp-config.php is not writable through the WordPress Filesystem API.', 'ultracache'));
+        }
+
+        $contents = $filesystem->get_contents($config);
+        if (!is_string($contents) || '' === $contents) {
+            return new WP_Error('ultracache_wp_config_read_failed', __('Failed to read wp-config.php through the WordPress Filesystem API.', 'ultracache'));
+        }
+
+        $inventory = self::get_wp_config_constant_inventory($contents);
+        $external = isset($inventory['external_matches']['WP_CACHE']) && is_array($inventory['external_matches']['WP_CACHE'])
+            ? $inventory['external_matches']['WP_CACHE']
+            : array();
+        foreach ($external as $match) {
+            $classified = self::classify_wp_config_boolean_value($match['value_raw'] ?? '');
+            if (!in_array($classified, array('true', 'false'), true)) {
+                return new WP_Error(
+                    'ultracache_external_wp_cache_constant',
+                    __('WP_CACHE is defined outside the UltraCache managed block in a non-standard way. UltraCache did not modify it.', 'ultracache')
+                );
+            }
+        }
+
+        return true;
+    }
+
 
     private static function update_wp_config_managed_constants($wp_cache_enabled, array $secret_patch = array())
     {
@@ -592,19 +675,31 @@ trait Ultra_Cache_WP_Config_Manager_Trait
             }
         }
 
+        $contents = self::strip_managed_constants_block($original_contents);
         $manage_wp_cache = false;
         if ($wp_cache_enabled) {
-            $external_wp_cache = isset($inventory['external_wp_cache_status']) ? (string) $inventory['external_wp_cache_status'] : 'missing';
-            if ('true' === $external_wp_cache) {
-                $manage_wp_cache = false;
-            } elseif ('missing' === $external_wp_cache) {
-                $manage_wp_cache = true;
-            } else {
-                return new WP_Error('ultracache_external_wp_cache_constant', __('WP_CACHE is defined outside the UltraCache managed block with a value that prevents UltraCache from enabling page cache.', 'ultracache'));
+            $external_wp_cache_matches = isset($external['WP_CACHE']) && is_array($external['WP_CACHE'])
+                ? array_values($external['WP_CACHE'])
+                : array();
+            foreach ($external_wp_cache_matches as $match) {
+                $classified = self::classify_wp_config_boolean_value($match['value_raw'] ?? '');
+                if (!in_array($classified, array('true', 'false'), true)) {
+                    return new WP_Error(
+                        'ultracache_external_wp_cache_constant',
+                        __('WP_CACHE is defined outside the UltraCache managed block in a non-standard way. UltraCache did not modify it.', 'ultracache')
+                    );
+                }
             }
+
+            if (!empty($external_wp_cache_matches)) {
+                $contents = self::remove_wp_config_define_matches($contents, $external_wp_cache_matches);
+                if (is_wp_error($contents)) {
+                    return $contents;
+                }
+            }
+            $manage_wp_cache = true;
         }
 
-        $contents = self::strip_managed_constants_block($original_contents);
         $block = self::get_managed_constants_block($manage_wp_cache, $redis_password, $varnish_password);
         $contents = self::insert_managed_constants_block($contents, $block);
         if (is_wp_error($contents)) {

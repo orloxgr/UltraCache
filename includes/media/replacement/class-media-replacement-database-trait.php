@@ -11,38 +11,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 {
     // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses private custom Media Library replacement registry tables with validated table identifiers.
 
-    private function get_media_replacement_reference_scan_tables()
-    {
-        global $wpdb;
-
-        if (!($wpdb instanceof wpdb)) {
-            return array();
-        }
-
-        return array(
-            array(
-                'table'   => (string) $wpdb->posts,
-                'primary' => 'ID',
-                'columns' => array('post_content', 'post_excerpt'),
-            ),
-            array(
-                'table'   => (string) $wpdb->postmeta,
-                'primary' => 'meta_id',
-                'columns' => array('meta_value'),
-            ),
-            array(
-                'table'   => (string) $wpdb->options,
-                'primary' => 'option_id',
-                'columns' => array('option_value'),
-            ),
-            array(
-                'table'   => (string) $wpdb->termmeta,
-                'primary' => 'meta_id',
-                'columns' => array('meta_value'),
-            ),
-        );
-    }
-
     private function sanitize_media_replacement_db_identifier($identifier, $max_length = 191)
     {
         $identifier = preg_replace('/[^A-Za-z0-9_]/', '', (string) $identifier);
@@ -407,7 +375,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         }
 
         $option_name = (string) $context['option_name'];
-        $this->invalidate_media_replacement_option_runtime_cache($option_name);
 
         if ($this->is_media_replacement_option_autoloaded((string) $context['autoload'])) {
             $alloptions = wp_load_alloptions();
@@ -499,30 +466,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return (bool) preg_match('/\b(char|varchar|text|tinytext|mediumtext|longtext|json)\b/', $column_type);
     }
 
-    private function get_media_replacement_reference_rows($limit = 10)
-    {
-        global $wpdb;
-
-        $items_table = $this->get_media_replacement_items_table_name();
-        $limit       = max(1, min(100, absint($limit)));
-
-        if ('' === $items_table || !($wpdb instanceof wpdb)) {
-            return array();
-        }
-
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT id, attachment_id, item_scope, size_name, old_relative_path, old_url, new_relative_path, new_url, status FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
-                $items_table,
-                'metadata_updated',
-                $limit
-            ),
-            ARRAY_A
-        );
-
-        return is_array($rows) ? $rows : array();
-    }
-
     private function get_media_replacement_upload_path_fragment($relative_path)
     {
         $uploads = function_exists('ultracache_uploads_base_info') ? ultracache_uploads_base_info() : wp_upload_dir(null, false);
@@ -586,237 +529,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         json_decode($value, true);
         return JSON_ERROR_NONE === json_last_error();
-    }
-
-    private function insert_media_replacement_reference_row($item_id, $table_name, $primary_key_column, $primary_key_value, $column_name, $old_fragment, $new_fragment, $stored_value)
-    {
-        global $wpdb;
-
-        $refs_table = $this->get_media_replacement_refs_table_name();
-        $item_id    = absint($item_id);
-
-        if ('' === $refs_table || $item_id <= 0 || !($wpdb instanceof wpdb)) {
-            return false;
-        }
-
-        $table_name         = $this->sanitize_media_replacement_db_identifier($table_name, 191);
-        $primary_key_column = $this->sanitize_media_replacement_db_identifier($primary_key_column, 64);
-        $column_name        = $this->sanitize_media_replacement_db_identifier($column_name, 64);
-        $primary_key_value  = substr(sanitize_text_field((string) $primary_key_value), 0, 191);
-        $old_fragment       = (string) $old_fragment;
-        $new_fragment       = (string) $new_fragment;
-        $stored_value       = (string) $stored_value;
-        $row_identity       = '';
-        if ((string) $wpdb->options === $table_name && 'option_id' === $primary_key_column && 'option_value' === $column_name) {
-            $row_identity = (string) $wpdb->get_var(
-                $wpdb->prepare(
-                    'SELECT option_name FROM %i WHERE option_id = %d LIMIT 1',
-                    $wpdb->options,
-                    absint($primary_key_value)
-                )
-            );
-            $row_identity = substr($row_identity, 0, 191);
-        }
-
-        if ('' === $table_name || '' === $primary_key_column || '' === $primary_key_value || '' === $column_name || '' === $old_fragment || '' === $new_fragment) {
-            return false;
-        }
-
-        $now      = current_time('mysql', true);
-        $ref_hash = md5($item_id . '|' . $table_name . '|' . $primary_key_column . '|' . $primary_key_value . '|' . $row_identity . '|' . $column_name . '|' . md5($old_fragment));
-
-        $row = array(
-            'job_id'             => '',
-            'item_id'            => $item_id,
-            'ref_hash'           => $ref_hash,
-            'table_name'         => $table_name,
-            'primary_key_column' => $primary_key_column,
-            'primary_key_value'  => $primary_key_value,
-            'row_identity'       => $row_identity,
-            'column_name'        => $column_name,
-            'old_value_hash'     => md5($stored_value),
-            'new_value_hash'     => md5($new_fragment),
-            'old_fragment'       => $old_fragment,
-            'new_fragment'       => $new_fragment,
-            'serialized'         => function_exists('is_serialized') && is_serialized($stored_value) ? 1 : 0,
-            'json_detected'      => $this->is_media_replacement_json_like_value($stored_value) ? 1 : 0,
-            'status'             => 'pending',
-            'error_message'      => null,
-            'created_at'         => $now,
-            'updated_at'         => $now,
-        );
-
-        return false !== $wpdb->replace(
-            $refs_table,
-            $row,
-            array('%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
-        );
-    }
-
-    private function scan_media_replacement_item_database_references(array $row)
-    {
-        global $wpdb;
-
-        $item_id = isset($row['id']) ? absint($row['id']) : 0;
-        if ($item_id <= 0 || !($wpdb instanceof wpdb)) {
-            return array('scanned' => false, 'refs' => 0, 'message' => __('Invalid Media Library replacement reference row.', 'ultracache'));
-        }
-
-        $fragments = $this->get_media_replacement_reference_fragments($row);
-        if (empty($fragments)) {
-            return array('scanned' => false, 'refs' => 0, 'message' => __('Old and new image URL/path fragments are missing for reference scan.', 'ultracache'));
-        }
-
-        $found = 0;
-        foreach ($this->get_media_replacement_reference_scan_tables() as $table_spec) {
-            $table_name = isset($table_spec['table']) ? (string) $table_spec['table'] : '';
-            $primary    = isset($table_spec['primary']) ? (string) $table_spec['primary'] : '';
-            $columns    = isset($table_spec['columns']) && is_array($table_spec['columns']) ? $table_spec['columns'] : array();
-
-            if ('' === $table_name || '' === $primary || empty($columns)) {
-                continue;
-            }
-
-            foreach ($columns as $column) {
-                $column = (string) $column;
-                if ('' === $column) {
-                    continue;
-                }
-
-                foreach ($fragments as $fragment) {
-                    $old_fragment = isset($fragment['old']) ? (string) $fragment['old'] : '';
-                    $new_fragment = isset($fragment['new']) ? (string) $fragment['new'] : '';
-                    if ('' === $old_fragment || '' === $new_fragment) {
-                        continue;
-                    }
-
-                    $like = '%' . $wpdb->esc_like($old_fragment) . '%';
-                    $matches = $wpdb->get_results(
-                        $wpdb->prepare(
-                            'SELECT %i AS primary_value, %i AS scanned_value FROM %i WHERE %i LIKE %s LIMIT 2000',
-                            $primary,
-                            $column,
-                            $table_name,
-                            $column,
-                            $like
-                        ),
-                        ARRAY_A
-                    );
-
-                    foreach ((array) $matches as $match) {
-                        $primary_value = isset($match['primary_value']) ? (string) $match['primary_value'] : '';
-                        $stored_value  = isset($match['scanned_value']) ? (string) $match['scanned_value'] : '';
-                        if ('' === $primary_value || '' === $stored_value || false === strpos($stored_value, $old_fragment)) {
-                            continue;
-                        }
-
-                        if ($this->insert_media_replacement_reference_row(
-                            $item_id,
-                            $table_name,
-                            $primary,
-                            $primary_value,
-                            $column,
-                            $old_fragment,
-                            $new_fragment,
-                            $stored_value
-                        )) {
-                            $found++;
-                        }
-                    }
-                }
-            }
-        }
-
-        return array('scanned' => true, 'refs' => $found, 'message' => '');
-    }
-
-    private function update_media_replacement_item_reference_scan_result($item_id, $status, $message = '')
-    {
-        global $wpdb;
-
-        $items_table = $this->get_media_replacement_items_table_name();
-        $item_id     = absint($item_id);
-        $status      = in_array((string) $status, array('metadata_updated', 'refs_scanned', 'failed'), true) ? (string) $status : 'failed';
-
-        if ('' === $items_table || $item_id <= 0 || !($wpdb instanceof wpdb)) {
-            return false;
-        }
-
-        return false !== $wpdb->update(
-            $items_table,
-            array(
-                'status'        => $status,
-                'error_message' => '' !== (string) $message ? wp_strip_all_tags((string) $message) : null,
-                'updated_at'    => current_time('mysql', true),
-            ),
-            array('id' => $item_id),
-            array('%s', '%s', '%s'),
-            array('%d')
-        );
-    }
-
-    private function get_media_replacement_reference_scan_summary()
-    {
-        global $wpdb;
-
-        $items_table = $this->get_media_replacement_items_table_name();
-        $refs_table  = $this->get_media_replacement_refs_table_name();
-        if ('' === $items_table || '' === $refs_table || !($wpdb instanceof wpdb)) {
-            return array();
-        }
-
-        $item_rows = $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT status, COUNT(*) AS item_count FROM %i GROUP BY status',
-                $items_table
-            ),
-            ARRAY_A
-        );
-
-        $summary = array(
-            'metadataUpdated'    => 0,
-            'refsScanned'        => 0,
-            'referenceScanFailed'=> 0,
-            'remainingRefsScan'  => 0,
-            'refsFound'          => 0,
-            'serializedRefs'     => 0,
-            'jsonRefs'           => 0,
-            'referenceScanItems' => 0,
-            'referenceScanTotal' => 0,
-        );
-
-        foreach ((array) $item_rows as $row) {
-            $status = isset($row['status']) ? sanitize_key((string) $row['status']) : '';
-            $count  = isset($row['item_count']) ? max(0, (int) $row['item_count']) : 0;
-            if ('metadata_updated' === $status) {
-                $summary['metadataUpdated'] += $count;
-            } elseif ('refs_scanned' === $status) {
-                $summary['refsScanned'] += $count;
-            } elseif ('failed' === $status) {
-                $summary['referenceScanFailed'] += $count;
-            }
-        }
-
-        $ref_row = $wpdb->get_row(
-            $wpdb->prepare(
-                'SELECT COUNT(*) AS refs_found, SUM(serialized) AS serialized_refs, SUM(json_detected) AS json_refs FROM %i WHERE status <> %s',
-                $refs_table,
-                'excluded'
-            ),
-            ARRAY_A
-        );
-
-        if (is_array($ref_row)) {
-            $summary['refsFound']      = isset($ref_row['refs_found']) ? max(0, (int) $ref_row['refs_found']) : 0;
-            $summary['serializedRefs'] = isset($ref_row['serialized_refs']) ? max(0, (int) $ref_row['serialized_refs']) : 0;
-            $summary['jsonRefs']       = isset($ref_row['json_refs']) ? max(0, (int) $ref_row['json_refs']) : 0;
-        }
-
-        $summary['remainingRefsScan']  = max(0, (int) $summary['metadataUpdated']);
-        $summary['referenceScanItems'] = max(0, (int) $summary['refsScanned']);
-        $summary['referenceScanTotal'] = max(0, (int) $summary['metadataUpdated'] + (int) $summary['refsScanned']);
-
-        return $summary;
     }
 
 
@@ -1752,9 +1464,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 250;
         $limit = max(25, min(1000, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
 
         $state = $this->get_media_replacement_ref_index_state();
         $start_new = 'idle' === $state['status'] || !empty($args['reset']) || !empty($args['start']);
@@ -1856,7 +1565,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $current_table = '';
         $current_column = '';
 
-        while ($remaining > 0 && $state['cursor_spec_index'] < $total_specs && $iterations < 25 && (0 === $iterations || microtime(true) < $deadline)) {
+        while ($remaining > 0 && $state['cursor_spec_index'] < $total_specs && $iterations < 25) {
             $spec = isset($specs[$state['cursor_spec_index']]) ? $specs[$state['cursor_spec_index']] : null;
             if (!is_array($spec)) {
                 $state['cursor_spec_index']++;
@@ -1899,10 +1608,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             $last_processed_primary = '';
 
             foreach ($rows as $db_row) {
-                if ($processed_candidates > 0 && microtime(true) >= $deadline) {
-                    break;
-                }
-
                 $stored_value = isset($db_row['scanned_value']) ? (string) $db_row['scanned_value'] : '';
                 $primary_value = isset($db_row['primary_value']) ? (string) $db_row['primary_value'] : '';
                 if ('' === $primary_value) {
@@ -2412,9 +2117,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 250;
         $limit = max(25, min(1000, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $rows = $this->get_media_replacement_ref_index_match_rows($limit);
 
         $batch_processed = 0;
@@ -2422,9 +2124,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $batch_unmatched = 0;
         $batch_failed = 0;
         foreach ($rows as $row) {
-            if ($batch_processed > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $batch_processed++;
             $index_id = isset($row['index_id']) ? absint($row['index_id']) : 0;
             $item_id = isset($row['item_id']) ? absint($row['item_id']) : 0;
@@ -2513,7 +2212,18 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return $this->get_media_replacement_database_preview_summary();
     }
 
-    private function get_media_replacement_database_apply_rows($limit = 50)
+    private function get_media_replacement_database_physical_row_key(array $ref)
+    {
+        return md5(
+            (string) ($ref['table_name'] ?? '') . "\n"
+            . (string) ($ref['primary_key_column'] ?? '') . "\n"
+            . (string) ($ref['primary_key_value'] ?? '') . "\n"
+            . (string) ($ref['row_identity'] ?? '') . "\n"
+            . (string) ($ref['column_name'] ?? '')
+        );
+    }
+
+    private function get_media_replacement_database_apply_groups($limit = 50)
     {
         global $wpdb;
 
@@ -2524,17 +2234,58 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array();
         }
 
+        /*
+         * Keep the existing reference limit as the batch seed, but expand every
+         * seeded physical row to include all of its pending prepared references.
+         * This prevents one database value from being read and written repeatedly
+         * merely because it contains several image references.
+         */
         $rows = $wpdb->get_results(
             $wpdb->prepare(
-                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE status = %s ORDER BY id ASC LIMIT %d',
+                'SELECT r.id, r.item_id, r.table_name, r.primary_key_column, r.primary_key_value, r.row_identity, r.column_name, r.old_fragment, r.new_fragment, r.serialized, r.json_detected, r.status
+                 FROM %i r
+                 INNER JOIN (
+                     SELECT seed.table_name, seed.primary_key_column, seed.primary_key_value, seed.row_identity, seed.column_name, MIN(seed.id) AS first_id
+                     FROM (
+                         SELECT id, table_name, primary_key_column, primary_key_value, row_identity, column_name
+                         FROM %i
+                         WHERE status = %s
+                         ORDER BY id ASC
+                         LIMIT %d
+                     ) seed
+                     GROUP BY seed.table_name, seed.primary_key_column, seed.primary_key_value, seed.row_identity, seed.column_name
+                 ) grouped
+                   ON grouped.table_name = r.table_name
+                  AND grouped.primary_key_column = r.primary_key_column
+                  AND grouped.primary_key_value = r.primary_key_value
+                  AND grouped.row_identity = r.row_identity
+                  AND grouped.column_name = r.column_name
+                 WHERE r.status = %s
+                 ORDER BY grouped.first_id ASC, r.id ASC',
+                $refs_table,
                 $refs_table,
                 'pending',
-                $limit
+                $limit,
+                'pending'
             ),
             ARRAY_A
         );
 
-        return is_array($rows) ? $rows : array();
+        if (!is_array($rows) || empty($rows)) {
+            return array();
+        }
+
+        $groups = array();
+        foreach ($rows as $row) {
+            $row = is_array($row) ? $row : array();
+            $key = $this->get_media_replacement_database_physical_row_key($row);
+            if (!isset($groups[$key])) {
+                $groups[$key] = array();
+            }
+            $groups[$key][] = $row;
+        }
+
+        return array_values($groups);
     }
 
     private function update_media_replacement_database_apply_ref_result($ref_id, $status, $message = '')
@@ -2812,6 +2563,71 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
+    private function validate_media_replacement_database_prepared_encoding($stored_value, $planned_serialized = false, $planned_json_detected = false)
+    {
+        $stored_value          = (string) $stored_value;
+        $planned_serialized    = !empty($planned_serialized);
+        $planned_json_detected = !empty($planned_json_detected);
+
+        if ($planned_serialized && $planned_json_detected) {
+            return array(
+                'valid'         => false,
+                'serialized'    => false,
+                'json_detected' => false,
+                'message'       => __('The prepared database row has inconsistent structured-value flags.', 'ultracache'),
+            );
+        }
+
+        $current_serialized = function_exists('is_serialized') && is_serialized($stored_value);
+        $current_json       = !$current_serialized && $this->is_media_replacement_json_like_value($stored_value);
+
+        if ($planned_serialized) {
+            if (!function_exists('is_serialized')) {
+                return array(
+                    'valid'         => false,
+                    'serialized'    => true,
+                    'json_detected' => false,
+                    'message'       => __('Serialized database value support is not available.', 'ultracache'),
+                );
+            }
+
+            if (!$current_serialized) {
+                return array(
+                    'valid'         => false,
+                    'serialized'    => true,
+                    'json_detected' => false,
+                    'message'       => __('The database row no longer matches the serialized representation recorded by Prepare. The prepared plan is stale and the current value was preserved.', 'ultracache'),
+                );
+            }
+
+            return array('valid' => true, 'serialized' => true, 'json_detected' => false, 'message' => '');
+        }
+
+        if ($planned_json_detected) {
+            if (!$current_json) {
+                return array(
+                    'valid'         => false,
+                    'serialized'    => false,
+                    'json_detected' => true,
+                    'message'       => __('The database row no longer matches the JSON representation recorded by Prepare. The prepared plan is stale and the current value was preserved.', 'ultracache'),
+                );
+            }
+
+            return array('valid' => true, 'serialized' => false, 'json_detected' => true, 'message' => '');
+        }
+
+        if ($current_serialized || $current_json) {
+            return array(
+                'valid'         => false,
+                'serialized'    => false,
+                'json_detected' => false,
+                'message'       => __('The database row no longer matches the raw representation recorded by Prepare. The prepared plan is stale and the current value was preserved.', 'ultracache'),
+            );
+        }
+
+        return array('valid' => true, 'serialized' => false, 'json_detected' => false, 'message' => '');
+    }
+
     private function validate_media_replacement_database_built_value($replacement_value, $old_fragment, $new_fragment, $serialized, $json_detected)
     {
         $replacement_value = (string) $replacement_value;
@@ -2917,36 +2733,30 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The planned JSON-like database value is no longer JSON-like.', 'ultracache'));
             }
 
-            $decoded = json_decode($stored_value, true);
+            if (false === strpos($stored_value, $old_fragment)) {
+                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The prepared image reference is no longer present in the JSON-like database value.', 'ultracache'));
+            }
+
+            $count     = 0;
+            $new_value = str_replace($old_fragment, $new_fragment, $stored_value, $count);
+            if ($count <= 0 || $new_value === $stored_value) {
+                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The prepared image reference could not be replaced in the JSON-like database value.', 'ultracache'));
+            }
+
+            json_decode($new_value, true);
             if (JSON_ERROR_NONE !== json_last_error()) {
-                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The planned JSON-like database value could not be decoded before replacement.', 'ultracache'));
+                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The JSON-like database value became invalid after applying the prepared replacement.', 'ultracache'));
             }
 
-            $count   = 0;
-            $decoded = $this->replace_media_replacement_fragment_recursive($decoded, $old_fragment, $new_fragment, $count);
-            if ($count <= 0) {
-                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The old image reference was not found inside the decoded JSON-like value.', 'ultracache'));
-            }
-
-            $encoded = wp_json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-            if (!is_string($encoded) || '' === $encoded) {
-                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The JSON-like database value could not be re-encoded after replacement.', 'ultracache'));
-            }
-
-            json_decode($encoded, true);
-            if (JSON_ERROR_NONE !== json_last_error()) {
-                return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The re-encoded JSON-like database value could not be decoded after replacement.', 'ultracache'));
-            }
-
-            if (false !== strpos($encoded, $old_fragment)) {
+            if (false !== strpos($new_value, $old_fragment)) {
                 return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The old image reference is still present in the JSON-like replacement value.', 'ultracache'));
             }
 
-            if (false === strpos($encoded, $new_fragment)) {
+            if (false === strpos($new_value, $new_fragment)) {
                 return array('changed' => false, 'value' => $stored_value, 'count' => 0, 'message' => __('The new image reference is missing from the JSON-like replacement value.', 'ultracache'));
             }
 
-            return array('changed' => true, 'value' => $encoded, 'count' => $count, 'message' => '');
+            return array('changed' => true, 'value' => $new_value, 'count' => $count, 'message' => '');
         }
 
         if (false === strpos($stored_value, $old_fragment)) {
@@ -3043,146 +2853,258 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         return array('updated' => true, 'conflict' => false, 'error' => false);
     }
 
-    private function apply_media_replacement_database_ref(array $ref)
+    private function apply_media_replacement_database_row_group(array $refs)
     {
-        $ref_id       = isset($ref['id']) ? absint($ref['id']) : 0;
-        $old_fragment = isset($ref['old_fragment']) ? (string) $ref['old_fragment'] : '';
-        $new_fragment = isset($ref['new_fragment']) ? (string) $ref['new_fragment'] : '';
-
-        if ($ref_id <= 0 || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment) {
-            return array('applied' => false, 'message' => __('Invalid planned database replacement row.', 'ultracache'));
+        $refs = array_values(array_filter($refs, 'is_array'));
+        if (empty($refs)) {
+            return array('results' => array());
         }
 
-        if ($this->is_media_replacement_internal_database_ref($ref)) {
-            return array(
-                'applied'  => false,
-                'excluded' => true,
-                'message'  => __('UltraCache operational state is outside the Media Library replacement content scope.', 'ultracache'),
-            );
-        }
+        $first_ref = $refs[0];
+        $group_key = $this->get_media_replacement_database_physical_row_key($first_ref);
+        $results   = array();
+        $work_refs = array();
 
-        $identity = $this->validate_media_replacement_database_ref_identity($ref);
-        if (empty($identity['valid'])) {
-            return array('applied' => false, 'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'));
-        }
+        foreach ($refs as $ref) {
+            $ref_id       = isset($ref['id']) ? absint($ref['id']) : 0;
+            $old_fragment = isset($ref['old_fragment']) ? (string) $ref['old_fragment'] : '';
+            $new_fragment = isset($ref['new_fragment']) ? (string) $ref['new_fragment'] : '';
 
-        $stored_value = $this->get_media_replacement_database_row_value($ref);
-        if (null === $stored_value) {
-            return array('applied' => false, 'message' => __('The database row for this replacement could not be read.', 'ultracache'));
-        }
-
-        $stored_value = (string) $stored_value;
-        $encoding     = $this->resolve_media_replacement_database_value_encoding(
-            $stored_value,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
-        );
-        if (false === strpos($stored_value, $old_fragment)) {
-            if (false !== strpos($stored_value, $new_fragment)) {
-                $already_applied = $this->validate_media_replacement_database_built_value(
-                    $stored_value,
-                    $old_fragment,
-                    $new_fragment,
-                    $encoding['serialized'],
-                    $encoding['json_detected']
-                );
-                if (!empty($already_applied['valid'])) {
-                    $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $stored_value);
-                    if (empty($runtime_verification['verified'])) {
-                        return array('applied' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified for the already-applied value.', 'ultracache'));
-                    }
-                    return array('applied' => true, 'already_applied' => true, 'message' => '', 'count' => 0);
+            if ($ref_id <= 0 || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment) {
+                if ($ref_id > 0) {
+                    $results[$ref_id] = array('status' => 'failed', 'message' => __('Invalid planned database replacement row.', 'ultracache'));
                 }
-                return array('applied' => false, 'message' => isset($already_applied['message']) ? (string) $already_applied['message'] : __('The already-replaced database value failed validation.', 'ultracache'));
+                continue;
             }
-            return array('applied' => false, 'message' => __('Neither the old nor the new image reference is present in the current database value.', 'ultracache'));
+
+            if (!hash_equals($group_key, $this->get_media_replacement_database_physical_row_key($ref))) {
+                $results[$ref_id] = array('status' => 'failed', 'message' => __('The prepared database replacement batch mixed different physical rows.', 'ultracache'));
+                continue;
+            }
+
+            if ($this->is_media_replacement_internal_database_ref($ref)) {
+                $results[$ref_id] = array(
+                    'status'  => 'excluded',
+                    'message' => __('UltraCache operational state is outside the Media Library replacement content scope.', 'ultracache'),
+                );
+                continue;
+            }
+
+            $identity = $this->validate_media_replacement_database_ref_identity($ref);
+            if (empty($identity['valid'])) {
+                $results[$ref_id] = array(
+                    'status'  => 'failed',
+                    'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'),
+                );
+                continue;
+            }
+
+            $work_refs[] = $ref;
         }
 
-        $replacement  = $this->build_media_replacement_database_value(
+        if (empty($work_refs)) {
+            return array('results' => $results);
+        }
+
+        $base_ref     = $work_refs[0];
+        $stored_value = $this->get_media_replacement_database_row_value($base_ref);
+        if (null === $stored_value) {
+            foreach ($work_refs as $ref) {
+                $results[absint($ref['id'])] = array('status' => 'failed', 'message' => __('The database row for this replacement could not be read.', 'ultracache'));
+            }
+            return array('results' => $results);
+        }
+
+        $stored_value       = (string) $stored_value;
+        $planned_serialized = !empty($base_ref['serialized']);
+        $planned_json       = !empty($base_ref['json_detected']);
+
+        foreach ($work_refs as $ref) {
+            if ((!empty($ref['serialized'])) !== $planned_serialized || (!empty($ref['json_detected'])) !== $planned_json) {
+                foreach ($work_refs as $row_ref) {
+                    $results[absint($row_ref['id'])] = array('status' => 'failed', 'message' => __('The prepared references for this database row disagree about its stored representation. The current value was preserved.', 'ultracache'));
+                }
+                return array('results' => $results);
+            }
+        }
+
+        $encoding = $this->validate_media_replacement_database_prepared_encoding(
             $stored_value,
-            $old_fragment,
-            $new_fragment,
-            $encoding['serialized'],
-            $encoding['json_detected']
+            $planned_serialized,
+            $planned_json
         );
-
-        if (empty($replacement['changed'])) {
-            return array('applied' => false, 'message' => isset($replacement['message']) ? (string) $replacement['message'] : __('No database value change was produced.', 'ultracache'));
+        if (empty($encoding['valid'])) {
+            $message = isset($encoding['message']) ? (string) $encoding['message'] : __('The database row no longer matches the representation recorded by Prepare. The current value was preserved.', 'ultracache');
+            foreach ($work_refs as $ref) {
+                $results[absint($ref['id'])] = array('status' => 'failed', 'message' => $message, 'conflict' => true);
+            }
+            return array('results' => $results);
         }
 
-        $prewrite_validation = $this->validate_media_replacement_database_built_value(
-            isset($replacement['value']) ? (string) $replacement['value'] : '',
-            $old_fragment,
-            $new_fragment,
-            $encoding['serialized'],
-            $encoding['json_detected']
-        );
-        if (empty($prewrite_validation['valid'])) {
-            return array('applied' => false, 'message' => isset($prewrite_validation['message']) ? (string) $prewrite_validation['message'] : __('The built database replacement value failed pre-write validation.', 'ultracache'));
+        $working_value   = $stored_value;
+        $changed_ref_ids = array();
+        $already_ref_ids = array();
+
+        foreach ($work_refs as $ref) {
+            $ref_id       = absint($ref['id']);
+            $old_fragment = (string) $ref['old_fragment'];
+            $new_fragment = (string) $ref['new_fragment'];
+
+            if (false === strpos($working_value, $old_fragment)) {
+                if (false !== strpos($working_value, $new_fragment)) {
+                    $already_validation = $this->validate_media_replacement_database_built_value(
+                        $working_value,
+                        $old_fragment,
+                        $new_fragment,
+                        $encoding['serialized'],
+                        $encoding['json_detected']
+                    );
+                    if (!empty($already_validation['valid'])) {
+                        $already_ref_ids[$ref_id] = true;
+                    } else {
+                        $results[$ref_id] = array(
+                            'status'  => 'failed',
+                            'message' => isset($already_validation['message']) ? (string) $already_validation['message'] : __('The already-replaced database value failed validation.', 'ultracache'),
+                        );
+                    }
+                } else {
+                    $results[$ref_id] = array('status' => 'failed', 'message' => __('Neither the old nor the new image reference is present in the current database value.', 'ultracache'));
+                }
+                continue;
+            }
+
+            $replacement = $this->build_media_replacement_database_value(
+                $working_value,
+                $old_fragment,
+                $new_fragment,
+                $encoding['serialized'],
+                $encoding['json_detected']
+            );
+
+            if (empty($replacement['changed'])) {
+                $results[$ref_id] = array(
+                    'status'  => 'failed',
+                    'message' => isset($replacement['message']) ? (string) $replacement['message'] : __('No database value change was produced.', 'ultracache'),
+                );
+                continue;
+            }
+
+            $candidate = isset($replacement['value']) ? (string) $replacement['value'] : '';
+            $prewrite_validation = $this->validate_media_replacement_database_built_value(
+                $candidate,
+                $old_fragment,
+                $new_fragment,
+                $encoding['serialized'],
+                $encoding['json_detected']
+            );
+            if (empty($prewrite_validation['valid'])) {
+                $results[$ref_id] = array(
+                    'status'  => 'failed',
+                    'message' => isset($prewrite_validation['message']) ? (string) $prewrite_validation['message'] : __('The built database replacement value failed pre-write validation.', 'ultracache'),
+                );
+                continue;
+            }
+
+            $working_value = $candidate;
+            $changed_ref_ids[$ref_id] = true;
         }
 
-        $replacement_value = (string) $replacement['value'];
-        $write_result      = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $replacement_value);
+        if ($working_value === $stored_value) {
+            if (!empty($already_ref_ids)) {
+                $runtime_verification = $this->verify_media_replacement_option_runtime_state($base_ref, $stored_value);
+                if (empty($runtime_verification['verified'])) {
+                    $message = isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified for the already-applied value.', 'ultracache');
+                    foreach (array_keys($already_ref_ids) as $ref_id) {
+                        $results[$ref_id] = array('status' => 'failed', 'message' => $message);
+                    }
+                } else {
+                    foreach (array_keys($already_ref_ids) as $ref_id) {
+                        $results[$ref_id] = array('status' => 'replaced', 'message' => '', 'already_applied' => true);
+                    }
+                }
+            }
+            return array('results' => $results);
+        }
+
+        $write_result = $this->compare_and_swap_media_replacement_database_row_value($base_ref, $stored_value, $working_value);
         if (empty($write_result['updated'])) {
-            return array(
-                'applied'  => false,
-                'conflict' => !empty($write_result['conflict']),
-                'message'  => !empty($write_result['conflict'])
-                    ? __('The database row changed after it was read. No replacement was written; run the database replacement step again with a fresh plan.', 'ultracache')
-                    : (!empty($write_result['message']) ? (string) $write_result['message'] : __('The database row could not be updated.', 'ultracache')),
-            );
+            $message = !empty($write_result['conflict'])
+                ? __('The database row changed after it was read. No grouped replacement was written; run the database replacement step again with a fresh plan.', 'ultracache')
+                : (!empty($write_result['message']) ? (string) $write_result['message'] : __('The database row could not be updated.', 'ultracache'));
+            foreach (array_unique(array_merge(array_keys($changed_ref_ids), array_keys($already_ref_ids))) as $ref_id) {
+                $results[$ref_id] = array('status' => 'failed', 'message' => $message);
+            }
+            return array('results' => $results);
         }
 
-        $restore_and_fail = function ($message) use ($ref, $stored_value, $replacement_value) {
-            $restore_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $replacement_value, $stored_value);
-            return array(
-                'applied' => false,
-                'message' => !empty($restore_result['updated'])
-                    ? (string) $message
-                    : sprintf(
-                        /* translators: %s: failure reason. */
-                        __('%s The original database value was not restored because the row changed again or the restore query failed.', 'ultracache'),
-                        (string) $message
-                    ),
-            );
+        $restore_and_fail = function ($message) use ($base_ref, $stored_value, $working_value, &$results, $changed_ref_ids, $already_ref_ids) {
+            $restore_result = $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+            $final_message = !empty($restore_result['updated'])
+                ? (string) $message
+                : sprintf(
+                    /* translators: %s: failure reason. */
+                    __('%s The original database value was not restored because the row changed again or the restore query failed.', 'ultracache'),
+                    (string) $message
+                );
+
+            foreach (array_keys($changed_ref_ids) as $ref_id) {
+                $results[$ref_id] = array('status' => 'failed', 'message' => $final_message);
+            }
+            foreach (array_keys($already_ref_ids) as $ref_id) {
+                $results[$ref_id] = array('status' => 'replaced', 'message' => '', 'already_applied' => true);
+            }
+
+            return array('results' => $results);
         };
 
-        $verified_value = $this->get_media_replacement_database_row_value($ref);
-        if (null === $verified_value || false === strpos((string) $verified_value, $new_fragment)) {
-            return $restore_and_fail(__('The database row update could not be verified.', 'ultracache'));
+        $verified_value = $this->get_media_replacement_database_row_value($base_ref);
+        if (null === $verified_value) {
+            return $restore_and_fail(__('The grouped database row update could not be read back for verification.', 'ultracache'));
         }
-
         $verified_value = (string) $verified_value;
-        if (false !== strpos($verified_value, $old_fragment)) {
-            return $restore_and_fail(__('The old image reference is still present after the database row update.', 'ultracache'));
+
+        foreach ($work_refs as $ref) {
+            $ref_id = absint($ref['id']);
+            if (!isset($changed_ref_ids[$ref_id]) && !isset($already_ref_ids[$ref_id])) {
+                continue;
+            }
+            if (false === strpos($verified_value, (string) $ref['new_fragment']) || false !== strpos($verified_value, (string) $ref['old_fragment'])) {
+                return $restore_and_fail(__('One or more prepared image references could not be verified after the grouped database row update.', 'ultracache'));
+            }
         }
 
         if (!empty($encoding['serialized'])) {
             $serialized_check = $this->verify_media_replacement_serialized_database_value($verified_value);
             if (empty($serialized_check['verified'])) {
-                return $restore_and_fail(__('The serialized database value could not be decoded immediately after replacement.', 'ultracache'));
+                return $restore_and_fail(__('The serialized database value could not be decoded immediately after the grouped replacement.', 'ultracache'));
             }
-
             if (!empty($serialized_check['repaired'])) {
-                return $restore_and_fail(__('The serialized database value required repair immediately after replacement and was not marked as applied.', 'ultracache'));
+                return $restore_and_fail(__('The serialized database value required repair immediately after the grouped replacement and was not marked as applied.', 'ultracache'));
             }
         }
 
         if (!empty($encoding['json_detected'])) {
             json_decode($verified_value, true);
             if (JSON_ERROR_NONE !== json_last_error()) {
-                return $restore_and_fail(__('The JSON-like database value could not be decoded immediately after replacement.', 'ultracache'));
+                return $restore_and_fail(__('The JSON-like database value could not be decoded immediately after the grouped replacement.', 'ultracache'));
             }
         }
 
-        $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $verified_value);
+        $runtime_verification = $this->verify_media_replacement_option_runtime_state($base_ref, $verified_value);
         if (empty($runtime_verification['verified'])) {
             return $restore_and_fail(isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified after replacement.', 'ultracache'));
         }
 
         $this->finalize_media_replacement_option_write($write_result);
 
-        return array('applied' => true, 'message' => '', 'count' => isset($replacement['count']) ? absint($replacement['count']) : 1);
+        foreach (array_keys($changed_ref_ids) as $ref_id) {
+            $results[$ref_id] = array('status' => 'replaced', 'message' => '');
+        }
+        foreach (array_keys($already_ref_ids) as $ref_id) {
+            $results[$ref_id] = array('status' => 'replaced', 'message' => '', 'already_applied' => true);
+        }
+
+        return array('results' => $results);
     }
 
     public function apply_media_library_replacement_database_replacements($args = array())
@@ -3206,11 +3128,8 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(10, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $duplicates_removed = $this->deduplicate_media_replacement_database_reference_rows();
-        $rows = $this->get_media_replacement_database_apply_rows($limit);
+        $groups = $this->get_media_replacement_database_apply_groups($limit);
 
         $batch_processed = 0;
         $batch_replaced  = 0;
@@ -3218,30 +3137,41 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         $batch_excluded  = 0;
         $registry_sync_failed = 0;
 
-        foreach ($rows as $row) {
-            if (microtime(true) >= $deadline) {
-                break;
-            }
-            $batch_processed++;
-            $ref_id = isset($row['id']) ? absint($row['id']) : 0;
-            $result = $this->apply_media_replacement_database_ref($row);
-            if (!empty($result['applied'])) {
-                if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'replaced', '')) {
-                    $batch_replaced++;
-                } else {
-                    $registry_sync_failed++;
+        foreach ($groups as $group) {
+            $group_result = $this->apply_media_replacement_database_row_group((array) $group);
+            $ref_results  = isset($group_result['results']) && is_array($group_result['results']) ? $group_result['results'] : array();
+
+            foreach ((array) $group as $row) {
+                $ref_id = isset($row['id']) ? absint($row['id']) : 0;
+                if ($ref_id <= 0) {
+                    continue;
                 }
-            } elseif (!empty($result['excluded'])) {
-                if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'excluded', isset($result['message']) ? (string) $result['message'] : '')) {
-                    $batch_excluded++;
+
+                $batch_processed++;
+                $result = isset($ref_results[$ref_id]) && is_array($ref_results[$ref_id])
+                    ? $ref_results[$ref_id]
+                    : array('status' => 'failed', 'message' => __('Database replacement did not return a result for this prepared reference.', 'ultracache'));
+                $status  = isset($result['status']) ? (string) $result['status'] : 'failed';
+                $message = isset($result['message']) ? (string) $result['message'] : '';
+
+                if ('replaced' === $status) {
+                    if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'replaced', '')) {
+                        $batch_replaced++;
+                    } else {
+                        $registry_sync_failed++;
+                    }
+                } elseif ('excluded' === $status) {
+                    if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'excluded', $message)) {
+                        $batch_excluded++;
+                    } else {
+                        $registry_sync_failed++;
+                    }
                 } else {
-                    $registry_sync_failed++;
-                }
-            } else {
-                if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'failed', isset($result['message']) ? (string) $result['message'] : __('Database replacement failed.', 'ultracache'))) {
-                    $batch_failed++;
-                } else {
-                    $registry_sync_failed++;
+                    if ($this->update_media_replacement_database_apply_ref_result($ref_id, 'failed', '' !== $message ? $message : __('Database replacement failed.', 'ultracache'))) {
+                        $batch_failed++;
+                    } else {
+                        $registry_sync_failed++;
+                    }
                 }
             }
         }
@@ -3535,35 +3465,15 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return array('verified' => false, 'message' => __('The new image reference is missing from the database row.', 'ultracache'));
         }
 
-        $repair_write_result = array();
         if (!empty($encoding['serialized'])) {
-            $serialized_check = $this->verify_media_replacement_serialized_database_value($stored_value);
-            if (empty($serialized_check['verified'])) {
-                return array('verified' => false, 'message' => __('The serialized database value could not be decoded after replacement.', 'ultracache'));
+            if (!function_exists('is_serialized') || !is_serialized($stored_value)) {
+                return array('verified' => false, 'message' => __('The serialized database value is invalid after replacement. Verify does not modify site content.', 'ultracache'));
             }
 
-            if (!empty($serialized_check['repaired']) && isset($serialized_check['value']) && is_string($serialized_check['value'])) {
-                $repaired_value = (string) $serialized_check['value'];
-                if ($repaired_value !== $stored_value) {
-                    $repair_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $repaired_value);
-                    if (empty($repair_result['updated'])) {
-                        return array(
-                            'verified' => false,
-                            'conflict' => !empty($repair_result['conflict']),
-                            'message'  => !empty($repair_result['conflict'])
-                                ? __('The serialized database row changed while its string lengths were being repaired. The newer value was preserved.', 'ultracache')
-                                : (!empty($repair_result['message']) ? (string) $repair_result['message'] : __('The serialized database value was repaired in memory but could not be saved.', 'ultracache')),
-                        );
-                    }
-
-                    $stored_value = $repaired_value;
-                    if (false !== strpos($stored_value, $old_fragment)) {
-                        return array('verified' => false, 'message' => __('The old image reference is still present in the repaired serialized database row.', 'ultracache'));
-                    }
-                    if (false === strpos($stored_value, $new_fragment)) {
-                        return array('verified' => false, 'message' => __('The new image reference is missing from the repaired serialized database row.', 'ultracache'));
-                    }
-                    $repair_write_result = $repair_result;
+            if ('b:0;' !== $stored_value) {
+                $decoded_serialized = $this->safe_unserialize_media_replacement_database_value($stored_value);
+                if (empty($decoded_serialized['success'])) {
+                    return array('verified' => false, 'message' => __('The serialized database value could not be decoded after replacement. Verify does not modify site content.', 'ultracache'));
                 }
             }
         }
@@ -3579,8 +3489,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         if (empty($runtime_verification['verified'])) {
             return array('verified' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified.', 'ultracache'));
         }
-
-        $this->finalize_media_replacement_option_write($repair_write_result);
 
         return array('verified' => true, 'message' => '');
     }
@@ -3673,32 +3581,6 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
     }
 
 
-    private function get_media_replacement_database_rollback_rows($limit = 50)
-    {
-        global $wpdb;
-
-        $refs_table = $this->get_media_replacement_refs_table_name();
-        $limit      = max(1, min(250, absint($limit)));
-
-        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
-            return array();
-        }
-
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                'SELECT id, item_id, table_name, primary_key_column, primary_key_value, row_identity, column_name, old_fragment, new_fragment, serialized, json_detected, status FROM %i WHERE status IN (%s, %s, %s) ORDER BY id DESC LIMIT %d',
-                $refs_table,
-                'verified',
-                'replaced',
-                'verify_failed',
-                $limit
-            ),
-            ARRAY_A
-        );
-
-        return is_array($rows) ? $rows : array();
-    }
-
     private function update_media_replacement_database_rollback_ref_result($ref_id, $status, $message = '')
     {
         global $wpdb;
@@ -3761,153 +3643,293 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
         );
     }
 
-    private function rollback_media_replacement_database_ref(array $ref)
+    private function get_media_replacement_database_rollback_groups($limit = 50)
     {
-        $ref_id       = isset($ref['id']) ? absint($ref['id']) : 0;
-        $old_fragment = isset($ref['old_fragment']) ? (string) $ref['old_fragment'] : '';
-        $new_fragment = isset($ref['new_fragment']) ? (string) $ref['new_fragment'] : '';
+        global $wpdb;
 
-        if ($ref_id <= 0 || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment) {
-            return array('restored' => false, 'message' => __('Invalid planned database rollback row.', 'ultracache'));
+        $refs_table = $this->get_media_replacement_refs_table_name();
+        $limit = max(1, min(250, absint($limit)));
+        if ('' === $refs_table || !($wpdb instanceof wpdb)) {
+            return array();
         }
 
-        $identity = $this->validate_media_replacement_database_ref_identity($ref);
-        if (empty($identity['valid'])) {
-            return array('restored' => false, 'message' => isset($identity['message']) ? (string) $identity['message'] : __('The planned database-row identity could not be verified.', 'ultracache'));
-        }
-
-        $stored_value = $this->get_media_replacement_database_row_value($ref);
-        if (null === $stored_value) {
-            return array('restored' => false, 'message' => __('The database row for this rollback could not be read.', 'ultracache'));
-        }
-
-        $stored_value = (string) $stored_value;
-        $encoding     = $this->resolve_media_replacement_database_value_encoding(
-            $stored_value,
-            !empty($ref['serialized']),
-            !empty($ref['json_detected'])
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT r.id, r.item_id, r.table_name, r.primary_key_column, r.primary_key_value, r.row_identity, r.column_name, r.old_fragment, r.new_fragment, r.serialized, r.json_detected, r.status
+                 FROM %i r
+                 INNER JOIN (
+                     SELECT seed.table_name, seed.primary_key_column, seed.primary_key_value, seed.row_identity, seed.column_name, MIN(seed.id) AS first_id
+                     FROM (
+                         SELECT id, table_name, primary_key_column, primary_key_value, row_identity, column_name
+                         FROM %i
+                         WHERE status IN (%s, %s, %s)
+                         ORDER BY id DESC
+                         LIMIT %d
+                     ) seed
+                     GROUP BY seed.table_name, seed.primary_key_column, seed.primary_key_value, seed.row_identity, seed.column_name
+                 ) grouped
+                   ON grouped.table_name = r.table_name
+                  AND grouped.primary_key_column = r.primary_key_column
+                  AND grouped.primary_key_value = r.primary_key_value
+                  AND grouped.row_identity = r.row_identity
+                  AND grouped.column_name = r.column_name
+                 WHERE r.status IN (%s, %s, %s, %s)
+                 ORDER BY grouped.first_id DESC, r.id DESC',
+                $refs_table,
+                $refs_table,
+                'verified',
+                'replaced',
+                'verify_failed',
+                $limit,
+                'verified',
+                'replaced',
+                'verify_failed',
+                'restored'
+            ),
+            ARRAY_A
         );
-        if (false !== strpos($stored_value, $old_fragment) && false === strpos($stored_value, $new_fragment)) {
-            $already_restored = $this->validate_media_replacement_database_built_value(
-                $stored_value,
+
+        if (!is_array($rows) || empty($rows)) {
+            return array();
+        }
+
+        $groups = array();
+        foreach ($rows as $row) {
+            $key = $this->get_media_replacement_database_physical_row_key((array) $row);
+            if (!isset($groups[$key])) {
+                $groups[$key] = array();
+            }
+            $groups[$key][] = (array) $row;
+        }
+
+        return array_values($groups);
+    }
+
+    private function rollback_media_replacement_database_row_group(array $refs)
+    {
+        $refs = array_values(array_filter($refs, 'is_array'));
+        if (empty($refs)) {
+            return array('results' => array());
+        }
+
+        $first_ref = $refs[0];
+        $group_key = $this->get_media_replacement_database_physical_row_key($first_ref);
+        $results = array();
+        $work_refs = array();
+
+        foreach ($refs as $ref) {
+            $ref_id = absint($ref['id'] ?? 0);
+            if ('restored' === (string) ($ref['status'] ?? '')) {
+                if ($ref_id > 0) {
+                    $results[$ref_id] = array('status' => 'restored', 'message' => '', 'already_restored' => true);
+                }
+                continue;
+            }
+
+            $old_fragment = (string) ($ref['old_fragment'] ?? '');
+            $new_fragment = (string) ($ref['new_fragment'] ?? '');
+            if ($ref_id <= 0 || '' === $old_fragment || '' === $new_fragment || $old_fragment === $new_fragment) {
+                if ($ref_id > 0) {
+                    $results[$ref_id] = array('status' => 'rollback_failed', 'message' => __('Invalid planned database rollback row.', 'ultracache'));
+                }
+                continue;
+            }
+            if (!hash_equals($group_key, $this->get_media_replacement_database_physical_row_key($ref))) {
+                $results[$ref_id] = array('status' => 'rollback_failed', 'message' => __('The database rollback batch mixed different physical rows.', 'ultracache'));
+                continue;
+            }
+            $identity = $this->validate_media_replacement_database_ref_identity($ref);
+            if (empty($identity['valid'])) {
+                $results[$ref_id] = array('status' => 'rollback_failed', 'message' => (string) ($identity['message'] ?? __('The planned database-row identity could not be verified.', 'ultracache')));
+                continue;
+            }
+            $work_refs[] = $ref;
+        }
+
+        if (empty($work_refs)) {
+            return array('results' => $results);
+        }
+
+        $base_ref = $work_refs[0];
+        $stored_value = $this->get_media_replacement_database_row_value($base_ref);
+        if (null === $stored_value) {
+            foreach ($work_refs as $ref) {
+                $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => __('The database row for this rollback could not be read.', 'ultracache'));
+            }
+            return array('results' => $results);
+        }
+        $stored_value = (string) $stored_value;
+
+        $planned_serialized = !empty($base_ref['serialized']);
+        $planned_json = !empty($base_ref['json_detected']);
+        foreach ($work_refs as $ref) {
+            if ((!empty($ref['serialized'])) !== $planned_serialized || (!empty($ref['json_detected'])) !== $planned_json) {
+                $message = __('The prepared references for this database row disagree about its stored representation. The current value was preserved.', 'ultracache');
+                foreach ($work_refs as $row_ref) {
+                    $results[absint($row_ref['id'])] = array('status' => 'rollback_failed', 'message' => $message);
+                }
+                return array('results' => $results);
+            }
+        }
+
+        $encoding = $this->validate_media_replacement_database_prepared_encoding($stored_value, $planned_serialized, $planned_json);
+        if (empty($encoding['valid'])) {
+            $message = (string) ($encoding['message'] ?? __('The database row no longer matches the representation recorded by Prepare. The current value was preserved.', 'ultracache'));
+            foreach ($work_refs as $ref) {
+                $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => $message, 'conflict' => true);
+            }
+            return array('results' => $results);
+        }
+
+        $working_value = $stored_value;
+        $changed_ref_ids = array();
+        $already_ref_ids = array();
+
+        /* Validate the whole physical row before producing any rollback write. */
+        foreach ($work_refs as $ref) {
+            $ref_id = absint($ref['id']);
+            $old_fragment = (string) $ref['old_fragment'];
+            $new_fragment = (string) $ref['new_fragment'];
+            $has_old = false !== strpos($working_value, $old_fragment);
+            $has_new = false !== strpos($working_value, $new_fragment);
+
+            if (!$has_new && $has_old) {
+                $already_ref_ids[$ref_id] = true;
+                continue;
+            }
+            if (!$has_new) {
+                $message = __('A prepared replacement reference is no longer present in this database row. The newer row was preserved and no grouped rollback was written.', 'ultracache');
+                foreach ($work_refs as $row_ref) {
+                    $row_id = absint($row_ref['id']);
+                    if ('restored' !== (string) ($row_ref['status'] ?? '')) {
+                        $results[$row_id] = array('status' => 'rollback_failed', 'message' => $message, 'conflict' => true);
+                    }
+                }
+                return array('results' => $results);
+            }
+
+            $replacement = $this->build_media_replacement_database_value(
+                $working_value,
                 $new_fragment,
                 $old_fragment,
                 $encoding['serialized'],
                 $encoding['json_detected']
             );
-            if (!empty($already_restored['valid'])) {
-                $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $stored_value);
-                if (empty($runtime_verification['verified'])) {
-                    return array('restored' => false, 'message' => isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified for the already-restored value.', 'ultracache'));
+            if (empty($replacement['changed'])) {
+                $message = (string) ($replacement['message'] ?? __('No grouped database rollback value was produced.', 'ultracache'));
+                foreach ($work_refs as $row_ref) {
+                    $row_id = absint($row_ref['id']);
+                    if ('restored' !== (string) ($row_ref['status'] ?? '')) {
+                        $results[$row_id] = array('status' => 'rollback_failed', 'message' => $message);
+                    }
                 }
-                return array('restored' => true, 'message' => '', 'count' => 0, 'alreadyRestored' => true);
+                return array('results' => $results);
             }
 
-            return array(
-                'restored' => false,
-                'message'  => isset($already_restored['message'])
-                    ? (string) $already_restored['message']
-                    : __('The already-restored database value failed validation.', 'ultracache'),
+            $candidate = (string) ($replacement['value'] ?? '');
+            $validation = $this->validate_media_replacement_database_built_value(
+                $candidate,
+                $new_fragment,
+                $old_fragment,
+                $encoding['serialized'],
+                $encoding['json_detected']
             );
-        }
-
-        if (false === strpos($stored_value, $new_fragment)) {
-            return array('restored' => false, 'message' => __('The replacement image reference is no longer present in this database row, so rollback could not identify a value to restore.', 'ultracache'));
-        }
-
-        $replacement = $this->build_media_replacement_database_value(
-            $stored_value,
-            $new_fragment,
-            $old_fragment,
-            $encoding['serialized'],
-            $encoding['json_detected']
-        );
-
-        if (empty($replacement['changed'])) {
-            return array('restored' => false, 'message' => isset($replacement['message']) ? (string) $replacement['message'] : __('No database rollback value was produced.', 'ultracache'));
-        }
-
-        $prewrite_validation = $this->validate_media_replacement_database_built_value(
-            isset($replacement['value']) ? (string) $replacement['value'] : '',
-            $new_fragment,
-            $old_fragment,
-            $encoding['serialized'],
-            $encoding['json_detected']
-        );
-        if (empty($prewrite_validation['valid'])) {
-            return array('restored' => false, 'message' => isset($prewrite_validation['message']) ? (string) $prewrite_validation['message'] : __('The built database rollback value failed pre-write validation.', 'ultracache'));
-        }
-
-        $replacement_value = (string) $replacement['value'];
-        $write_result      = $this->compare_and_swap_media_replacement_database_row_value($ref, $stored_value, $replacement_value);
-        if (empty($write_result['updated'])) {
-            return array(
-                'restored' => false,
-                'conflict' => !empty($write_result['conflict']),
-                'message'  => !empty($write_result['conflict'])
-                    ? __('The database row changed after it was read. The newer value was preserved and rollback did not write.', 'ultracache')
-                    : (!empty($write_result['message']) ? (string) $write_result['message'] : __('The database row could not be restored.', 'ultracache')),
-            );
-        }
-
-        $restore_and_fail = function ($message) use ($ref, $stored_value, $replacement_value) {
-            $restore_result = $this->compare_and_swap_media_replacement_database_row_value($ref, $replacement_value, $stored_value);
-            return array(
-                'restored' => false,
-                'message'  => !empty($restore_result['updated'])
-                    ? (string) $message
-                    : sprintf(
-                        /* translators: %s: failure reason. */
-                        __('%s The replaced database value was not restored because the row changed again or the recovery query failed.', 'ultracache'),
-                        (string) $message
-                    ),
-            );
-        };
-
-        $verified_value = $this->get_media_replacement_database_row_value($ref);
-        if (null === $verified_value || false === strpos((string) $verified_value, $old_fragment)) {
-            return $restore_and_fail(__('The database rollback update could not be verified.', 'ultracache'));
-        }
-
-        $verified_value = (string) $verified_value;
-        if (false !== strpos($verified_value, $new_fragment)) {
-            return $restore_and_fail(__('The replacement image reference is still present after database rollback.', 'ultracache'));
-        }
-
-        if (!empty($encoding['serialized'])) {
-            $serialized_check = $this->verify_media_replacement_serialized_database_value($verified_value);
-            if (empty($serialized_check['verified'])) {
-                return $restore_and_fail(__('The serialized database value could not be decoded immediately after rollback.', 'ultracache'));
+            if (empty($validation['valid'])) {
+                $message = (string) ($validation['message'] ?? __('The grouped database rollback value failed pre-write validation.', 'ultracache'));
+                foreach ($work_refs as $row_ref) {
+                    $row_id = absint($row_ref['id']);
+                    if ('restored' !== (string) ($row_ref['status'] ?? '')) {
+                        $results[$row_id] = array('status' => 'rollback_failed', 'message' => $message);
+                    }
+                }
+                return array('results' => $results);
             }
-            if (!empty($serialized_check['repaired'])) {
-                return $restore_and_fail(__('The serialized database value required repair immediately after rollback and was not marked as restored.', 'ultracache'));
+
+            $working_value = $candidate;
+            $changed_ref_ids[$ref_id] = true;
+        }
+
+        if ($working_value !== $stored_value) {
+            $write_result = $this->compare_and_swap_media_replacement_database_row_value($base_ref, $stored_value, $working_value);
+            if (empty($write_result['updated'])) {
+                $message = !empty($write_result['conflict'])
+                    ? __('The database row changed after it was read. The newer value was preserved and no grouped rollback was written.', 'ultracache')
+                    : (string) ($write_result['message'] ?? __('The database row could not be restored.', 'ultracache'));
+                foreach ($work_refs as $ref) {
+                    $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => $message, 'conflict' => !empty($write_result['conflict']));
+                }
+                return array('results' => $results);
+            }
+
+            $verified_value = $this->get_media_replacement_database_row_value($base_ref);
+            if (null === $verified_value) {
+                $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+                foreach ($work_refs as $ref) {
+                    $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => __('The grouped database rollback could not be read back for verification.', 'ultracache'));
+                }
+                return array('results' => $results);
+            }
+            $verified_value = (string) $verified_value;
+            foreach ($work_refs as $ref) {
+                if (false === strpos($verified_value, (string) $ref['old_fragment']) || false !== strpos($verified_value, (string) $ref['new_fragment'])) {
+                    $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+                    foreach ($work_refs as $row_ref) {
+                        $results[absint($row_ref['id'])] = array('status' => 'rollback_failed', 'message' => __('One or more prepared references could not be verified after the grouped database rollback.', 'ultracache'));
+                    }
+                    return array('results' => $results);
+                }
+            }
+
+            if (!empty($encoding['serialized'])) {
+                $serialized_check = $this->verify_media_replacement_serialized_database_value($verified_value);
+                if (empty($serialized_check['verified']) || !empty($serialized_check['repaired'])) {
+                    $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+                    foreach ($work_refs as $ref) {
+                        $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => __('The serialized database value did not verify cleanly after grouped rollback.', 'ultracache'));
+                    }
+                    return array('results' => $results);
+                }
+            }
+            if (!empty($encoding['json_detected'])) {
+                json_decode($verified_value, true);
+                if (JSON_ERROR_NONE !== json_last_error()) {
+                    $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+                    foreach ($work_refs as $ref) {
+                        $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => __('The JSON-like database value did not verify after grouped rollback.', 'ultracache'));
+                    }
+                    return array('results' => $results);
+                }
+            }
+
+            $runtime = $this->verify_media_replacement_option_runtime_state($base_ref, $verified_value);
+            if (empty($runtime['verified'])) {
+                $this->compare_and_swap_media_replacement_database_row_value($base_ref, $working_value, $stored_value);
+                foreach ($work_refs as $ref) {
+                    $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => (string) ($runtime['message'] ?? __('The WordPress option runtime cache did not verify after grouped rollback.', 'ultracache')));
+                }
+                return array('results' => $results);
+            }
+            $this->finalize_media_replacement_option_write($write_result);
+        } else {
+            $runtime = $this->verify_media_replacement_option_runtime_state($base_ref, $stored_value);
+            if (empty($runtime['verified'])) {
+                foreach ($work_refs as $ref) {
+                    $results[absint($ref['id'])] = array('status' => 'rollback_failed', 'message' => (string) ($runtime['message'] ?? __('The WordPress option runtime cache did not verify for the already-restored database row.', 'ultracache')));
+                }
+                return array('results' => $results);
             }
         }
 
-        if (!empty($encoding['json_detected'])) {
-            json_decode($verified_value, true);
-            if (JSON_ERROR_NONE !== json_last_error()) {
-                return $restore_and_fail(__('The JSON-like database value could not be decoded immediately after rollback.', 'ultracache'));
-            }
+        foreach ($work_refs as $ref) {
+            $results[absint($ref['id'])] = array('status' => 'restored', 'message' => '', 'already_restored' => isset($already_ref_ids[absint($ref['id'])]));
         }
-
-        $runtime_verification = $this->verify_media_replacement_option_runtime_state($ref, $verified_value);
-        if (empty($runtime_verification['verified'])) {
-            return $restore_and_fail(isset($runtime_verification['message']) ? (string) $runtime_verification['message'] : __('The WordPress option runtime cache could not be verified after rollback.', 'ultracache'));
-        }
-
-        $this->finalize_media_replacement_option_write($write_result);
-
-        return array('restored' => true, 'message' => '', 'count' => isset($replacement['count']) ? absint($replacement['count']) : 1);
+        return array('results' => $results);
     }
 
     public function rollback_media_library_replacement_database_replacements($args = array())
     {
         if (!$this->ensure_media_replacement_tables()) {
-            return array(
-                'success' => false,
-                'message' => __('Media Library replacement registry tables are not available.', 'ultracache'),
-            );
+            return array('success' => false, 'message' => __('Media Library replacement registry tables are not available.', 'ultracache'));
         }
 
         $args = is_array($args) ? $args : array();
@@ -3915,76 +3937,88 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
             return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for database rollback. Restore the database backup, then run Restart Replacement Plan again.', 'ultracache'));
         }
 
-        $limit = isset($args['limit']) ? absint($args['limit']) : 50;
-        $limit = max(10, min(250, $limit));
-        $rows  = $this->get_media_replacement_database_rollback_rows($limit);
-
+        $limit = max(10, min(250, absint($args['limit'] ?? 50)));
+        $groups = $this->get_media_replacement_database_rollback_groups($limit);
         $batch_processed = 0;
-        $batch_restored  = 0;
-        $batch_failed    = 0;
+        $batch_restored = 0;
+        $batch_failed = 0;
+        $registry_sync_failed = 0;
 
-        foreach ($rows as $row) {
-            $batch_processed++;
-            $ref_id = isset($row['id']) ? absint($row['id']) : 0;
-            $result = $this->rollback_media_replacement_database_ref($row);
-            if (!empty($result['restored'])) {
-                $this->update_media_replacement_database_rollback_ref_result($ref_id, 'restored', '');
-                $batch_restored++;
-            } else {
-                $this->update_media_replacement_database_rollback_ref_result($ref_id, 'rollback_failed', isset($result['message']) ? (string) $result['message'] : __('Database rollback failed.', 'ultracache'));
-                $batch_failed++;
+        foreach ($groups as $group) {
+            $group_result = $this->rollback_media_replacement_database_row_group((array) $group);
+            $ref_results = isset($group_result['results']) && is_array($group_result['results']) ? $group_result['results'] : array();
+            foreach ((array) $group as $ref) {
+                $ref_id = absint($ref['id'] ?? 0);
+                if ($ref_id <= 0 || 'restored' === (string) ($ref['status'] ?? '')) {
+                    continue;
+                }
+                $batch_processed++;
+                $result = isset($ref_results[$ref_id]) ? (array) $ref_results[$ref_id] : array('status' => 'rollback_failed', 'message' => __('Database rollback did not return a result for this prepared reference.', 'ultracache'));
+                $status = (string) ($result['status'] ?? 'rollback_failed');
+                $message = (string) ($result['message'] ?? '');
+                if ('restored' === $status) {
+                    if ($this->update_media_replacement_database_rollback_ref_result($ref_id, 'restored', '')) {
+                        $batch_restored++;
+                    } else {
+                        $registry_sync_failed++;
+                    }
+                } else {
+                    if ($this->update_media_replacement_database_rollback_ref_result($ref_id, 'rollback_failed', '' !== $message ? $message : __('Database rollback failed.', 'ultracache'))) {
+                        $batch_failed++;
+                    } else {
+                        $registry_sync_failed++;
+                    }
+                }
             }
         }
 
         $summary = $this->get_media_replacement_database_rollback_summary();
-        $total = isset($summary['totalRefs']) ? max(0, (int) $summary['totalRefs']) : 0;
-        $pending_rollback = isset($summary['pendingRollback']) ? max(0, (int) $summary['pendingRollback']) : 0;
-        $restored = isset($summary['restoredRefs']) ? max(0, (int) $summary['restoredRefs']) : 0;
-        $rollback_failed = isset($summary['rollbackFailedRefs']) ? max(0, (int) $summary['rollbackFailedRefs']) : 0;
-        $processed = max(0, $total - $pending_rollback);
-        $has_more = $pending_rollback > 0;
-        $progress = $total > 0 ? min(100, round(($processed / $total) * 100, 1)) : 100;
+        $total = max(0, (int) ($summary['totalRefs'] ?? 0));
+        $pending = max(0, (int) ($summary['pendingRollback'] ?? 0));
+        $restored = max(0, (int) ($summary['restoredRefs'] ?? 0));
+        $rollback_failed = max(0, (int) ($summary['rollbackFailedRefs'] ?? 0));
+        $has_more = $pending > 0;
+
+        if ($registry_sync_failed > 0) {
+            return array(
+                'success' => false,
+                'blocked' => true,
+                'retryRequired' => true,
+                'status' => 'database_rollback_reconcile_required',
+                'hasMore' => true,
+                'message' => __('Database rows were restored, but one or more rollback registry statuses could not be persisted. Resume Rollback Replacement to reconcile the current values.', 'ultracache'),
+                'registrySyncFailed' => $registry_sync_failed,
+                'rollbackFailedRefs' => $rollback_failed,
+            );
+        }
 
         return array(
-            'success'              => true,
-            'message'              => $has_more
+            'success' => true,
+            'message' => $has_more
                 ? sprintf(
-                    /* translators: 1: restored references, 2: total references. */
-                    __('Media Library replacement database rollback is in progress: %1$d of %2$d references restored.', 'ultracache'),
-                    (int) $restored,
-                    (int) $total
+                    /* translators: 1: number of restored references, 2: number of references remaining. */
+                    __('Media Library replacement database rollback is in progress: %1$d references restored; %2$d remain.', 'ultracache'),
+                    $restored,
+                    $pending
                 )
                 : sprintf(
-                    /* translators: 1: restored references, 2: failed references. */
-                    __('Media Library replacement restored %1$d database references. Failed: %2$d.', 'ultracache'),
-                    (int) $restored,
-                    (int) $rollback_failed
+                    /* translators: 1: number of restored references, 2: number of references that failed to roll back. */
+                    __('Media Library replacement database rollback restored %1$d references. Failed: %2$d.', 'ultracache'),
+                    $restored,
+                    $rollback_failed
                 ),
-            'status'               => $has_more ? 'db_rollback_running' : 'db_rollback_complete',
-            'hasMore'              => $has_more,
-            'batchSize'            => $limit,
-            'batchProcessedRefs'   => $batch_processed,
-            'batchRestoredRefs'    => $batch_restored,
+            'status' => $has_more ? 'db_rollback_running' : 'db_rollback_complete',
+            'hasMore' => $has_more,
+            'batchSize' => $limit,
+            'batchProcessedRefs' => $batch_processed,
+            'batchRestoredRefs' => $batch_restored,
             'batchRollbackFailedRefs' => $batch_failed,
-            'referencesFound'      => $total,
-            'matchedRefs'          => $total,
-            'pendingRefs'          => isset($summary['pendingRefs']) ? (int) $summary['pendingRefs'] : 0,
-            'replacedRefs'         => max(0, $total - $restored - $rollback_failed),
-            'failedRefs'           => isset($summary['failedRefs']) ? (int) $summary['failedRefs'] : 0,
-            'restoredRefs'         => $restored,
-            'pendingRollbackRefs'  => $pending_rollback,
-            'rollbackFailedRefs'   => $rollback_failed,
-            'serializedRefs'       => isset($summary['serializedRefs']) ? (int) $summary['serializedRefs'] : 0,
-            'jsonRefs'             => isset($summary['jsonRefs']) ? (int) $summary['jsonRefs'] : 0,
-            'refsScanned'          => $processed,
-            'remainingRefsScan'    => 0,
-            'progressPercent'      => $progress,
-            'databaseReferencesMatched' => true,
-            'databaseReplaced'     => false,
-            'databaseRolledBack'   => !$has_more && $restored === $total && 0 === $rollback_failed,
-            'nextStep'             => $has_more
-                ? __('Continue rolling back database references in chunks. Do not delete original files.', 'ultracache')
-                : __('Database reference rollback is complete. Original files and attachment metadata still remain; cleanup should not run until the full rollback/cleanup tools are in place.', 'ultracache'),
+            'referencesFound' => $total,
+            'restoredRefs' => $restored,
+            'pendingRollbackRefs' => $pending,
+            'rollbackFailedRefs' => $rollback_failed,
+            'databaseRolledBack' => !$has_more && 0 === $rollback_failed,
+            'progressPercent' => ($restored + $rollback_failed + $pending) > 0 ? min(100, round((($restored + $rollback_failed) / ($restored + $rollback_failed + $pending)) * 100, 1)) : 100,
         );
     }
 
@@ -4198,7 +4232,7 @@ trait Ultra_Cache_Media_Replacement_Database_Trait
                 $total
             );
         } elseif ($verify_failed_refs > 0) {
-            $next_step = __('Retry Verify DB Replacements to repair and verify failed serialized rows before cleanup.', 'ultracache');
+            $next_step = __('Review failed database verification rows before cleanup. Verify does not repair or modify site content.', 'ultracache');
             $message = sprintf(
                 /* translators: %d: failed verification count. */
                 __('Media Library replacement verification found %d database row that still needs attention.', 'ultracache'),

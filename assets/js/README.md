@@ -1,3 +1,4 @@
+- `inline-registry-dispatcher.js` — Shared DEFER dispatcher for occurrence-keyed non-NATIVE inline JavaScript collected into the per-page Unified Inline Registry manifest.
 # UltraCache frontend JavaScript helper assets
 
 This directory contains UltraCache-owned frontend JavaScript helpers that are migrated from raw inline output to WordPress-registered scripts.
@@ -9,7 +10,9 @@ Migrated helpers are kept as human-readable source files. They are not minified,
 - `async-css-runtime.js` — Strict-CSP-compatible activation runtime for UltraCache-managed async stylesheets, preserving each link's declared target media without inline event handlers.
 - `mailerlite-lazy-nonce.js` — Lazy MailerLite nonce refresh helper enqueued through `wp_enqueue_scripts` with WordPress-native script APIs.
 - `runtime-js-scan-collector.js` — Runtime JavaScript scanner collector enqueued only for verified scan requests through `wp_enqueue_scripts` with configuration passed by `wp_add_inline_script()`.
-- `delayed-js-loader.js` — Delayed JavaScript release loader enqueued through `wp_enqueue_scripts` when delayed JS features are active, with runtime configuration passed by `wp_add_inline_script()`.
+- `dynamic-script-finder-bootstrap.js` — Parser-early Runtime Script Classification Firewall. It intercepts direct runtime-created executable script insertion, connected `src` mutation, and `document.write`/`writeln` script fragments before browser execution, assigns NATIVE / DEFER / DELAY provenance through the shared policy, neutralizes controlled DEFER/DELAY nodes, and hands execution to `delayed-js-loader.js`. Generic DOM subtree insertion is not recursively scanned.
+- `delayed-js-interaction-bootstrap.js` — Tiny parser-early capture bridge for configured Delay JS interaction triggers. It preserves the strongest eligible interaction until the full deferred loader initializes.
+- `delayed-js-loader.js` — Native-deferred delayed JavaScript release loader enqueued through `wp_enqueue_scripts` when delayed JS features are active, with runtime configuration passed by `wp_add_inline_script()`.
 
 Additional frontend helpers will be migrated in separate staged versions as they are moved from final HTML rewriting to WordPress-registered helper assets.
 
@@ -17,4 +20,6 @@ Additional frontend helpers will be migrated in separate staged versions as they
 - `font-display-cssom-patch.js` — Runtime CSSOM font-display patch helper enqueued through `wp_enqueue_scripts`.
 - `dynamic-icon-font-delay.js` — Intercepts matching same-origin dynamically inserted icon-font stylesheets before activation, adds `font-display: swap` through CSSOM, and exposes aggregate timing in `window.ultracacheIconFontDelayTiming`.
 - `woocommerce-cart-fragments-delay.js` — Optional WooCommerce cart-fragments AJAX delay helper enqueued through `wp_enqueue_scripts`, with timing configuration passed by `wp_add_inline_script()`.
-- `lcp-observer.js` — Lightweight frontend LCP discovery helper with optional slider-safe runtime image request-credentials learning. It sends one page-scoped observation per eligible visit, skips query-string URLs, expired discovery periods, and locked page/viewport mappings, and supports public or administrator-only discovery periods.
+- `lcp-request-credentials-bootstrap.js` — Minimal parser-early bootstrap used only while LCP request-credentials learning is enabled. It records runtime image `src` credential modes and hands the bounded map to the deferred LCP observer.
+- `lcp-observer.js` — Deferred frontend LCP discovery helper using buffered PerformanceObserver entries. It sends one page-scoped observation per eligible visit, consumes the optional early request-credentials map, skips query-string URLs, expired discovery periods, and locked page/viewport mappings, and supports public or administrator-only discovery periods.
+- `elementor-compatibility-runtime.js` — Elementor lazy-background recovery helper loaded only by the explicit Elementor Compatibility integration switch.

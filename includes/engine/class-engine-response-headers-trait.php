@@ -130,34 +130,97 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
     }
 
     /**
-     * Whether existing response headers forbid public shared caching.
+     * Classify whether the current representation may enter a public shared
+     * cache now, must be deferred until a clean UltraCache HIT, or is private.
      *
-     * @return bool
+     * An allowed Policy v2 response cookie keeps the PAGE public, but the
+     * cookie-bearing representation itself is not shared. This preserves the
+     * visitor-specific Set-Cookie header while giving Varnish/LiteSpeed an
+     * explicit signal to perform one clean follow-up handoff.
+     *
+     * @return array<string,mixed>
      */
-    private function response_forbids_public_shared_cache()
+    private function get_public_shared_cache_response_policy()
     {
+        $set_cookie_values = array();
+        $forbid_reason = '';
+
         foreach (headers_list() as $header_line) {
             $header_line = (string) $header_line;
             if (0 === stripos($header_line, 'Set-Cookie:')) {
-                return true;
+                $set_cookie_values[] = trim(substr($header_line, strlen('Set-Cookie:')));
+                continue;
             }
             if (0 === stripos($header_line, 'Pragma:') && false !== stripos($header_line, 'no-cache')) {
-                return true;
+                $forbid_reason = 'pragma-no-cache';
+                continue;
             }
             if (0 === stripos($header_line, 'Surrogate-Control:') && 1 === preg_match('/(?:^|[,\s])(private|no-store)(?:$|[,=\s])/', strtolower($header_line))) {
-                return true;
+                $forbid_reason = 'surrogate-control-private';
+                continue;
             }
             if (0 !== stripos($header_line, 'Cache-Control:')) {
                 continue;
             }
 
             $value = strtolower(trim(substr($header_line, strlen('Cache-Control:'))));
-            if (1 === preg_match('/(?:^|[,\s])(private|no-store|no-cache)(?:$|[,=\s])/', $value)) {
-                return true;
+            if (1 === preg_match('/(?:^|[,\s])(private|no-store|no-cache)(?:$|[,=\s])/', $value, $match)) {
+                $forbid_reason = 'cache-control-' . sanitize_key((string) ($match[1] ?? 'private'));
             }
         }
 
-        return false;
+        if ('' !== $forbid_reason) {
+            return array(
+                'decision' => 'forbid',
+                'reason' => $forbid_reason,
+                'cookieNames' => array(),
+                'cookiePolicy' => array(),
+            );
+        }
+
+        if (empty($set_cookie_values)) {
+            return array(
+                'decision' => 'allow',
+                'reason' => 'clean-public-response',
+                'cookieNames' => array(),
+                'cookiePolicy' => array(),
+            );
+        }
+
+        $cookie_names = function_exists('ultracache_extract_set_cookie_names')
+            ? ultracache_extract_set_cookie_names($set_cookie_values)
+            : array();
+        $settings = $this->get_settings();
+        $cookie_policy = function_exists('ultracache_response_cookie_cache_policy')
+            ? ultracache_response_cookie_cache_policy($cookie_names, $settings)
+            : array('decision' => 'reject', 'reason' => 'response-cookie-policy-unavailable');
+
+        if ('allow' !== (string) ($cookie_policy['decision'] ?? '')) {
+            return array(
+                'decision' => 'forbid',
+                'reason' => sanitize_key((string) ($cookie_policy['reason'] ?? 'response-cookie-rejected')),
+                'cookieNames' => $cookie_names,
+                'cookiePolicy' => $cookie_policy,
+            );
+        }
+
+        return array(
+            'decision' => 'defer',
+            'reason' => sanitize_key((string) ($cookie_policy['reason'] ?? 'public-response-cookie')),
+            'cookieNames' => $cookie_names,
+            'cookiePolicy' => $cookie_policy,
+        );
+    }
+
+    /**
+     * Whether the current representation must not be stored in shared cache.
+     *
+     * @return bool
+     */
+    private function response_forbids_public_shared_cache()
+    {
+        $policy = $this->get_public_shared_cache_response_policy();
+        return 'allow' !== (string) ($policy['decision'] ?? 'forbid');
     }
 
     /**
@@ -227,6 +290,8 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
             header('Cache-Control: private, no-store, max-age=0, must-revalidate', true);
             header('Surrogate-Control: ' . ($is_esi_parent ? 'content="ESI/1.0", no-store' : 'no-store'), true);
             header('X-UltraCache-Cacheable: 0');
+            header('X-UltraCache-Page-Cacheable: 0');
+            header('X-UltraCache-Shared-Cache-State: forbidden-page-policy');
             header('X-UltraCache-Surrogate-TTL: 0');
             header('X-UltraCache-Stale-While-Revalidate: 0');
             if ($is_esi_parent) {
@@ -241,8 +306,16 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
             return;
         }
 
-        if ($this->response_forbids_public_shared_cache()) {
+        $shared_policy = $this->get_public_shared_cache_response_policy();
+        $shared_decision = (string) ($shared_policy['decision'] ?? 'forbid');
+        if ('allow' !== $shared_decision) {
             header('X-UltraCache-Cacheable: 0');
+            header('X-UltraCache-Page-Cacheable: ' . ('defer' === $shared_decision ? '1' : '0'));
+            header('X-UltraCache-Shared-Cache-State: ' . ('defer' === $shared_decision ? 'deferred-response-cookie' : 'forbidden-response-policy'));
+            $shared_reason = sanitize_key((string) ($shared_policy['reason'] ?? ''));
+            if ('' !== $shared_reason) {
+                header('X-UltraCache-Shared-Cache-Reason: ' . substr($shared_reason, 0, 100));
+            }
             header('X-UltraCache-Surrogate-TTL: 0');
             header('X-UltraCache-Stale-While-Revalidate: 0');
             return;
@@ -267,6 +340,8 @@ trait Ultra_Cache_Engine_Response_Headers_Trait
             }
         }
         header('X-UltraCache-Cacheable: 1');
+        header('X-UltraCache-Page-Cacheable: 1');
+        header('X-UltraCache-Shared-Cache-State: ready');
         header('X-UltraCache-Surrogate-TTL: ' . (string) $seconds);
         header('X-UltraCache-Stale-While-Revalidate: ' . (string) $stale_seconds);
         $proof_expires_at = absint($settings['shared_cache_control_proof_expires_at'] ?? 0);

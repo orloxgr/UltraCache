@@ -62,8 +62,12 @@ trait Ultra_Cache_WP_Varnish_Refresh_Candidates_Trait
             return ultracache_is_trusted_loopback_url($url) ? $url : '';
         }
 
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
         $url_host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        if (function_exists('ultracache_is_trusted_public_host')) {
+            return '' !== $url_host && ultracache_is_trusted_public_host($url_host) ? $url : '';
+        }
+
+        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
         return '' !== $home_host && hash_equals($home_host, $url_host) ? $url : '';
     }
 

@@ -32,7 +32,7 @@ trait Ultra_Cache_WP_Varnish_Diagnostics_Trait
         $settings = self::get_dashboard_settings();
         $payload = array(
             'schema' => 1,
-            'homeUrl' => esc_url_raw(home_url('/')),
+            'siteOrigin' => function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : '',
             'pageCacheEnabled' => !empty($settings['pageCacheEnabled']),
             'varnishEnabled' => self::is_varnish_runtime_enabled($settings),
             'varnishMode' => self::sanitize_varnish_mode($settings['varnishCliMode'] ?? 'http'),

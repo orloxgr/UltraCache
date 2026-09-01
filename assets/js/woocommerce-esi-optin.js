@@ -1,10 +1,28 @@
 (function () {
     'use strict';
 
-    var cookie = 'ultracache_esi_optin=1; Path=/; SameSite=Lax';
-    if (window.location && window.location.protocol === 'https:') {
-        cookie += '; Secure';
+    function hasEsiMiniCart() {
+        return !!document.querySelector(
+            '[data-ultracache-esi-adapter="woocommerce-classic-mini-cart"], ' +
+            '[data-ultracache-esi-auto="woocommerce-mini-cart"]'
+        );
     }
 
-    document.cookie = cookie;
+    function optIn() {
+        if (!hasEsiMiniCart()) {
+            return;
+        }
+
+        var cookie = 'ultracache_esi_optin=1; Path=/; SameSite=Lax';
+        if (window.location && window.location.protocol === 'https:') {
+            cookie += '; Secure';
+        }
+        document.cookie = cookie;
+    }
+
+    if ('loading' === document.readyState) {
+        document.addEventListener('DOMContentLoaded', optIn, { once: true });
+    } else {
+        optIn();
+    }
 }());

@@ -24,6 +24,12 @@ function ultracache_get_varnish_revalidation_vcl_signature()
         return '';
     }
 
-    $site = function_exists('home_url') ? (string) home_url('/') : '';
+    $site = function_exists('ultracache_get_configured_site_base')
+        ? (string) ultracache_get_configured_site_base()
+        : '';
+    if ('' === $site) {
+        return '';
+    }
+
     return hash_hmac('sha256', 'ultracache-varnish-origin-revalidation|' . $site, $secret);
 }

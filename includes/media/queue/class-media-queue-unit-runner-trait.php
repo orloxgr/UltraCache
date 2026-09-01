@@ -810,7 +810,7 @@ trait Ultra_Cache_Media_Queue_Unit_Runner_Trait
 	}
 
 	/**
-	 * Retry failed/interrupted child units for parent rows using one format policy.
+	 * Retry failed child units for parent rows using one format policy.
 	 *
 	 * @param string $format Parent format policy.
 	 * @return int
@@ -825,7 +825,7 @@ trait Ultra_Cache_Media_Queue_Unit_Runner_Trait
 		$format = $this->normalize_media_queue_format($format);
 		$parent_ids = $wpdb->get_col(
 			$wpdb->prepare(
-				"SELECT DISTINCT units.parent_queue_id FROM %i units INNER JOIN %i parents ON parents.id = units.parent_queue_id WHERE parents.source_kind = 'attachment' AND parents.format = %s AND units.status IN ('processing','failed')",
+				"SELECT DISTINCT units.parent_queue_id FROM %i units INNER JOIN %i parents ON parents.id = units.parent_queue_id WHERE parents.source_kind = 'attachment' AND parents.format = %s AND units.status = 'failed'",
 				$units,
 				$parents,
 				$format
@@ -833,7 +833,7 @@ trait Ultra_Cache_Media_Queue_Unit_Runner_Trait
 		);
 		$result = $wpdb->query(
 			$wpdb->prepare(
-				"UPDATE %i units INNER JOIN %i parents ON parents.id = units.parent_queue_id SET units.status = 'pending', units.consecutive_failures = 0, units.stale_recoveries = 0, units.failure_code = '', units.failure_stage = '', units.failure_detail = '', units.resolution_code = '', units.resolution_detail = '', units.resolution_context = '', units.encoder_attempts = '', units.updated_at = %s, units.started_at = NULL, units.completed_at = NULL WHERE parents.source_kind = 'attachment' AND parents.format = %s AND units.status IN ('processing','failed')",
+				"UPDATE %i units INNER JOIN %i parents ON parents.id = units.parent_queue_id SET units.status = 'pending', units.consecutive_failures = 0, units.stale_recoveries = 0, units.failure_code = '', units.failure_stage = '', units.failure_detail = '', units.resolution_code = '', units.resolution_detail = '', units.resolution_context = '', units.encoder_attempts = '', units.updated_at = %s, units.started_at = NULL, units.completed_at = NULL WHERE parents.source_kind = 'attachment' AND parents.format = %s AND units.status = 'failed'",
 				$units,
 				$parents,
 				current_time('mysql'),

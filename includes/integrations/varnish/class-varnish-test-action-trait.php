@@ -176,30 +176,13 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
             return $value;
         }
 
-        $tested_at = absint($value['time'] ?? 0);
-        $proof_expires_at = absint($value['proofExpiresAt'] ?? 0);
-        if ($proof_expires_at <= 0 && !empty($value['supported']) && $tested_at > 0) {
-            $proof_expires_at = $tested_at + WEEK_IN_SECONDS;
-            $value['proofExpiresAt'] = $proof_expires_at;
-        }
-        if ($proof_expires_at > 0 && $proof_expires_at <= time()) {
-            $value['proofExpired'] = true;
-            $value['supported'] = false;
-            $value['status'] = 'proof-expired';
-        }
+        // Capability proofs are invalidated by their configuration/contract
+        // fingerprints, not by elapsed wall-clock time. Keep legacy expiry
+        // metadata inert so older persisted PASS results remain valid.
+        $value['proofExpiresAt'] = 0;
+        unset($value['proofExpired']);
 
         return $value;
-    }
-
-    /**
-     * Bound the lifetime of an HTTP behavior proof because the external VCL
-     * can change without changing the saved UltraCache endpoint settings.
-     *
-     * @return int
-     */
-    private static function get_varnish_exact_capability_proof_ttl()
-    {
-        return WEEK_IN_SECONDS;
     }
 
     /**
@@ -334,19 +317,12 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
             $value['exactInvalidationVerified'] = false;
             $value['configurationChanged'] = true;
             $value['status'] = 'configuration-changed';
-            $value['message'] = __('The Varnish configuration changed. Run Test Varnish again.', 'ultracache');
+            $value['message'] = __('The Varnish configuration changed. Run Redetect Varnish Capabilities again.', 'ultracache');
         } elseif (!empty($value['exactInvalidationVerified'])) {
-            $tested_at = absint($value['time'] ?? 0);
-            $proof_expires_at = $tested_at > 0 ? $tested_at + self::get_varnish_exact_capability_proof_ttl() : 0;
-            $value['proofExpiresAt'] = $proof_expires_at;
-            if ($proof_expires_at <= time()) {
-                $value['success'] = false;
-                $value['verified'] = false;
-                $value['exactInvalidationVerified'] = false;
-                $value['proofExpired'] = true;
-                $value['status'] = 'proof-expired';
-                $value['message'] = __('The Varnish canary proof expired. Run Test Varnish again because the external VCL can change independently.', 'ultracache');
-            }
+            // A successful behavior proof remains valid until its bound
+            // Varnish configuration/capability contract changes.
+            $value['proofExpiresAt'] = 0;
+            unset($value['proofExpired']);
         }
 
         $variant_capability = self::get_varnish_html_variant_capability_status();
@@ -421,7 +397,7 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
         $verified = $transport_available && !empty($capability_state['behaviorVerifiedAllEndpoints']);
         $verified_endpoint_count = absint($capability_state['behaviorVerifiedEndpointCount'] ?? 0);
         $endpoint_count = absint($registry['configuredEndpointCount'] ?? count((array) ($settings['servers'] ?? array())));
-        $proof_expires_at = absint($capability_state['proofExpiresAt'] ?? 0);
+        $proof_expires_at = 0;
         $tested_at = absint($capability_state['testedAt'] ?? 0);
         $status = 'verified';
         if (!$transport_available) {
@@ -430,8 +406,6 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
             $status = 'verified';
         } elseif ($verified_endpoint_count > 0) {
             $status = 'partial-topology';
-        } elseif ('proof-expired' === sanitize_key((string) ($capability_state['state'] ?? ''))) {
-            $status = 'proof-expired';
         } else {
             $status = sanitize_key((string) ($capability_state['state'] ?? 'not-tested'));
         }
@@ -450,14 +424,9 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
                 $verified_endpoint_count,
                 $endpoint_count
             );
-        } elseif ('proof-expired' === $status) {
-            $message = self::maybe_translate_sprintf(
-                'One or more exact %s endpoint proofs expired because external VCL behavior can change independently. Run Test Varnish again.',
-                $method_label
-            );
         } elseif ('' === $message) {
             $message = self::maybe_translate_sprintf(
-                'Run Test Varnish successfully before UltraCache treats exact %s as a managed runtime capability.',
+                'Run Redetect Varnish Capabilities successfully before UltraCache treats exact %s as a managed runtime capability.',
                 $method_label
             );
         }
@@ -482,17 +451,47 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
     /**
      * Run the isolated exact URL invalidation, public refill, and ESI test.
      *
+     * @param bool $diagnostic_enable Allow the isolated test to exercise a configured-but-disabled connection without persisting an enable-state change.
      * @return array
      */
-    public static function run_varnish_basic_test()
+    public static function run_varnish_basic_test($diagnostic_enable = false)
     {
+        $probe_requested_url = esc_url_raw(home_url('/'));
+        $probe_resolution = function_exists('ultracache_resolve_anonymous_frontend_url')
+            ? ultracache_resolve_anonymous_frontend_url($probe_requested_url, 'varnish_capability')
+            : array(
+                'success' => '' !== $probe_requested_url,
+                'requestedUrl' => $probe_requested_url,
+                'resolvedUrl' => $probe_requested_url,
+                'httpCode' => 200,
+                'redirected' => false,
+                'redirectCount' => 0,
+            );
+
         if (!is_callable(array(static::class, 'varnish_test_behavior'))) {
-            return array(
+            $unavailable = array(
                 'success' => false,
                 'status' => 'runner-unavailable',
                 'message' => __('Varnish test behavior is unavailable.', 'ultracache'),
                 'time' => time(),
             );
+            $unavailable['requestedUrl'] = $probe_requested_url;
+            $unavailable['requestedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+                ? ultracache_multilingual_get_public_url_language($probe_requested_url)
+                : '';
+            if (is_wp_error($probe_resolution)) {
+                $unavailable['resolvedUrl'] = '';
+                $unavailable['resolvedLanguage'] = '';
+                $unavailable['resolutionError'] = sanitize_key((string) $probe_resolution->get_error_code());
+            } else {
+                $unavailable['resolvedUrl'] = esc_url_raw((string) ($probe_resolution['resolvedUrl'] ?? ''));
+                $unavailable['resolvedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+                    ? ultracache_multilingual_get_public_url_language($unavailable['resolvedUrl'])
+                    : '';
+                $unavailable['redirected'] = !empty($probe_resolution['redirected']);
+                $unavailable['redirectCount'] = max(0, (int) ($probe_resolution['redirectCount'] ?? 0));
+            }
+            return $unavailable;
         }
 
         self::reset_settings_cache();
@@ -500,7 +499,23 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
             self::refresh_reverse_proxy_status();
         }
         $tested_settings = self::get_varnish_cli_settings();
-        $result = self::varnish_test_behavior($tested_settings);
+        $diagnostic_override_active = false;
+        if ($diagnostic_enable
+            && !empty($tested_settings['connectionConfigured'])
+            && !empty($tested_settings['servers'])
+        ) {
+            $tested_settings['enabled'] = true;
+            self::set_varnish_cli_settings_diagnostic_override($tested_settings);
+            $diagnostic_override_active = true;
+        }
+
+        try {
+            $result = self::varnish_test_behavior($tested_settings);
+        } finally {
+            if ($diagnostic_override_active) {
+                self::clear_varnish_cli_settings_diagnostic_override();
+            }
+        }
         if (!is_array($result)) {
             $result = array(
                 'success' => false,
@@ -508,6 +523,26 @@ trait Ultra_Cache_WP_Varnish_Test_Action_Trait
                 'message' => __('Varnish test returned an invalid result.', 'ultracache'),
                 'time' => time(),
             );
+        }
+
+        $result['requestedUrl'] = $probe_requested_url;
+        $result['requestedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+            ? ultracache_multilingual_get_public_url_language($probe_requested_url)
+            : '';
+        if (is_wp_error($probe_resolution)) {
+            $result['resolvedUrl'] = '';
+            $result['resolvedLanguage'] = '';
+            $result['resolutionError'] = sanitize_key((string) $probe_resolution->get_error_code());
+            $result['redirected'] = false;
+            $result['redirectCount'] = 0;
+        } else {
+            $result['resolvedUrl'] = esc_url_raw((string) ($probe_resolution['resolvedUrl'] ?? ''));
+            $result['resolvedLanguage'] = function_exists('ultracache_multilingual_get_public_url_language')
+                ? ultracache_multilingual_get_public_url_language($result['resolvedUrl'])
+                : '';
+            $result['resolutionError'] = empty($probe_resolution['success']) ? 'frontend_target_http_status' : '';
+            $result['redirected'] = !empty($probe_resolution['redirected']);
+            $result['redirectCount'] = max(0, (int) ($probe_resolution['redirectCount'] ?? 0));
         }
 
         return self::store_varnish_basic_test_result($result, $tested_settings);

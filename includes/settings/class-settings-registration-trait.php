@@ -82,6 +82,7 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'thirdPartyJsParallelExecutionEnabled' => false,
             'delayedLocalJsAutoStart'  => 'custom',
             'delayedLocalJsAutoStartSeconds' => 0.05,
+            'delayedJsMinimumReleaseSeconds' => 0,
             'delayedJsAutostartAfterLoadEnabled' => false,
             'delayedJsAutostartMousemoveEnabled' => false,
             'delayedJsAutostartScrollEnabled' => false,
@@ -115,10 +116,17 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'clsDimensionsEnabled'       => false,
             'asyncCssEnabled'            => false,
             'asyncExternalCssEnabled'    => false,
+            'asyncConsentCssEnabled'     => false,
+            'asyncConsentCssAutoEnabled' => false,
             'asyncCssExcludeList'        => '',
             'asyncExternalCssExcludeList' => '',
             'aggressiveAsyncCssEnabled'  => false,
             'delayNonCriticalJsEnabled'  => false,
+            'protectWpBakeryAnimationsEnabled' => false,
+            'protectElementorCompatibilityEnabled' => false,
+            'realCookieBannerCompatibilityEnabled' => false,
+            'complianzCompatibilityEnabled' => false,
+            'woocommerceVariableProductCompatibilityEnabled' => false,
             'delayNonCriticalJsExcludeList' => '',
             'lcpImagePriorityEnabled'    => false,
             'lcpFrontendDiscoveryEnabled' => false,
@@ -151,13 +159,6 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'browserCacheRulesEnabled'   => false,
             'apacheStaticHtmlDeliveryEnabled' => false,
             'liteSpeedCacheEnabled'      => false,
-            'liteSpeedRefillAfterTargetedInvalidation' => false,
-            'liteSpeedWarmDuringSiteWarmup' => false,
-            'liteSpeedStalePurgeEnabled' => false,
-            'liteSpeedRefreshAheadEnabled' => false,
-            'liteSpeedRefreshAheadThresholdPercent' => 85,
-            'liteSpeedRefreshAheadMaxPages' => 5,
-            'liteSpeedRefreshAheadPinnedUrls' => '',
             'varnishCliEnabled'          => false,
             'varnishConnectionConfigured' => false,
             'varnishCliMode'             => 'http',
@@ -184,6 +185,9 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'cronWarmStartAfterCleanup'  => false,
             'cronWarmStartAfterManualPurge' => false,
             'warmUncachedUrlsOnFirstVisit' => false,
+            'warmCssBundlesEnabled'       => true,
+            'alsoWarmTranslationPagesEnabled' => true,
+            'multilingualWarmPolicyV1'  => array('schemaVersion' => 2, 'migrationVersion' => 0, 'providerPolicies' => array(), 'providerStates' => array()),
             'cronWarmPagesPerMinute'     => 2,
             'scheduledWarmLimit'         => 9,
             'warmMenuLocation'           => '',
@@ -191,13 +195,15 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'warmFullSiteSources'        => '',
             'staleWhileRevalidateEnabled'=> false,
             'debugHeadersEnabled'        => false,
+            'openBrowserScannerInNewWindowEnabled' => false,
             'cacheFreshTtlMinutes'       => 1440,
             'cacheMaxStaleMinutes'       => 2880,
             'cacheExceptionPaths'        => implode("\n", self::get_default_excluded_paths()),
             'cacheExceptionQueryArgs'    => implode("\n", self::get_default_excluded_query_args()),
             'cacheQueryStringsEnabled'   => false,
             'cacheQueryStringAllowlist'  => '',
-            'cacheSafeTrackingCookiesEnabled' => false,
+            'cacheQueryCombinationLevel' => '3',
+            'cacheSafeTrackingCookiesEnabled' => true,
             'safeTrackingCookieList'     => implode("\n", self::get_default_safe_tracking_cookie_patterns()),
             'unsafeCacheCookieList'      => implode("\n", self::get_default_unsafe_cache_cookie_patterns()),
             'uninstallCleanupPolicy'    => 'delete_everything',
@@ -216,9 +222,6 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
     private static function get_default_excluded_paths()
     {
         return array_values(array_filter(array(
-            '/cart/',
-            '/checkout/',
-            '/my-account/',
             function_exists('ultracache_wordpress_admin_public_path') ? ultracache_wordpress_admin_public_path() : '',
             '/wp-login.php',
             '/wc-api/',
@@ -265,7 +268,10 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'download_file',
             'ultracache_runtime_js_scan',
             'ultracache_runtime_js_scan_id',
+            'ultracache_runtime_js_scan_token',
             'ultracache_runtime_js_scan_nonce',
+            'ultracache_runtime_js_scan_mode',
+            'ultracache_runtime_js_scan_context',
         );
     }
 
@@ -370,10 +376,9 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
     private static function get_default_js_delay_defer_exclusion_patterns()
     {
         /*
-         * Visible default safety exclusion only. jQuery is the WordPress
-         * core provider for window.jQuery and prevents broad cascade
-         * failures when Delay/Defer is enabled. Other core dependencies
-         * remain scanner/error driven or manual broad-preset additions.
+         * Canonical visible defaults used by fresh settings and Populate
+         * Defaults. Saving user-edited JavaScript policy lists must never
+         * inject additional compatibility entries.
          */
         return array_values(array_filter(array(
             function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path('js/jquery/jquery.min.js') : '',
@@ -461,9 +466,6 @@ trait Ultra_Cache_WP_Settings_Registration_Trait
             'hcaptcha',
             'google.com/recaptcha',
             'maps.googleapis.com',
-            'complianz',
-            'cmplz',
-
             'cookieyes',
             'cky-',
             'intercom',

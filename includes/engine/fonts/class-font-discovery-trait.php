@@ -89,10 +89,19 @@ trait Ultra_Cache_Engine_Font_Discovery_Trait
             return '';
         }
 
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
         $url_host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
-        if ('' === $home_host || '' === $url_host || $home_host !== $url_host) {
+        if ('' === $url_host) {
             return '';
+        }
+        if (function_exists('ultracache_is_local_site_url')) {
+            if (!ultracache_is_local_site_url($url)) {
+                return '';
+            }
+        } else {
+            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+            if ('' === $home_host || $home_host !== $url_host) {
+                return '';
+            }
         }
 
         $fragment_pos = strpos($url, '#');

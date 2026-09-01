@@ -113,7 +113,10 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
     {
         $saved_state = $this->normalize_media_replacement_workflow_state($saved_state);
 
-        if ('' !== (string) ($saved_state['do_started_at'] ?? '') || !in_array((string) ($saved_state['workflow_stage'] ?? 'prepare'), array('prepare', ''), true)) {
+        $rollback_complete = 'rollback_complete' === (string) ($saved_state['active_step'] ?? '');
+        if (!$rollback_complete
+            && ('' !== (string) ($saved_state['do_started_at'] ?? '')
+                || !in_array((string) ($saved_state['workflow_stage'] ?? 'prepare'), array('prepare', ''), true))) {
             return array(
                 'success' => false,
                 'message' => __('Restart is unavailable after the destructive replacement stage has started.', 'ultracache'),
@@ -306,6 +309,8 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
             'delete_completed_at'    => '',
             'delete_authorized_at'   => '',
             'delete_authorized_fingerprint' => '',
+            'rollback_started_at'    => '',
+            'rollback_completed_at'  => '',
             'verify_destination_cursor_item_id' => 0,
             'verify_destination_checked'        => 0,
             'verify_destination_failed'         => 0,
@@ -348,11 +353,11 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
         $state['target_format']        = in_array((string) $state['target_format'], array('avif', 'webp'), true) ? (string) $state['target_format'] : 'webp';
         $state['fallback_format']      = ('avif' === $state['target_format'] && 'webp' === (string) $state['fallback_format']) ? 'webp' : 'original';
         $state['collision_policy']     = in_array((string) $state['collision_policy'], array('block', 'overwrite'), true) ? (string) $state['collision_policy'] : 'block';
-        $state['status']               = in_array((string) $state['status'], array('idle', 'scanning', 'decisions_required', 'copying', 'validating', 'planning_metadata', 'scanning_database', 'matching_database', 'planning_database', 'scanning_theme', 'planning_theme', 'validating_pre_do', 'applying_metadata', 'applying_database', 'applying_theme', 'verifying_files', 'verifying_metadata', 'verifying_database', 'verifying_theme', 'planning_cleanup', 'deleting_originals', 'completed', 'failed'), true) ? (string) $state['status'] : 'idle';
+        $state['status']               = in_array((string) $state['status'], array('idle', 'scanning', 'decisions_required', 'copying', 'validating', 'planning_metadata', 'scanning_database', 'matching_database', 'planning_database', 'scanning_theme', 'planning_theme', 'validating_pre_do', 'applying_metadata', 'applying_database', 'applying_theme', 'verifying_files', 'verifying_metadata', 'verifying_database', 'verifying_theme', 'planning_cleanup', 'deleting_originals', 'rolling_back', 'rollback_complete', 'rollback_failed', 'completed', 'failed'), true) ? (string) $state['status'] : 'idle';
         $state['run_status']           = in_array((string) $state['run_status'], array('idle', 'running', 'paused', 'failed', 'completed'), true) ? (string) $state['run_status'] : 'idle';
         $state['active_step']          = sanitize_key((string) $state['active_step']);
         $state['last_error']           = sanitize_text_field((string) $state['last_error']);
-        $state['workflow_stage']       = in_array((string) $state['workflow_stage'], array('prepare', 'do', 'verify', 'delete', 'complete'), true) ? (string) $state['workflow_stage'] : 'prepare';
+        $state['workflow_stage']       = in_array((string) $state['workflow_stage'], array('prepare', 'do', 'verify', 'delete', 'rollback', 'complete'), true) ? (string) $state['workflow_stage'] : 'prepare';
         $state['workflow_message']     = sanitize_text_field((string) $state['workflow_message']);
         $state['workflow_updated_at']  = sanitize_text_field((string) $state['workflow_updated_at']);
         $state['workflow_verified_at'] = sanitize_text_field((string) $state['workflow_verified_at']);
@@ -361,7 +366,7 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
             'readiness_completed_at', 'registry_completed_at', 'prepare_started_at', 'prepare_completed_at',
             'do_started_at', 'do_completed_at', 'do_flush_all_completed_at',
             'verify_started_at', 'verify_completed_at', 'delete_started_at',
-            'delete_completed_at', 'delete_authorized_at', 'pre_do_guard_completed_at',
+            'delete_completed_at', 'delete_authorized_at', 'rollback_started_at', 'rollback_completed_at', 'pre_do_guard_completed_at',
             'decisions_completed_at'
         ) as $timestamp_key) {
             $state[$timestamp_key] = sanitize_text_field((string) $state[$timestamp_key]);
@@ -792,8 +797,6 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
         $reset       = !empty($args['reset']) || !empty($args['start']);
         $batch_size  = isset($args['limit']) ? absint($args['limit']) : 100;
         $batch_size  = max(1, min(250, $batch_size));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
         $saved       = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
         $has_plan    = '' !== (string) $saved['created_at'] || $this->media_replacement_has_registry_rows();
         $start_new   = $reset
@@ -923,17 +926,12 @@ trait Ultra_Cache_Media_Replacement_Registry_Trait
             $state = $this->update_media_replacement_workflow_state($state);
         }
 
-        $deadline = microtime(true) + $time_budget;
         $ids = $this->get_media_replacement_candidate_attachment_ids_batch($state['cursor_attachment_id'], $batch_size);
         $batch_stats = $this->get_media_replacement_default_scan_stats();
         $last_id = $state['cursor_attachment_id'];
         $processed_ids = 0;
 
         foreach ($ids as $attachment_id) {
-            if ($processed_ids > 0 && microtime(true) >= $deadline) {
-                break;
-            }
-
             $attachment_id = absint($attachment_id);
             if ($attachment_id <= 0) {
                 continue;

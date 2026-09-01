@@ -230,10 +230,6 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 		return $this->get_media_replacement_manager()->verify_media_library_replacement_theme_css_replacements($args);
 	}
 
-	public function set_media_library_replacement_workflow_stage($args = array()) {
-		return $this->get_media_replacement_manager()->set_media_library_replacement_workflow_stage($args);
-	}
-
 	public function get_media_library_replacement_workflow_status($args = array()) {
 		return $this->get_media_replacement_manager()->get_media_library_replacement_workflow_status($args);
 	}
@@ -268,6 +264,14 @@ trait Ultra_Cache_Media_Replacement_Facade_Trait {
 
 	public function run_media_library_replacement_verify_chunk($args = array()) {
 		return $this->get_media_replacement_manager()->run_media_library_replacement_verify_chunk($args);
+	}
+
+	public function get_media_library_replacement_rollback_status() {
+		return $this->get_media_replacement_manager()->get_media_library_replacement_rollback_status();
+	}
+
+	public function run_media_library_replacement_rollback_chunk($args = array()) {
+		return $this->get_media_replacement_manager()->run_media_library_replacement_rollback_chunk($args);
 	}
 
 	public function get_media_library_replacement_delete_status() {

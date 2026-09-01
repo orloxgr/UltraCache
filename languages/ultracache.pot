@@ -2,14 +2,14 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: UltraCache 2.59.13.15\n"
+"Project-Id-Version: UltraCache 3.06.05\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/UltraCache\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-08-07 01:30+0000\n"
+"POT-Creation-Date: 2026-08-21 09:56+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: UltraCache build pipeline\n"
 "X-Domain: ultracache\n"
@@ -277,7 +277,7 @@ msgid "Integrations"
 msgstr ""
 
 #: includes/class-wp-cli.php:407
-msgid "Test Varnish integration."
+msgid "Redetect Varnish Capabilities integration."
 msgstr ""
 
 #: includes/class-wp-cli.php:411
@@ -388,7 +388,7 @@ msgid "Compatibility exclusion textarea"
 msgstr ""
 
 #: includes/diagnostics/class-diagnostics-trait.php:374
-msgid "Safe third-party delay patterns"
+msgid "Delay third-party JS patterns"
 msgstr ""
 
 #: includes/diagnostics/class-diagnostics-trait.php:374
@@ -1895,6 +1895,10 @@ msgstr ""
 msgid "Defer Chain"
 msgstr ""
 
+#: includes/admin/js/diagnostics.js
+msgid "Add to Do Not Defer or Delay"
+msgstr ""
+
 #: includes/admin-dashboard.js:3406
 msgid "Exclude Chain"
 msgstr ""
@@ -2009,7 +2013,7 @@ msgstr ""
 #: includes/admin-dashboard.js:3999
 #: includes/admin-dashboard.js:4034
 #: includes/admin-dashboard.js:4066
-msgid "Save Both Lists"
+msgid "Save Lists"
 msgstr ""
 
 #: includes/admin-dashboard.js:4004
@@ -2056,9 +2060,9 @@ msgstr ""
 
 #: includes/admin-dashboard.js:4048
 msgid ""
-"What it does: reads pasted browser console errors and looks for missing globals, missing jQuery plugin methods, stack-trace URLs, and dependency clues.\n"
+"What it does: reads pasted browser console errors, maps the script that actually failed to its WordPress-declared dependencies first, and only falls back to targeted active plugin/theme file discovery when the registry does not explain the error.\n"
 "\n"
-"Why it helps: it can propose the script that should move earlier instead of blindly excluding the script that shouted first.\n"
+"Why it helps: it aims for the smallest provider/consumer change that explains the reported error instead of adding unrelated page-wide dependency findings.\n"
 "\n"
 "Watch for: it only proposes visible fixes. It does not create hidden exceptions."
 msgstr ""
@@ -3530,7 +3534,7 @@ msgid "Uses the LCP image detected by LCP Image Priority as a visual boundary. E
 msgstr ""
 
 #: includes/admin-dashboard.js:10059
-msgid "Delay safe third-party JS"
+msgid "Delay third-party JS"
 msgstr ""
 
 #: includes/admin-dashboard.js:10060
@@ -4103,7 +4107,7 @@ msgid "Speed-first defer-instead safeguards, compatibility exclusions, third-par
 msgstr ""
 
 #: includes/admin-dashboard.js:10661
-msgid "Safe Third-Party Delay Patterns"
+msgid "Delay third-party JS Patterns"
 msgstr ""
 
 #: includes/admin-dashboard.js:10662
@@ -6519,12 +6523,12 @@ msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confir
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:388
-msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confirmed for native site-tag purge."
+msgid "A LiteSpeed origin or active LiteSpeed cache response has not been confirmed for native public site-cache purge."
 msgstr ""
 
 
 #: includes/runtime/class-runtime-cache-services-trait.php:396
-msgid "Handled by the native LiteSpeed site-tag purge hook."
+msgid "Handled by the native LiteSpeed public site-cache purge hook."
 msgstr ""
 
 #: includes/rest/class-rest-litespeed-trait.php:46
@@ -6541,7 +6545,7 @@ msgid "LiteSpeed exact URL invalidation headers were dispatched through signed i
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:288
-msgid "LiteSpeed exact URL-tag purge response prepared."
+msgid "LiteSpeed exact URL purge response prepared."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:367
@@ -6557,7 +6561,7 @@ msgid "LiteSpeed signed control response did not acknowledge the purge."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:287
-msgid "LiteSpeed site-tag purge response prepared."
+msgid "LiteSpeed public site-cache purge response prepared."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:468
@@ -6693,10 +6697,6 @@ msgstr ""
 msgid "Native LiteSpeed HTML Cache is not enabled for refill."
 msgstr ""
 
-#: includes/admin/js/dashboard-application.js:3192
-msgid "Refill LiteSpeed after targeted invalidation"
-msgstr ""
-
 #: includes/integrations/litespeed/class-litespeed-refill-trait.php:91
 #, php-format
 msgid "Site warm-up will populate %d LiteSpeed HTML variant(s)."
@@ -6712,10 +6712,6 @@ msgstr ""
 
 #: includes/warmup/class-warm-page-pipeline-trait.php:444
 msgid "The page cache warmed, but the selected Varnish and LiteSpeed refills did not complete."
-msgstr ""
-
-#: includes/admin/js/dashboard-application.js:3200
-msgid "Warm LiteSpeed with site warm-up"
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-refill-trait.php:617
@@ -6764,7 +6760,7 @@ msgstr ""
 
 #: includes/admin/js/cache.js:287
 #: includes/admin/js/dashboard-diagnostics-ui.js:417
-msgid "Behavior test"
+msgid "Capability test"
 msgstr ""
 
 #: includes/admin/js/dashboard-diagnostics-ui.js:418
@@ -6804,7 +6800,7 @@ msgid "LiteSpeed behavior test failed for one or more active HTML buckets."
 msgstr ""
 
 #: includes/rest/class-rest-litespeed-trait.php:96
-msgid "LiteSpeed behavior test helper is unavailable."
+msgid "LiteSpeed capability test helper is unavailable."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:361
@@ -6824,7 +6820,7 @@ msgid "LiteSpeed explicitly bypassed the tested public page."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:261
-msgid "LiteSpeed headers were visible, but the post-purge MISS-to-HIT sequence was not completed."
+msgid "LiteSpeed headers were visible, but the post-purge capability sequence was not verified."
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:357
@@ -6844,7 +6840,7 @@ msgid "Native LSCache detection, exact invalidation, refill telemetry, and a can
 msgstr ""
 
 #: includes/admin/js/cache.js:290
-msgid "No LiteSpeed behavior test has been run yet."
+msgid "No LiteSpeed capability test has been run yet."
 msgstr ""
 
 #: includes/admin/js/cache.js:304
@@ -6872,7 +6868,7 @@ msgid "Success"
 msgstr ""
 
 #: includes/admin/js/cache.js:273
-msgid "Test LiteSpeed Behavior"
+msgid "Test LiteSpeed Capability"
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php:305
@@ -6988,14 +6984,6 @@ msgstr ""
 msgid "Last quarantine"
 msgstr ""
 
-#: includes/admin/js/dashboard-diagnostics-ui.js:419
-msgid "Last refresh-ahead scan"
-msgstr ""
-
-#: includes/admin/js/cache.js:291
-msgid "Last refresh-ahead scan: "
-msgstr ""
-
 #: includes/admin/js/dashboard-diagnostics-ui.js:893 includes/admin/js/dashboard-diagnostics-ui.js:986
 msgid "Last seen"
 msgstr ""
@@ -7025,7 +7013,7 @@ msgid "LiteSpeed stale exact URL invalidation headers were dispatched through si
 msgstr ""
 
 #: includes/integrations/litespeed/class-litespeed-control-trait.php:292
-msgid "LiteSpeed stale exact URL-tag purge response prepared."
+msgid "LiteSpeed stale exact URL purge response prepared."
 msgstr ""
 
 #: includes/admin/js/dashboard-diagnostics-ui.js:885
@@ -7049,7 +7037,7 @@ msgid "Maximum width or height for newly converted uploads. Smaller images keep 
 msgstr ""
 
 #: includes/admin/js/dashboard-application.js:3610
-msgid "Media status"
+msgid "Media queue items"
 msgstr ""
 
 #: includes/admin/js/dashboard-application.js:3528
@@ -7106,10 +7094,6 @@ msgstr ""
 
 #: includes/admin/js/dashboard-application.js:3532
 msgid "Recent stale workers"
-msgstr ""
-
-#: includes/admin/js/dashboard-diagnostics-ui.js:418
-msgid "Refresh ahead"
 msgstr ""
 
 #: includes/admin/js/dashboard-diagnostics-ui.js:899
@@ -7249,7 +7233,7 @@ msgid "Enable UltraCache Page Cache first, then enable native LiteSpeed HTML Cac
 msgstr ""
 
 #: includes/admin/js/cache.js:288
-msgid "Enable native LiteSpeed HTML Cache above before running the behavior test."
+msgid "Enable native LiteSpeed HTML Cache above before running the capability test."
 msgstr ""
 
 #: includes/admin/js/cache.js:290
@@ -7288,20 +7272,8 @@ msgstr ""
 msgid "Use UltraCache HTML freshness markers and the bounded candidate registry to queue hot pages near Fresh TTL through the existing warm worker."
 msgstr ""
 
-#: includes/admin/js/cache.js:341
-msgid "Refresh threshold (% of Fresh TTL)"
-msgstr ""
-
 #: includes/admin/js/cache.js:342
 msgid "Queue a candidate when the oldest active UltraCache HTML bucket reaches this percentage of Fresh TTL, or when a required bucket is missing."
-msgstr ""
-
-#: includes/admin/js/cache.js:352
-msgid "Maximum pages per scan"
-msgstr ""
-
-#: includes/admin/js/cache.js:353
-msgid "Bound the number of due candidates checked and possibly queued by one LiteSpeed refresh-ahead scan."
 msgstr ""
 
 #: includes/admin/js/cache.js:374
@@ -7309,7 +7281,7 @@ msgid "Include LiteSpeed in Flush All Cache"
 msgstr ""
 
 #: includes/admin/js/cache.js:375
-msgid "Also purge LiteSpeed when the main Flush All Cache action runs. Native mode purges the UltraCache site tag; otherwise a confirmed LiteSpeed WordPress purge transport is used."
+msgid "Also purge LiteSpeed when the main Flush All Cache action runs. Native mode purges the LiteSpeed public site cache; otherwise a confirmed LiteSpeed WordPress purge transport is used."
 msgstr ""
 
 #: includes/admin/js/cache.js:385
@@ -7433,11 +7405,11 @@ msgid "Enable ESI fragment framework"
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-esi-capability-trait.php:105
-msgid "Run Test Varnish to verify end-to-end ESI processing."
+msgid "Run Redetect Varnish Capabilities to verify end-to-end ESI processing."
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-esi-capability-trait.php:114
-msgid "The ESI capability contract changed. Run Test Varnish again."
+msgid "The ESI capability contract changed. Run Redetect Varnish Capabilities again."
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-esi-capability-trait.php:128
@@ -7493,7 +7465,7 @@ msgid "Test required"
 msgstr ""
 
 #: includes/admin/js/varnish.js:280
-msgid "Run Test Varnish after installing the ESI VCL rules. Until verification succeeds, registered fragments render inline fallback HTML."
+msgid "Run Redetect Varnish Capabilities after installing the ESI VCL rules. Until verification succeeds, registered fragments render inline fallback HTML."
 msgstr ""
 
 #: includes/admin/js/varnish.js:424
@@ -7501,7 +7473,7 @@ msgid "Verified public fragments emit signed same-origin ESI includes with inlin
 msgstr ""
 
 #: includes/admin/js/varnish.js:425
-msgid "Requests ESI support. Registered fragments continue rendering inline fallback HTML until Test Varnish verifies end-to-end ESI composition."
+msgid "Requests ESI support. Registered fragments continue rendering inline fallback HTML until Redetect Varnish Capabilities verifies end-to-end ESI composition."
 msgstr ""
 
 #: includes/admin/js/varnish.js:431
@@ -7509,7 +7481,7 @@ msgid "Generic Varnish ESI rules"
 msgstr ""
 
 #: includes/admin/js/varnish.js:432
-msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses, reload Varnish, and run Test Varnish."
+msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses, reload Varnish, and run Redetect Varnish Capabilities."
 msgstr ""
 
 #: includes/admin/js/varnish.js:438
@@ -7517,7 +7489,7 @@ msgid "Copy VCL snippet"
 msgstr ""
 
 #: includes/admin/js/varnish.js:461
-msgid "Test Varnish checks the configured connection, one exact front-page invalidation, the public refill, and end-to-end ESI composition."
+msgid "Redetect Varnish Capabilities checks the configured connection, one exact front-page invalidation, the public refill, and end-to-end ESI composition."
 msgstr ""
 
 #: includes/admin/js/varnish.js:279
@@ -7625,7 +7597,7 @@ msgid "Verified public fragments use shared fragment cache, while private fragme
 msgstr ""
 
 #: includes/admin/js/varnish.js:485
-msgid "Public ESI is verified. Private fragments remain inline fallback until Test Varnish verifies session isolation and no-store transport."
+msgid "Public ESI is verified. Private fragments remain inline fallback until Redetect Varnish Capabilities verifies session isolation and no-store transport."
 msgstr ""
 
 #: includes/admin/js/varnish.js:492
@@ -7633,7 +7605,7 @@ msgid "Generic Varnish ESI and private-session rules"
 msgstr ""
 
 #: includes/admin/js/varnish.js:493
-msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses. Extend the documented transport-cookie expressions only for cookies rendered exclusively inside private fragments, reload Varnish, and run Test Varnish."
+msgid "Add these rules to a VCL that does not already process Surrogate-Control ESI responses. Extend the documented transport-cookie expressions only for cookies rendered exclusively inside private fragments, reload Varnish, and run Redetect Varnish Capabilities."
 msgstr ""
 
 #: includes/esi/class-esi-registry.php
@@ -7681,7 +7653,7 @@ msgid "This generic VCL snippet is a suggestion and is not installed automatical
 msgstr ""
 
 #: includes/admin/js/ui.js
-msgid "The same baseline rules can be used across Varnish servers, but control-panel paths, include structure, and reload commands differ. Review the snippet for your setup, compile and reload Varnish, and then run Test Varnish again."
+msgid "The same baseline rules can be used across Varnish servers, but control-panel paths, include structure, and reload commands differ. Review the snippet for your setup, compile and reload Varnish, and then run Redetect Varnish Capabilities again."
 msgstr ""
 
 #: includes/admin/js/varnish.js:129
@@ -7697,7 +7669,7 @@ msgid "%d attempt(s)"
 msgstr ""
 
 #: includes/admin/js/varnish.js:154
-msgid "Action: fix the reported Varnish transport or authentication error, then run the invalidation or Test Varnish again."
+msgid "Action: fix the reported Varnish transport or authentication error, then run the invalidation or Redetect Varnish Capabilities again."
 msgstr ""
 
 #: includes/admin/js/varnish.js:155
@@ -7746,7 +7718,7 @@ msgid "The recommended snippet requires two independent signals: the request-sid
 msgstr ""
 
 #: includes/admin/js/ui.js
-msgid "This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Test Varnish again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations."
+msgid "This is a suggestion and is not installed automatically. Merge the relevant rules into your existing VCL instead of replacing an unrelated full configuration blindly. Compile/reload Varnish and run Redetect Varnish Capabilities again. Frontend ESI composition probes use an independent 20-second timeout; the Admin endpoint timeout controls only Varnish admin socket operations."
 msgstr ""
 
 #: includes/admin/js/ui.js
@@ -7762,7 +7734,7 @@ msgid "Use the bundled fail-closed template on CWP servers. Sites without the Ul
 msgstr ""
 
 #: includes/admin/js/ui.js
-msgid "The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Test Varnish."
+msgid "The file preserves the CWP placeholders %domain%, %backend_domain%, %proxy_ip%, and %proxy_port%. Review the active include structure, rebuild affected domain configurations, compile/reload Varnish, and run Redetect Varnish Capabilities."
 msgstr ""
 
 #: includes/admin/js/ui.js
@@ -7867,8 +7839,12 @@ msgstr ""
 msgid "Detect Varnish Configuration"
 msgstr ""
 
+#: includes/admin/js/varnish.js
+msgid "Redetect Varnish Capabilities"
+msgstr ""
+
 #: includes/admin/js/varnish.js:555
-msgid "Save Varnish Settings before testing."
+msgid "Save Varnish Settings before redetecting capabilities."
 msgstr ""
 
 #: includes/admin/js/varnish.js:556
@@ -7877,7 +7853,7 @@ msgid "Save Varnish Settings before flushing."
 msgstr ""
 
 #: includes/admin/js/varnish.js:559
-msgid "Unsaved Varnish changes detected. Don't forget to press Save Varnish Settings before testing or flushing."
+msgid "Unsaved Varnish changes detected. Save the settings before redetecting capabilities or flushing."
 msgstr ""
 
 #: includes/admin/js/varnish.js:560
@@ -8062,7 +8038,7 @@ msgid "Many managed hosts expose only a local HTTP purge endpoint. UltraCache ca
 msgstr ""
 
 #: includes/admin/js/ui.js
-msgid "Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Test Varnish to see which capabilities are Supported."
+msgid "Choosing Admin / BAN does not mean exact invalidation is missing. Exact BAN performs that job in Admin mode, so Exact PURGE is shown as “Unavailable in Admin/BAN mode.” That label describes the selected control method, not a lost feature. Choose the mode your server actually exposes, then use Redetect Varnish Capabilities to see which capabilities are Supported."
 msgstr ""
 
 #: includes/admin/js/varnish.js
@@ -8148,7 +8124,7 @@ msgid "The persistent Varnish invalidation queue was unavailable. A bounded sync
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-flush-scope-trait.php
-msgid "Run Test Varnish successfully before UltraCache exposes those contracts to runtime invalidation."
+msgid "Run Redetect Varnish Capabilities successfully before UltraCache exposes those contracts to runtime invalidation."
 msgstr ""
 
 #: includes/media/replacement/class-media-replacement-workflow-trait.php
@@ -8526,7 +8502,7 @@ msgid "Bucket %d"
 msgstr ""
 
 #: includes/admin/js/varnish.js:325
-msgid "Configuration changed · run Test Varnish again"
+msgid "Configuration changed · run Redetect Varnish Capabilities again"
 msgstr ""
 
 #: includes/admin/js/varnish.js:280
@@ -8570,7 +8546,7 @@ msgid "Not applicable · one active HTML bucket (%s)"
 msgstr ""
 
 #: includes/admin/js/varnish.js:333
-msgid "Proof expired · run Test Varnish again"
+msgid "Proof expired · run Redetect Varnish Capabilities again"
 msgstr ""
 
 #: includes/admin/js/varnish.js:538
@@ -9115,7 +9091,7 @@ msgid "Transport verified"
 msgstr ""
 
 #: includes/admin/js/varnish.js:843
-msgid "The configured Varnish control connection could not be authenticated or reached. Check the endpoint and secret, then run Test Varnish again."
+msgid "The configured Varnish control connection could not be authenticated or reached. Check the endpoint and secret, then run Redetect Varnish Capabilities again."
 msgstr ""
 
 #: includes/admin/js/varnish.js:846
@@ -9315,7 +9291,7 @@ msgid "The static Varnish canary file could not be written."
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-esi-capability-trait.php:152
-msgid "The stored public-path ESI behavior proof expired. Run Test Varnish again."
+msgid "The stored public-path ESI behavior proof expired. Run Redetect Varnish Capabilities again."
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-flush-scope-trait.php:203
@@ -9323,7 +9299,7 @@ msgid "The configured Varnish transport did not pass the HTML-only or entire-hos
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-flush-scope-trait.php:204
-msgid "Run Test Varnish to verify HTML-only or entire-host invalidation for every configured endpoint."
+msgid "Run Redetect Varnish Capabilities to verify HTML-only or entire-host invalidation for every configured endpoint."
 msgstr ""
 
 #: includes/integrations/varnish/class-varnish-flush-scope-trait.php:633
@@ -9479,7 +9455,7 @@ msgstr ""
 
 #: includes/admin/js/media-replacement.js
 #: includes/admin/js/media-replacement-ui.js
-msgid "Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again."
+msgid "Preparation failed. Open Advanced / Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again."
 msgstr ""
 
 #: includes/admin/js/media-replacement-ui.js
@@ -9676,4 +9652,2645 @@ msgstr ""
 
 #: includes/admin/js/ui.js:1001
 msgid "UltraCache will analyze the scripts used on the page and look for strong signs of dependency and execution-order conflicts. Do not add every suggested script blindly. Start with the page element or functionality that is not working, identify which plugin, theme, or component it belongs to, and compare that with the findings. Apply the most relevant safeguard first, then test the page again."
+msgstr ""
+
+#: includes/admin/js/settings.js:298 includes/admin/js/dashboard-application.js:3404
+msgid "Apply Optimal Settings"
+msgstr ""
+
+#: includes/admin/js/settings.js:299
+msgid "Apply UltraCache's recommended performance configuration while preserving infrastructure credentials, schedules, exclusions, safeguards, and other user-maintained lists."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:196
+msgid "Saving optimal settings…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:198
+msgid "Optimal settings saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3391
+msgid "Optimal Configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3397
+msgid "Uses UltraCache's recommended configuration as a repeatable setup operation. You can still adjust every setting manually afterwards."
+msgstr ""
+
+#: includes/admin/js/ui.js:957
+msgid "Recommended setup for most WordPress websites. Apply Optimal Settings, complete the site-specific selections below, then prepare the cache and images."
+msgstr ""
+
+#: includes/admin/js/ui.js:959
+msgid "Apply Optimal Settings."
+msgstr ""
+
+#: includes/admin/js/ui.js:959
+msgid "It applies UltraCache’s recommended performance configuration while preserving your infrastructure credentials, schedules, exclusions, safeguards, and other user-maintained lists."
+msgstr ""
+
+#: includes/admin/js/ui.js:1010
+msgid "Apply Optimal Settings provides the recommended starting configuration. Some additional options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5005
+msgid "For most sites, begin with Apply Optimal Settings. It applies UltraCache's recommended cache, JavaScript, CSS, media, and Object Cache configuration while preserving your manual safeguards and infrastructure settings."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5006
+msgid "After applying Optimal Settings, run Flush All Cache once and warm the homepage."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php
+msgid "Setup planning engine is not available."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:674
+msgid "Analyzing this website…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:230
+msgid "Appending default JavaScript dependency safeguards…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1011 includes/admin/js/dashboard-application.js:1018
+msgid "Apply Optimal Settings failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:714
+msgid "Applying configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:186
+msgid "Applying recommended cache and frontend settings…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:726
+msgid "Close"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:665
+msgid "Close Optimal Settings"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:709
+msgid "Compression selection, image-format activation, site warm sources, local Google Fonts, and plugin-specific optimizations that require additional validation are not applied by this step yet."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:714
+msgid "Configuration complete"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:703
+msgid "CSS delivery"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:702
+msgid "Defer + dependency safeguards"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:685
+msgid "Detected environment"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:205
+msgid "Detecting and verifying the best Object Cache backend…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:701 includes/admin/js/dashboard-application.js:705
+msgid "Disable"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:701 includes/admin/js/dashboard-application.js:705 includes/admin/js/dashboard-application.js:706
+msgid "Enable"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:689
+msgid "HTML compression"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:690
+msgid "Image encoder candidate"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:244
+msgid "JavaScript dependency safeguards are ready."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:702
+msgid "JavaScript strategy"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:704
+msgid "Keep unchanged if no backend passes verification"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:689
+msgid "Live test required"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:688
+msgid "live verification during Apply"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:694
+msgid "Multiple assigned menus — selection required later"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:694
+msgid "No assigned frontend menu detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:605
+msgid "No encoder candidate detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:589
+msgid "None detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:691 includes/admin/js/dashboard-application.js:692 includes/admin/js/dashboard-application.js:693
+msgid "Not detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:225
+msgid "Object Cache already uses the recommended configuration."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:688
+msgid "Object Cache candidate"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:219
+msgid "Object Cache configured."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:222
+msgid "Object Cache was not changed: "
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:706
+msgid "Off until image conversion is validated"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:247
+msgid "Optimal Settings applied."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:694
+msgid "Primary menu"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:703
+msgid "Recommended bundle and asynchronous-delivery configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:200
+msgid "Recommended cache and frontend settings saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:680
+msgid "Retry analysis"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:670
+msgid "Review the detected environment and the settings UltraCache will apply. Capabilities that require a live test are shown as pending instead of being guessed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:699
+msgid "Settings applied now"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:957
+msgid "The website could not be analyzed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:952
+msgid "UltraCache returned an invalid setup plan."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:668
+msgid "UltraCache setup"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:687
+msgid "Unknown"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:704
+msgid "verified before saving"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:687
+msgid "Web server"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:678
+msgid "Website analysis failed."
+msgstr ""
+
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "The live HTML compression probe was inconclusive, so the existing compression setting was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Server-managed HTML compression is active, so UltraCache compression stays off."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML compression was left off because the live probe detected an unsafe server response."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Brotli compression is available and was selected."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Gzip compression is available and was selected."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "No supported UltraCache HTML compression encoder is available."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML compression capability detection returned an invalid response."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache runtime validation failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Testing live HTML compression and selecting the correct delivery mode…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Testing HTML compression…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML compression configured."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML compression was not changed because the live probe was inconclusive."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML Compression unchanged"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "HTML compression capability detection failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache selected. Verifying runtime payload storage…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache configured and runtime-verified."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache configured and verified."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache validation failed and the previous configuration was restored. "
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache validation failed and the previous configuration could not be restored. "
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache setup restored"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "live capability check + runtime verification during Apply"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Live test during Apply"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Live-test server delivery, then use server-managed mode or the best supported UltraCache encoder"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "capability-tested, configured, then runtime-verified"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Image-format activation, site warm sources, local Google Fonts, and plugin-specific optimizations that require additional validation are not applied by this step yet."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "HTML Compression is configured automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings runs the live compression check, keeps UltraCache compression off when the server already handles it, and otherwise selects the best supported UltraCache encoder."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Object Cache is configured and verified automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings checks Redis, APCu, SQLite, and Disk in deterministic order, installs the selected drop-in, and verifies runtime object payload storage before keeping the change."
+msgstr ""
+
+#: includes/runtime/class-runtime-cache-services-trait.php
+msgid "The live HTML compression probe did not complete, so UltraCache did not change the compression mode."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Multiple assigned menus — no automatic menu selection"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Recommended warm sources"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No automatic sources available"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warm-up menu"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Keep the existing menu selection when no primary menu can be chosen deterministically"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Keep unchanged"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Image-format activation, local Google Fonts, and plugin-specific optimizations that require additional validation are not applied by this step yet."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Configuring the recommended site warm-up scope…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Primary menu, Depth 1, and recommended full-site warm-up sources configured."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Recommended full-site warm-up sources were configured, but multiple assigned menus prevented automatic primary-menu selection. The existing menu selection was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Recommended full-site warm-up sources were configured. No assigned frontend menu was available, so the existing menu selection was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Warm-up menu unchanged"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "No deterministic site warm-up scope was available, so the existing warm-up scope was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Warm-up scope unchanged"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Recommended setup for most WordPress websites. Apply Optimal Settings to configure the deterministic site settings automatically, then complete only the checks that still require live validation."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Warm-up menu is configured automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings selects a deterministic primary/main/header frontend menu when one can be identified and uses Depth 1. If multiple assigned menus are ambiguous, UltraCache preserves the existing menu selection instead of guessing."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Full-site warm-up sources are configured automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings selects Homepage / blog index, Selected menu URLs when a deterministic menu is available, Pages, Posts, and Categories. Additional sources remain manual."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "AVIF and WebP passed the live Media Library conversion test. AVIF was selected with WebP fallback and AVIF upload conversion."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "AVIF passed the live Media Library conversion test. AVIF was selected with original-file fallback and AVIF upload conversion."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings runs the Media Library conversion test, prefers AVIF with WebP fallback when both pass, falls back to WebP when needed, and enables Convert new uploads only after a successful format test."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Apply Optimal Settings uses a 1920-pixel maximum upload side and Compact image compression for the recommended configuration."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Applying plugin-specific optimizations only where the integration is detected…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Enable automatically only after the live image conversion test passes"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Enable empty-cart suppression"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Enable lazy nonce refresh"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Enabling the recommended font optimization settings…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Image conversion validation failed, so the existing image-format settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Image conversion validation was inconclusive, so the existing image-format settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Image formats are selected from the live Media Library conversion test. Plugin-specific optimizations are enabled only when the matching integration is detected."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Image formats are validated automatically."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Local Google Fonts + Font-Mix bundle + icon-font delay"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Local Google Fonts optimization, generated Font-Mix bundling, and icon-font delay are enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "MailerLite"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "MailerLite lazy nonce refresh enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "MailerLite optimization not applicable."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Media formats unchanged"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Media setup"
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Media upload defaults are configured automatically."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Neither AVIF nor WebP passed the live Media Library conversion test. Convert new uploads was left off and the existing rewrite formats were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Not applicable"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Testing AVIF/WebP conversion and selecting the optimal image formats…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Testing Media Library image conversion…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "WebP passed the live Media Library conversion test while AVIF did not. WebP was selected for rewrite and upload conversion."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "WooCommerce"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "WooCommerce empty-cart suppression enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "WooCommerce optimization not applicable."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php
+msgid "Setup wizard state is not available."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Close setup wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "First-run setup"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache is configured"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Welcome to UltraCache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache can analyze this website and apply the recommended performance configuration automatically. The setup uses live capability checks where required instead of guessing."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What setup will do"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Analyze the server, WordPress site, integrations, media encoders, and warm-up scope."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Apply and verify the recommended cache, frontend, media, font, and integration settings."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Analysis is complete. UltraCache will now apply the recommended configuration and verify capabilities that require live tests."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Website analysis"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No backend candidate"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No deterministic automatic menu selection"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Configuring UltraCache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Recommended configuration applied."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache has completed the first-run configuration. You can change any individual setting from the dashboard at any time."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Set up UltraCache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Configuring…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Apply recommended configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Finish"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Not now"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache could not save the setup wizard state."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "The setup wizard could not be started."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "First-run setup failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Previous setup attempt needs attention."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Flush cache, warm the site, and prepare existing media for background conversion."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache has completed first-run configuration and started the recommended cache warm-up and media preparation. You can change any individual setting from the dashboard at any time."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Preparing website…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Resume website preparation"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Applying…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Flushing all cache layers…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full cache purge processing via dashboard…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "All cache layers cleared."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Failed to flush all cache layers."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Automatic cache flush did not complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warming the homepage…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage warm processing via dashboard…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage warm completed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage warm failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Automatic homepage warm did not complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage warmed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warming the configured main menu…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Configured menu warm completed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No deterministic menu scope was available; menu warm was skipped."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Starting or resuming background full-site warm-up…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Background full-site warm-up could not be started."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Background full-site warm-up started or resumed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Preparing the existing Media Library conversion queue…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Media conversion queue preparation failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Background media conversion could not be resumed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Existing-media conversion queue prepared and background processing resumed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Analyzing HTML JS Dependencies"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warm-up cancelled. Background automation may continue."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No automation work is waiting."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Running scheduled warm-up"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Running targeted work"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Running UI warm-up"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Running WP-CLI warm-up"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Scheduled full-site warm-up"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Scheduled targeted work"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Waiting for retry"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Paused by configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Recovered"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Attention required"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "HTML"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "CSS bundle"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "LCP refresh"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Varnish"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "LiteSpeed"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Queue"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "URLs pending"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "processing"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "stages open"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Retry after"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Next run"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Owner"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "WP-CLI"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UI"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Cron"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Stage"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Paused UI session available to resume."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full-site plan"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "processed"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "selected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What it does: lets Apache serve a ready-made cached HTML file before WordPress and PHP start.\\n\\nWhy it helps: safe repeat visits can skip the WordPress kitchen completely and get the saved page from the shelf.\\n\\nWatch for: this only applies to safe anonymous queryless GET requests. It skips unsafe cookies, query strings, admin, login, REST, AJAX, WooCommerce dynamic paths, cart, checkout, account, and session-like visits. PHP debug headers and PHP hit counters do not run for these server-level hits."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What it does: controls when all delayed JavaScript queues are allowed to run.\\n\\nWhy it helps: delayed scripts stay out of the first loading rush, then release by visitor interaction or by the fallback timer.\\n\\nWatch for: event triggers are useful when a widget must wake as soon as the visitor interacts. Leaving events off gives a cleaner timer-only test."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What it does: combines UltraCache-generated font-mix CSS files into one ordered stylesheet.\\n\\nWhy it helps: the browser has one font CSS request to handle instead of many small blocking requests.\\n\\nWatch for: this bundle stays blocking on purpose because font CSS can change text size, icon display, and first-view layout."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What it does: async-loads only the single consolidated bundle-font-mix stylesheet.\\n\\nWhy it helps: a large font-mix bundle can leave the render-blocking path, so the page can paint sooner.\\n\\nWatch for: text or icons may appear with fallback styling first and settle later. Check the first viewport, product cards, menus, headers, and decorative fonts."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "What it does: applies a WooCommerce preset. Off disables UltraCache Woo timing and cleanup. Safe delays cart fragments only. Balanced also enables general Woo asset cleanup and removes Woo Blocks CSS when no Woo blocks are found. Aggressive adds product/gallery cleanup outside product pages and product-filter cleanup when no filter is found. Custom means the small switches no longer match a preset.\\n\\nWhy it helps: WooCommerce often loads cart and shop helpers before the visitor needs them.\\n\\nWatch for: test homepage, shop, product, cart, checkout, account, mini-cart, add-to-cart, search, and filters after changing this."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "AUTOMATION WORKER"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Apply Optimal Settings now flushes the cache, warms the homepage and configured menu, starts or resumes the background full-site warm-up, and prepares existing media conversion automatically."
+msgstr ""
+
+#: includes/admin/js/warmup.js
+msgid "Please enable Page Caching before warming cache."
+msgstr ""
+
+#: includes/admin/js/warmup.js
+msgid "Warm-up setup failed, and the manual priority lease could not be released. Refresh warm-up status before retrying."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:676
+msgid "Verify the website"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:686
+msgid "Analyze JavaScript dependency order, apply deterministic safeguards, and ask you to verify the visible interactions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:734
+msgid "Automated JavaScript checks are complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:735
+msgid "UltraCache analyzed the homepage, applied only deterministic Strong Suggestion safeguards, purged and warmed the affected cache, and rescanned. One visual check remains because backend diagnostics cannot prove that every interactive component looks and behaves correctly."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:738
+msgid "Verify visible interactions"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:740
+msgid "Menu and mobile navigation"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:741
+msgid "Sliders, popups, and other interactive widgets"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:742
+msgid "Forms and search"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:743
+msgid "Cart, checkout, and account flows when applicable"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:757
+msgid "Checking JavaScript…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:757
+msgid "Resume JavaScript checks"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:758
+msgid "Open website"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:759
+msgid "Finish setup"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:880
+msgid "Automated JavaScript checks complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:881
+msgid "UltraCache applied deterministic Strong Suggestion safeguards and rescanned the homepage. Verify the visible menu, sliders, forms, search, and cart/checkout flows before considering the site fully checked."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1382
+msgid "Purging and rewarming after JavaScript safeguard changes…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1384
+msgid "JavaScript safeguard cache purge processing…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1385
+msgid "Cache cleared after JavaScript safeguard changes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1386
+msgid "Failed to clear cache after JavaScript safeguard changes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1389
+msgid "JavaScript safeguard cache purge did not complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1394
+msgid "Homepage rewarm processing after JavaScript safeguards…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1395
+msgid "Homepage rewarm completed after JavaScript safeguards."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1396
+msgid "Homepage rewarm failed after JavaScript safeguards."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1399
+msgid "Homepage rewarm did not complete after JavaScript safeguard changes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1412
+msgid "Background full-site warm-up could not be resumed after JavaScript safeguards."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1414
+msgid "Cache purged and warm-up restarted after JavaScript safeguard changes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1430
+msgid "JavaScript dependency analysis pass %d of 3…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1439
+msgid "Automatic JavaScript dependency analysis was unavailable. No JavaScript safeguard setting was changed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1447
+msgid "%d Strong Suggestion(s) remain for manual review; no additional deterministic safeguard could be applied automatically."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1448
+msgid "No missing high-confidence JavaScript dependency conflicts remain."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1452
+msgid "Applying %d deterministic JavaScript safeguard(s)…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1455
+msgid "Automatic JavaScript safeguards could not be saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1458
+msgid "Applied %d deterministic JavaScript safeguard(s)."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1462
+msgid "Running final JavaScript dependency verification scan…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1471
+msgid "Final JavaScript dependency verification was unavailable; the safeguards already applied were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1473
+msgid "Automatic JavaScript checks reached the 3-pass correction limit with %d Strong Suggestion(s) still requiring review."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1474
+msgid "Automatic JavaScript dependency checks completed with no missing Strong Suggestions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1554
+msgid "UltraCache could not mark setup as complete."
+msgstr ""
+
+#: includes/admin/js/ui.js:963
+msgid "Upload conversion is configured automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js:963
+msgid "Convert new uploads is enabled only when a format passes the live Media Library conversion test."
+msgstr ""
+
+#: includes/admin/js/ui.js:965
+msgid "Image formats are selected automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js:965
+msgid "UltraCache prefers tested AVIF with WebP fallback, falls back to WebP when needed, and preserves the existing rewrite formats when the live test is inconclusive."
+msgstr ""
+
+#: includes/admin/js/ui.js:968
+msgid "Main font optimizations are applied automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js:968
+msgid "Optimal Settings enables Local Google Fonts Optimization, Bundle Generated Font-Mix CSS, and Delay icon fonts."
+msgstr ""
+
+#: includes/admin/js/ui.js:969
+msgid "WooCommerce optimization is conditional."
+msgstr ""
+
+#: includes/admin/js/ui.js:969
+msgid "Suppress empty-cart execution is enabled automatically only when WooCommerce is detected."
+msgstr ""
+
+#: includes/admin/js/ui.js:970
+msgid "MailerLite optimization is conditional."
+msgstr ""
+
+#: includes/admin/js/ui.js:970
+msgid "Lazy MailerLite nonce refresh is enabled automatically only when MailerLite is detected."
+msgstr ""
+
+#: includes/admin/js/ui.js:976
+msgid "Website preparation is automatic"
+msgstr ""
+
+#: includes/admin/js/ui.js:977
+msgid "Apply Optimal Settings now performs the initial Flush All, homepage and deterministic menu warm, background full-site warm start/resume, and existing-media queue preparation automatically. The normal warm-up and media workers continue resumably after setup."
+msgstr ""
+
+#: includes/admin/js/ui.js:980
+msgid "Post-install JavaScript verification"
+msgstr ""
+
+#: includes/admin/js/ui.js:981
+msgid "Apply Optimal Settings automatically runs Analyze HTML JS Dependencies on the homepage, applies only deterministic Strong Suggestion safeguards to Defer Instead or Do Not Defer or Delay according to the scanner evidence, purges and warms the affected cache, and rescans. The correction loop is bounded and never applies generic heuristic suggestions automatically."
+msgstr ""
+
+#: includes/admin/js/ui.js:983
+msgid "Verify the visible interactions."
+msgstr ""
+
+#: includes/admin/js/ui.js:983
+msgid "Open the public website and check the menu, mobile navigation, sliders, popups, forms, search, and cart/checkout/account flows when applicable. This visual/functional check cannot be proven by backend analysis."
+msgstr ""
+
+#: includes/admin/js/ui.js:984
+msgid "Use Browser Runtime Errors when a problem remains."
+msgstr ""
+
+#: includes/admin/js/ui.js:984
+msgid "If an interaction still fails or the browser Console reports an error, open JS Defer / Delay Safeguards & Diagnostics and run the Runtime Scan or Console Error Handler for that exact page. Runtime errors are page-specific and are not blindly converted into exclusions by the automatic setup."
+msgstr ""
+
+#: includes/admin/js/ui.js:985
+msgid "Review residual Strong Suggestions only when reported."
+msgstr ""
+
+#: includes/admin/js/ui.js:985
+msgid "The setup assistant can stop with a residual finding when no additional deterministic automatic action is available. In that case review the finding in JS Defer / Delay Safeguards & Diagnostics instead of adding unrelated scripts."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1018
+msgid "Overview"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1019
+msgid "Cache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1020
+msgid "Frontend"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1021
+msgid "Media"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1023
+msgid "Advanced"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4236
+msgid "UltraCache sections"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4331
+msgid "Processing…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4337
+msgid "Warming…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4337
+msgid "Resume Warm Site"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4337
+msgid "Warm Site"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:4330
+msgid "Flush All Cache includes Varnish and requires plugin activation or network plugin management permission."
+msgstr ""
+
+#: includes/admin/js/ui.js:952
+msgid "Close UltraCache help"
+msgstr ""
+
+#: includes/admin/js/ui.js:956
+msgid "UltraCache help"
+msgstr ""
+
+#: includes/admin/js/ui.js:957
+msgid "For most WordPress websites, use the First-Run Setup Wizard or Apply Optimal Settings from Overview. If you prefer to configure UltraCache yourself, follow the Manual Setup below; every location matches the current dashboard tabs."
+msgstr ""
+
+#: includes/admin/js/ui.js:959
+msgid "Recommended setup"
+msgstr ""
+
+#: includes/admin/js/ui.js:960
+msgid "Open Overview and use Apply Optimal Settings. UltraCache analyzes the environment, applies the recommended configuration, validates compression, Object Cache and image conversion, prepares warm-up and existing media, and runs deterministic JavaScript dependency diagnostics."
+msgstr ""
+
+#: includes/admin/js/ui.js:963
+msgid "Manual Setup"
+msgstr ""
+
+#: includes/admin/js/ui.js:964
+msgid "Use this checklist when you want to review or configure the important setup choices manually instead of relying on the automatic setup workflow."
+msgstr ""
+
+#: includes/admin/js/ui.js:966
+msgid "Cache → Cache Engine: check HTML Compression."
+msgstr ""
+
+#: includes/admin/js/ui.js:966
+msgid "Open the HTML Compression dropdown so UltraCache can run the live check. Keep Server managed when the web server already compresses HTML; otherwise select an available UltraCache Brotli or gzip mode."
+msgstr ""
+
+#: includes/admin/js/ui.js:967
+msgid "Cache → Warm Cache: select the main menu and depth."
+msgstr ""
+
+#: includes/admin/js/ui.js:967
+msgid "Choose the primary frontend menu. Depth 1 is the recommended starting point for most websites."
+msgstr ""
+
+#: includes/admin/js/ui.js:968
+msgid "Cache → Warm Cache: choose Full-site warm-up sources."
+msgstr ""
+
+#: includes/admin/js/ui.js:968
+msgid "Homepage / blog index, Selected menu URLs, Pages, Posts, and Categories are the recommended general-purpose sources. Add extra sources only when the site needs them."
+msgstr ""
+
+#: includes/admin/js/ui.js:969
+msgid "Media → Media Optimization: configure new uploads."
+msgstr ""
+
+#: includes/admin/js/ui.js:969
+msgid "Enable Convert new uploads only after the selected output format passes the Image conversion test."
+msgstr ""
+
+#: includes/admin/js/ui.js:970
+msgid "Media → Media Optimization: set Maximum upload image side."
+msgstr ""
+
+#: includes/admin/js/ui.js:970
+msgid "1920 pixels is appropriate for most modern websites. Increase it only when larger source images are genuinely required."
+msgstr ""
+
+#: includes/admin/js/ui.js:971
+msgid "Media → Media Optimization: choose image formats."
+msgstr ""
+
+#: includes/admin/js/ui.js:971
+msgid "Prefer AVIF with WebP fallback when both formats pass the live conversion test. Use WebP when AVIF is unavailable or fails validation."
+msgstr ""
+
+#: includes/admin/js/ui.js:972
+msgid "Media → Media Optimization: choose Image compression level."
+msgstr ""
+
+#: includes/admin/js/ui.js:972
+msgid "Compact provides a strong reduction in file size with little visible difference for normal website images."
+msgstr ""
+
+#: includes/admin/js/ui.js:973
+msgid "Media → AVIF / WebP Batch Conversion: run Image conversion test."
+msgstr ""
+
+#: includes/admin/js/ui.js:973
+msgid "Run Image conversion test and then Check test before the first batch or before enabling upload conversion for a new format."
+msgstr ""
+
+#: includes/admin/js/ui.js:974
+msgid "Frontend → Fonts: enable the main font optimizations."
+msgstr ""
+
+#: includes/admin/js/ui.js:974
+msgid "Enable Local Google Fonts Optimization, Bundle Generated Font-Mix CSS, and Delay icon fonts."
+msgstr ""
+
+#: includes/admin/js/ui.js:975
+msgid "Frontend → WooCommerce: use Suppress empty-cart execution when applicable."
+msgstr ""
+
+#: includes/admin/js/ui.js:975
+msgid "Use the empty-cart suppression strategy on WooCommerce sites to avoid unnecessary cart-fragment work for anonymous empty-cart pages."
+msgstr ""
+
+#: includes/admin/js/ui.js:976
+msgid "Advanced → Advanced settings: enable Lazy MailerLite nonce refresh when applicable."
+msgstr ""
+
+#: includes/admin/js/ui.js:976
+msgid "Enable it only when the website uses MailerLite forms."
+msgstr ""
+
+#: includes/admin/js/ui.js:977
+msgid "Server → Object Cache: select and verify the backend."
+msgstr ""
+
+#: includes/admin/js/ui.js:977
+msgid "Test the available backend before keeping it active. Redis is the preferred persistent backend when available; APCu is local and non-persistent; SQLite and Disk are fallbacks."
+msgstr ""
+
+#: includes/admin/js/ui.js:978
+msgid "Server → Varnish Cache: configure Varnish when present."
+msgstr ""
+
+#: includes/admin/js/ui.js:978
+msgid "Enter the required connection and purge details, save them, and run the Varnish test before relying on external-cache invalidation."
+msgstr ""
+
+#: includes/admin/js/ui.js:979
+msgid "Cache → Automation & Scheduling: configure automatic full-site warm-up."
+msgstr ""
+
+#: includes/admin/js/ui.js:979
+msgid "Enable Warm full site after Flush All Cache when desired. Cache → Warm Cache also contains Warm uncached URLs after first visit."
+msgstr ""
+
+#: includes/admin/js/ui.js:983
+msgid "Manual preparation after saving"
+msgstr ""
+
+#: includes/admin/js/ui.js:985
+msgid "Overview → Flush All Cache clears the previous cached output."
+msgstr ""
+
+#: includes/admin/js/ui.js:986
+msgid "Cache → Warm Cache → Warm Up Homepage HTML Cache prepares the front page immediately."
+msgstr ""
+
+#: includes/admin/js/ui.js:987
+msgid "Cache → Warm Cache → Warm Up Menu HTML Cache prepares the selected menu URLs; use the CSS-bundle variant when CSS bundling is enabled."
+msgstr ""
+
+#: includes/admin/js/ui.js:988
+msgid "Media → AVIF / WebP Batch Conversion → Start / Resume Conversion prepares existing Media Library images."
+msgstr ""
+
+#: includes/admin/js/ui.js:989
+msgid "Overview → Warm Site starts or resumes the configured full-site warm-up."
+msgstr ""
+
+#: includes/admin/js/ui.js:997
+msgid "If an interaction still fails or the browser Console reports an error, open Frontend → JS Defer / Delay Safeguards & Diagnostics and run the Runtime Scan or Console Error Handler for that exact page. Runtime errors are page-specific and are not blindly converted into exclusions by the automatic setup."
+msgstr ""
+
+#: includes/admin/js/ui.js:998
+msgid "The setup assistant can stop with a residual finding when no additional deterministic automatic action is available. In that case review the finding in Frontend → JS Defer / Delay Safeguards & Diagnostics instead of adding unrelated scripts."
+msgstr ""
+
+#: includes/admin/js/ui.js:1000
+msgid "Manual JavaScript verification"
+msgstr ""
+
+#: includes/admin/js/ui.js:1002
+msgid "Open the public website in a private window."
+msgstr ""
+
+#: includes/admin/js/ui.js:1002
+msgid "Use an anonymous/private browser session so you test the public cached page instead of a logged-in administration session."
+msgstr ""
+
+#: includes/admin/js/ui.js:1003
+msgid "Open the browser Console and reload."
+msgstr ""
+
+#: includes/admin/js/ui.js:1003
+msgid "Use the main interactive elements on the page and copy any red JavaScript errors together with their stack traces."
+msgstr ""
+
+#: includes/admin/js/ui.js:1004
+msgid "Frontend → JS Defer / Delay Safeguards & Diagnostics: analyze Console errors."
+msgstr ""
+
+#: includes/admin/js/ui.js:1004
+msgid "Paste the errors into Console Error Handler and extract the proposed safeguards. Prefer Defer Instead first unless the finding explicitly requires Do Not Defer or Delay."
+msgstr ""
+
+#: includes/admin/js/ui.js:1005
+msgid "Save, flush, warm, and retest."
+msgstr ""
+
+#: includes/admin/js/ui.js:1005
+msgid "Save the safeguard lists, run Overview → Flush All Cache, then Cache → Warm Cache → Warm Up Homepage HTML Cache and repeat the anonymous browser test."
+msgstr ""
+
+#: includes/admin/js/ui.js:1006
+msgid "If there are no Console errors but something still fails, analyze HTML JS dependencies."
+msgstr ""
+
+#: includes/admin/js/ui.js:1006
+msgid "Open Frontend → JS Defer / Delay Safeguards & Diagnostics and run Analyze HTML JS Dependencies. Review Strong Suggestions that match the broken component instead of adding every suggestion blindly."
+msgstr ""
+
+#: includes/admin/js/ui.js:1013
+msgid "Open Frontend → CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure."
+msgstr ""
+
+#: includes/admin/js/ui.js:1014
+msgid "Open Advanced → Advanced Frontend Javascript manipulation and enable Delay non-critical/local JS. This can provide a significant PageSpeed/Lighthouse boost, but it can break JavaScript without visible errors, making problems difficult to find and fix."
+msgstr ""
+
+#: includes/admin/js/ui.js:1015
+msgid "Open Cache → Query-string args caching and enable it. Under Query-string args whitelist, click Populate, then click Save Query-string Whitelist. UltraCache can then cache eligible query URLs such as /YourProductURL?color=red."
+msgstr ""
+
+#: includes/admin/js/ui.js:1021
+msgid "Frequently asked questions"
+msgstr ""
+
+#: includes/admin/js/ui.js:1022
+msgid "Open a topic and then select a question. The FAQ covers the common setup, cache, media, LCP, integration, and troubleshooting questions for the installed plugin."
+msgstr ""
+
+#. Dashboard advanced layout group
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced Frontend Javascript manipulation"
+msgstr ""
+
+#. Dashboard advanced layout group description
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced parallel execution, LCP-boundary, and local JavaScript delay controls."
+msgstr ""
+
+#. Dashboard advanced layout group
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced CSS Delivery"
+msgstr ""
+
+#. Dashboard advanced layout group description
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced inline and asynchronous stylesheet delivery controls."
+msgstr ""
+
+#. Dashboard advanced layout group
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced Fonts Optimisation"
+msgstr ""
+
+#. Dashboard advanced layout group description
+#: includes/admin/js/dashboard-application.js
+msgid "Advanced asynchronous and runtime font stylesheet controls."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:62
+msgid "Javascript"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1021
+msgid "Fonts & CSS"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1024
+msgid "Automation"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5011
+msgid "Javascript manipulation"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5351
+msgid "Control WooCommerce cache safety, request timing, and optional asset cleanup."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5434
+msgid "Warning these settings may hurt your performance"
+msgstr ""
+
+#: includes/admin/js/ui.js:974
+msgid "Fonts & CSS → Fonts Optimization: enable the main font optimizations."
+msgstr ""
+
+#: includes/admin/js/ui.js:975
+msgid "Javascript → WooCommerce: use Suppress empty-cart execution when applicable."
+msgstr ""
+
+#: includes/admin/js/ui.js:979
+msgid "Automation → Automation & Scheduling: configure automatic full-site warm-up."
+msgstr ""
+
+#: includes/admin/js/ui.js:997
+msgid "If an interaction still fails or the browser Console reports an error, open Javascript → JS Defer / Delay Safeguards & Diagnostics and run the Runtime Scan or Console Error Handler for that exact page. Runtime errors are page-specific and are not blindly converted into exclusions by the automatic setup."
+msgstr ""
+
+#: includes/admin/js/ui.js:998
+msgid "The setup assistant can stop with a residual finding when no additional deterministic automatic action is available. In that case review the finding in Javascript → JS Defer / Delay Safeguards & Diagnostics instead of adding unrelated scripts."
+msgstr ""
+
+#: includes/admin/js/ui.js:1004
+msgid "Javascript → JS Defer / Delay Safeguards & Diagnostics: analyze Console errors."
+msgstr ""
+
+#: includes/admin/js/ui.js:1006
+msgid "Open Javascript → JS Defer / Delay Safeguards & Diagnostics and run Analyze HTML JS Dependencies. Review Strong Suggestions that match the broken component instead of adding every suggestion blindly."
+msgstr ""
+
+#: includes/admin/js/ui.js:1013
+msgid "Open Fonts & CSS → CSS Bundle Exclusions & Diagnostics, then click Run CSS Diagnostics. Under Top CSS bundle sources by bytes, you will see which CSS files contribute the most to the generated bundle. Excluding one or two of the largest files—especially large theme stylesheets—can often provide a significant performance improvement. Add exclusions one at a time and run another performance test after each change, as the best configuration depends on the theme and page structure."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Also warm CSS bundles"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "When enabled, the three manual warm actions build the configured UltraCache CSS bundle scope together with HTML. Disable to warm HTML only."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Preserving the existing Object Cache configuration…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Existing Object Cache configuration preserved and runtime-verified."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Existing Object Cache configuration preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Existing Object Cache configuration was preserved unchanged, but runtime verification failed. "
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Object Cache preserved"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Existing external Object Cache configuration preserved without modification."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Existing external Object Cache preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "existing configuration will be preserved"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Configured · existing configuration will be preserved"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Not configured · no automatic configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Preserve existing configuration; runtime-verify only when UltraCache manages it"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "Preserve existing configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js includes/admin/js/dashboard-settings-actions.js
+msgid "No automatic configuration"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1533
+msgid "Applied %d deterministic JavaScript safeguard(s) for confirmed runtime errors."
+msgstr ""
+
+#: includes/admin/js/ui.js:994
+msgid "Apply Optimal Settings first runs hidden same-origin browser runtime checks on the homepage and selected navigation pages. If no JavaScript runtime errors are captured, UltraCache does not add any extra dependency safeguard. Only when real runtime errors are detected does setup run Analyze HTML JS Dependencies on the affected page, apply deterministic Strong Suggestion safeguards when available, purge/rewarm, and verify the runtime again. The loop is bounded to three runtime verification passes."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1527
+msgid "Applying %d deterministic JavaScript safeguard(s) for confirmed runtime errors…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1477
+msgid "Automatic hidden browser runtime checks were unavailable. No additional JavaScript safeguard was applied."
+msgstr ""
+
+#: includes/admin/js/ui.js:987
+msgid "Cache → Warm Cache → Warm Up Configured Menu prepares the selected menu URLs; Also warm CSS bundles controls whether the configured CSS bundle scope is included."
+msgstr ""
+
+#: includes/admin/js/ui.js:986
+msgid "Cache → Warm Cache → Warm Up Homepage prepares the front page immediately; Also warm CSS bundles controls whether the configured CSS bundle scope is included."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2952
+msgid "Checking JavaScript runtime errors"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1487
+msgid "Detected %d JavaScript runtime error(s). Running dependency analysis only on affected pages."
+msgstr ""
+
+#: includes/admin/js/ui.js:997
+msgid "If an interaction still fails after Apply Optimal Settings, open Javascript → JS Defer / Delay Safeguards & Diagnostics and run Runtime Scan for that exact page. Runtime errors are page-specific, and setup only adds safeguards proven by the JavaScript Error Fixer."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1483
+msgid "JavaScript runtime checks passed on %d page(s) with no browser errors."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1489
+msgid "JavaScript runtime checks reached the 3-pass limit with %d error(s) still present. No further automatic change was made."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1473
+msgid "JavaScript runtime verification pass %d of 3…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2868
+msgid "Loading hidden frontend runtime check…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:705
+msgid "Run hidden browser runtime checks and repair only JavaScript problems that produce real runtime errors."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1500
+msgid "Runtime errors confirmed; analyzing dependency order for the affected page…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1517
+msgid "Runtime errors were detected, but dependency analysis was unavailable for the affected pages. No JavaScript safeguard was changed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1523
+msgid "Runtime errors were detected, but no new deterministic Strong Suggestion matched an automatic safeguard. Existing JavaScript settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2947
+msgid "Testing JavaScript runtime page %1$d of %2$d…"
+msgstr ""
+
+#: includes/admin/js/ui.js:998
+msgid "The setup assistant can stop with residual runtime errors when no deterministic Strong Suggestion can be applied automatically. In that case review the affected page in Javascript → JS Defer / Delay Safeguards & Diagnostics instead of adding unrelated scripts."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:871
+msgid "UltraCache completed hidden browser runtime checks. Dependency analysis and deterministic safeguards were invoked only if actual runtime errors were detected. Verify visible menu, slider, form, search, and cart/checkout interactions when you need full visual confirmation."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:763
+msgid "UltraCache ran hidden browser runtime checks on the homepage and selected navigation pages. JavaScript dependency analysis and deterministic safeguards were used only when real runtime errors were detected. One visual check remains because automated diagnostics cannot prove that every interactive component looks and behaves correctly."
+msgstr ""
+
+
+#: includes/admin/js/dashboard-application.js:1520
+msgid "Dependency analysis completed for %d affected page(s)."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1314
+msgid "Automatic CSS Bundle Exclusions skipped because CSS bundle warm-up is disabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1320
+msgid "Automatic CSS Bundle Exclusions skipped because no homepage diagnostics URL was available."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1324
+msgid "Analyzing the generated homepage CSS bundle for large source stylesheets…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1328
+msgid "CSS bundle source analysis processing via dashboard…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1329
+msgid "CSS bundle source analysis completed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1330
+msgid "CSS bundle source analysis failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1331
+msgid "Analyzing CSS bundle sources…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1334
+msgid "CSS bundle source analysis was unavailable; existing CSS Bundle Exclusions were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1341
+msgid "No usable generated CSS bundle source data was available; existing CSS Bundle Exclusions were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1349
+msgid "CSS Bundle Exclusions already contains two or more entries; automatic setup preserved the existing list without adding more."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1354
+msgid "No additional CSS source larger than 50 KB qualified for automatic bundle exclusion."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1367
+msgid "The selected large CSS sources were already covered by existing CSS Bundle Exclusions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1371
+msgid "Appending %d large CSS Bundle Exclusion(s) and rebuilding the homepage bundle…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1374
+msgid "Automatic CSS Bundle Exclusions could not be saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1378
+msgid "CSS exclusion cache purge processing via dashboard…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1379
+msgid "Cache cleared for CSS bundle rebuild."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1380
+msgid "Failed to clear cache for CSS bundle rebuild."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1383
+msgid "Automatic CSS exclusion cache purge did not complete."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1387
+msgid "Homepage CSS bundle rebuild processing via dashboard…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1388
+msgid "Homepage CSS bundle rebuilt with automatic exclusions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1389
+msgid "Homepage CSS bundle rebuild failed after automatic exclusions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1392
+msgid "Homepage CSS bundle rebuild did not complete after automatic exclusions."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1395
+msgid "Added %d automatic CSS Bundle Exclusion(s) and rebuilt the homepage CSS bundle."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No effective query-string args are currently allowlisted, so query-string variants bypass cache."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "ALL is not recommended on faceted or filter-heavy sites."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "ALL is not recommended. The estimate is shown in bounded scientific notation to avoid large-number allocation."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Query cache combination level"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Hard limit for cached query-string identities per URL path. When the limit is full, new unknown query variants bypass cache instead of evicting older variants."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "1 — 8 variants per URL"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "2 — 64 variants per URL"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "3 — 512 variants per URL (Default)"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "4 — 4,096 variants per URL"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "ALL — NOT RECOMMENDED"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Current combination limit"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Calculated immediately from the selected level. ALL uses the effective unique allowlist count and switches to bounded scientific notation for very large lists."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "cached query variants per URL"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Effective allowlisted query args"
+msgstr ""
+
+#: includes/warmup/class-warm-runner-trait.php
+msgid "Query cache combination limit reached; this new query variant intentionally bypassed cache."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1757
+msgid "Applying automatic JavaScript compatibility fixes…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1763
+msgid "Automatic JavaScript compatibility fixes applied."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1701
+msgid "Automatic JavaScript verification was unavailable. Existing safeguards were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1707
+msgid "JavaScript compatibility verified."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1712
+msgid "JavaScript verification finished with unresolved items left for Diagnostics."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1753
+msgid "No additional automatic JavaScript fix was proven. Existing settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1737
+msgid "Optimizing JavaScript compatibility…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:763
+msgid "UltraCache ran the Browser Runtime Scan and JavaScript Error Fixer on the frontend probe URL until no runtime errors remained. One visual check remains because automated diagnostics cannot prove that every interactive component looks and behaves correctly."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:871
+msgid "UltraCache completed automatic JavaScript compatibility verification. Verify visible menu, slider, form, search, and cart/checkout interactions when you need full visual confirmation."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1697
+msgid "Running automatic JavaScript compatibility repair…"
+msgstr ""
+
+#: includes/admin/js/ui.js:994
+msgid "Apply Optimal Settings runs the same Browser Runtime Scan and JavaScript Error Fixer repair cycle used in Javascript diagnostics on the frontend probe URL. It repeats for up to six scans and stops early when zero runtime errors remain."
+msgstr ""
+
+#: includes/admin/js/ui.js:1014
+msgid "Apply Optimal Settings enables Delay non-critical/local JS automatically. You can also control it manually in Javascript → Javascript manipulation."
+msgstr ""
+
+#: includes/admin/js/ui.js:998
+msgid "The setup assistant can stop with residual runtime errors when no deterministic automatic fix can be proven. In that case review the affected page in Javascript → JS Defer / Delay Safeguards & Diagnostics."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Automatic JavaScript verification failed with %d unresolved runtime error(s) after 6 scans."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Automatic JavaScript verification failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Runtime scan failed because the frontend frame did not return a completed browser error payload."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Live test during Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Setup Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache Setup Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Setup choices"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Choose the Object Cache backend and how far UltraCache should warm the website. The Wizard uses the existing UltraCache settings and subsystems."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Choose the backend for the existing Object Cache setup flow. Existing credentials and infrastructure values are preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warm-up"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Choose how far the existing UltraCache warm-up flow should run after configuration."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Homepage + Menu"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full Site"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Choose the URL sources used by the existing full-site warm-up flow."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Skipping after current image…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Skip image conversion"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "UltraCache has completed the Setup Wizard. You can change any individual setting from the dashboard at any time."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Run Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Warming the configured menu…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No configured menu scope was available; menu warm was skipped."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Menu warm skipped by Wizard selection."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full Site selected; the existing full-site warm-up flow will use its configured sources."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Starting or resuming the existing full-site warm-up…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full-site warm-up could not be started."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full-site warm-up started or resumed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full-site warm-up skipped by Wizard selection."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Setup Wizard failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "You can still adjust every setting manually after running the wizard."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Running…"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "For most sites, begin with Run Wizard. It applies UltraCache's recommended cache, JavaScript, CSS, media, and Object Cache configuration while preserving user-maintained credentials, schedules, exclusions, safeguards, and lists."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "The Wizard uses the warm-up scope you select: Homepage, Homepage + Menu, or Full Site. Homepage image conversion runs live through the existing AVIF / WebP conversion flow."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Saving recommended settings…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Recommended settings saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Wizard warm-up selections preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Verifying the Object Cache backend selected in the Wizard…"
+msgstr ""
+
+#: includes/admin/js/settings.js
+msgid "Apply UltraCache's recommended performance configuration. If you have manually added credentials, schedules, exclusions, safeguards, and other user-maintained lists the wizard will preserve them."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "For most WordPress websites, use Run Wizard from Overview. The same Setup Wizard is used on fresh installations and when you run it again later. If you prefer to configure UltraCache yourself, follow the Manual Setup below; every location matches the current dashboard tabs."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "Open Overview and use Run Wizard. UltraCache analyzes the environment, applies the recommended configuration, uses your selected Object Cache backend and warm-up scope, validates compression and image conversion, converts homepage media live, and runs deterministic JavaScript diagnostics."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The Setup Wizard runs the same Browser Runtime Scan and JavaScript Error Fixer repair cycle used in Javascript diagnostics on the frontend probe URL. It repeats for up to six scans and stops early when zero runtime errors remain."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "If an interaction still fails after the Setup Wizard, open Javascript → JS Defer / Delay Safeguards & Diagnostics and run Runtime Scan for that exact page. Runtime errors are page-specific, and setup only adds safeguards proven by the JavaScript Error Fixer."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The Setup Wizard enables Delay non-critical/local JS automatically. You can also control it manually in Javascript → Javascript manipulation."
+msgstr ""
+
+#: includes/admin/js/ui.js
+msgid "The Setup Wizard provides the recommended starting configuration. Some additional options are intended only for specific themes, plugins, or compatibility cases. Enabling options that your website does not need may reduce performance or cause visual or functional problems."
+msgstr ""
+
+
+#: includes/admin/js/dashboard-application.js
+msgid "Full-site warm-up completed."
+msgstr ""
+
+#: includes/admin/js/diagnostics.js:1355
+msgid "Browser Runtime Scan"
+msgstr ""
+
+#: includes/admin/js/diagnostics.js:1356
+msgid "UltraCache is clearing cache, warming the selected URL, scanning browser runtime errors, and applying only deterministic fixes. The scan can run for up to ten cycles."
+msgstr ""
+
+#: includes/admin/js/diagnostics.js:1358
+msgid "Scan URL"
+msgstr ""
+
+#: includes/admin/js/diagnostics.js:1363
+msgid "Preparing Runtime Scan…"
+msgstr ""
+
+
+#: includes/admin/js/dashboard-settings-actions.js:608
+msgid "Populating the Query-string args whitelist with the existing detection flow…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:613
+msgid "Query-string args whitelist population failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:616
+msgid "Query-string args whitelist processed with Populate and saved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:618
+msgid "Query-string args whitelist could not be populated."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:756
+msgid "Automatic setup completed with a final browser check recommended."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:757
+msgid "UltraCache compared an unoptimized Runtime Scan baseline with the optimized frontend, repaired the new deterministic JavaScript errors it found, and reached zero new runtime errors. One visual check remains because automated diagnostics cannot prove that every interactive component looks and behaves correctly."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1548
+msgid "Baseline cache state is clear."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:1623
+msgid "UltraCache completed the automatic JavaScript repair and applied every safeguard it could determine confidently. Please check the page as an anonymous visitor; there may still be some JavaScript errors."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3024
+msgid "Runtime Scan timed out after 300 seconds while waiting for the frontend collector to finish. No clean result was recorded."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3025
+msgid "Runtime Scan failed because the frontend frame did not return a completed browser error payload. No clean result was recorded."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:2968
+msgid "Browser Scanner popup was blocked. Allow popups for this WordPress admin page or turn off “Open Browser scanner in new window”."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3013
+msgid "Browser Scanner window is not available. Keep the scanner window open or turn off “Open Browser scanner in new window”."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:3098
+msgid "Browser Scanner window could not navigate to the Runtime Scan URL."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5983
+msgid "Open Browser scanner in new window"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5984
+msgid "Diagnostic display mode. When enabled, Browser Runtime Scan opens the scanned frontend in a visible browser window so you can inspect the live page and DevTools. When disabled, the existing hidden iframe scanner is used unchanged."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Debug Browser Scanner"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Diagnostic debug mode. Opens Browser Runtime Scan in a visible browser window so you can inspect the live page and DevTools. It also enables the temporary Runtime Scan Comparison diagnostics. When disabled, Runtime Scan uses the normal hidden iframe scanner and comparison diagnostics stay off."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5892
+msgid "Protect WPBakery animations"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5893
+msgid "Keeps lifecycle-critical WPBakery/Visual Composer frontend JavaScript out of UltraCache Delay queues while still allowing normal defer optimization, protecting animations, carousels, legacy sliders, tabs, accordions, and isotope grids from broken one-shot initialization."
+msgstr ""
+
+#: includes/admin/js/media-replacement-ui.js
+msgid "Advanced / Recovery"
+msgstr ""
+
+#: includes/admin/js/media-replacement.js:1759
+#: includes/media/replacement/class-media-replacement-workflow-trait.php:3077
+msgid "Rollback Replacement is complete. Restart Replacement Plan before deleting original files."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:476
+msgid "Selecting and verifying the best available HTML delivery path…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:500
+msgid "Native LiteSpeed HTML Cache was enabled, but its capability could not be verified from a cache HIT."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:506
+msgid "Native LiteSpeed HTML Cache was enabled, but its capability test failed to run."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:533
+msgid "Apache Static HTML Delivery verification was inconclusive, so the existing delivery setting was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:540
+msgid "Apache Static HTML Delivery verification failed, so the existing delivery setting was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "A Varnish endpoint candidate was found, but exact invalidation could not be verified. Existing Varnish settings were left unchanged."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Automatic Varnish setup is not applicable on the detected LiteSpeed environment."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Checking and verifying Varnish integration when applicable…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Existing Varnish configuration preserved; automatic Varnish setup is skipped on LiteSpeed."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "No verified Varnish integration was found; existing settings were left unchanged."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish discovery could not be completed. Existing Varnish settings were left unchanged."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish exact invalidation was not verified."
+msgstr ""
+
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish was detected, but automatic configuration requires a token or control key. Existing Varnish settings were left unchanged."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php
+msgid "A Varnish HTTP endpoint accepted the control request, but exact invalidation could not be verified."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php
+msgid "Varnish discovery found an HTTP endpoint and verified exact invalidation on the isolated canary."
+msgstr ""
+
+#: includes/integrations/varnish/class-varnish-discovery-action-trait.php
+msgid "Varnish was detected and verified automatically."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish capability verification failed. Existing Varnish endpoint, secret, and enable-state settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "LiteSpeed detected; Native LiteSpeed HTML Cache enabled and capability verified."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Apache-compatible static delivery verified on the live public path; Apache Static HTML Delivery enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Server-side Apache Static delivery was not verified; UltraCache PHP early cache will be used."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx Helper purge hook detected; the existing Flush All integration was already enabled and was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx Helper purge hook detected and Flush All integration enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx Helper was detected, but its purge hook is not available. Existing Nginx integration settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx server detected; no Nginx Helper purge integration was found. Existing Nginx integration settings were preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx server detected; Apache-compatible static delivery was verified behind it. No Nginx Helper purge integration was found."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Nginx server detected; Apache Static delivery was not verified, so UltraCache PHP early cache will be used. No Nginx Helper purge integration was found."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish capability verification failed."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "The discovered Varnish candidate failed persisted capability verification, so the previous Varnish settings were restored."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "The discovered Varnish candidate failed verification and the previous Varnish settings could not be restored."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Existing Varnish configuration preserved; exact invalidation verified and Flush All integration enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js
+msgid "Varnish detected; exact invalidation verified, configuration saved, and Flush All integration enabled."
+msgstr ""
+
+#. Server-side plugin deactivation confirmation flow.
+#: includes/admin/class-admin-trait.php:126
+#: includes/admin/class-admin-trait.php:177
+msgid "Sorry, you are not allowed to deactivate this plugin."
+msgstr ""
+
+#. Server-side plugin deactivation confirmation flow.
+#: includes/admin/class-admin-trait.php:137
+msgid "The UltraCache deactivation confirmation expired. Please return to Plugins and try again."
+msgstr ""
+
+#. Server-side plugin deactivation confirmation flow.
+#: includes/admin/class-admin-trait.php:146
+msgid "The uninstall cleanup policy could not be saved. UltraCache was not deactivated."
+msgstr ""
+
+#. Server-side plugin deactivation confirmation flow.
+#: includes/admin/class-admin-trait.php:183
+msgid "The UltraCache deactivation request expired. Please return to Plugins and try again."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Runtime Scan could not resolve the final anonymous frontend URL in the isolated browser frame."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Runtime Scan loaded the anonymous frontend page, but the verified collector was not injected. The scan target may have redirected after token creation or bypassed the WordPress request that enables the collector."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Runtime Scan could not load the isolated anonymous frontend frame."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Restart Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Start Wizard"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Resume Wizard"
+msgstr ""
+
+#: includes/integrations/litespeed/class-litespeed-diagnostics-trait.php
+msgid "Exact purge was verified, but LiteSpeed did not produce an observable refill HIT within the behavior test."
+msgstr ""
+
+#: generated
+msgid "Enable Page Cache and LiteSpeed HTML Cache before running the capability test."
+msgstr ""
+
+#: generated
+msgid "The anonymous frontend URL could not be resolved for the LiteSpeed capability test."
+msgstr ""
+
+#: generated
+msgid "The resolved anonymous front-page URL is not eligible for the LiteSpeed capability test."
+msgstr ""
+
+#: generated
+msgid "LiteSpeed capability verified: an X-LiteSpeed-Cache HIT was observed."
+msgstr ""
+
+#: generated
+msgid "LiteSpeed HIT observed for this HTML bucket."
+msgstr ""
+
+#: generated
+msgid "No LiteSpeed HIT was observed for this HTML bucket during the capability probe."
+msgstr ""
+
+#: generated
+msgid "LiteSpeed capability verified: a native cache HIT was observed."
+msgstr ""
+
+#: generated
+msgid "LiteSpeed capability was not verified because no native cache HIT was observed."
+msgstr ""
+
+#: generated
+msgid "Capability test: one observed X-LiteSpeed-Cache HIT is sufficient to verify native LiteSpeed HTML cache delivery. Existing confirmed HIT evidence is reused; otherwise UltraCache makes a small live public probe and stops as soon as one HIT is observed."
+msgstr ""
+
+#: includes/admin/js/varnish.js
+msgid "Behavior test"
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:1193
+msgid "No front page warm target was available."
+msgstr ""
+
+#: includes/rest/class-rest-cache-trait.php:1254
+msgid "No front page CSS warm target was available."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5121
+msgid "Also warm translation pages"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:5122
+msgid "Include every active language exposed by the multilingual provider in Warm Up Homepage, Warm Up Configured Menu, Warm Up Full Site, and scheduled / cron full-site warm-up. Disable to warm only the provider's default language. This does not change cache purge or post-save invalidation behavior."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Multilingual"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Multilingual Status"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Provider-neutral multilingual runtime and public URL topology detected by UltraCache."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Multiple providers detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Language directories"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Different domains"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Query parameter"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Ambiguous — integration disabled"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Detected, topology not ready"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No multilingual provider detected"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Default language"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "URL mode"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Published languages"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "No published multilingual language routes are currently available."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Multilingual Warming"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Controls whether proactive Warm Cache operations include translated language variants. Cache invalidation and normal visitor-driven cache creation are not disabled by this setting."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "Include every active language exposed by the multilingual provider in Warm Up Homepage, Warm Up Configured Menu, Warm Up Full Site, and scheduled / cron full-site warm-up. Disable to warm only the provider's default language. Detailed per-language controls will live here in Multilingual."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js
+msgid "This control becomes available when UltraCache positively detects a supported multilingual provider."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6607
+msgid "Automatic Warm"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6609
+msgid "Scheduled / Cron warm"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6610
+msgid "Include this language in scheduled/background full-site warm plans."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6617
+msgid "Warm after Flush All Cache"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6618
+msgid "Include this language when the global Warm full site after Flush All Cache trigger starts a background warm plan."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6625
+msgid "Warm after Scheduled Cleanup"
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6626
+msgid "Include this language when the global warm-after-cleanup trigger starts a background warm plan."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6634
+msgid "After correctness invalidation, proactively rewarm affected URLs for this language when the global Warm affected pages after save setting is enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-application.js:6538
+msgid "Master multilingual warm-up switch. When enabled, the per-language policy below decides which translated languages participate. When disabled, non-default languages are excluded from proactive Warm Cache operations. Cache invalidation is unaffected."
+msgstr ""
+
+#: includes/warmup/class-cron-warm-orchestrator-trait.php:3350
+msgid "No multilingual language is enabled for this automatic warm operation."
+msgstr ""
+
+#: includes/warmup/class-warm-queue-trait.php:222
+msgid "No multilingual language is enabled for this warm operation."
+msgstr ""
+
+msgid "Warm Policy Diagnostics"
+msgstr ""
+
+msgid "Read-only effective include/exclude view from the same multilingual policy engine used by Warm Cache."
+msgstr ""
+
+msgid "Master multilingual warm-up"
+msgstr ""
+
+msgid "Enabled"
+msgstr ""
+
+msgid "Included"
+msgstr ""
+
+msgid "Excluded"
+msgstr ""
+
+msgid "None"
+msgstr ""
+
+msgid "Configured Menu"
+msgstr ""
+
+msgid "Scheduled / Cron"
+msgstr ""
+
+msgid "After Flush All"
+msgstr ""
+
+msgid "After Scheduled Cleanup"
+msgstr ""
+
+msgid "Affected pages after save"
+msgstr ""
+
+msgid "warm operations"
+msgstr ""
+
+msgid "Global full-site sources"
+msgstr ""
+
+msgid "Custom full-site sources"
+msgstr ""
+
+msgid "Operation diagnostics become available when one supported multilingual provider has a ready public topology."
+msgstr ""
+
+#: includes/setup/class-setup-apache-static-capability-trait.php:194
+msgid "Apache Static HTML Delivery could not be verified because the configured Varnish layer could not be invalidated before the public-path probe."
+msgstr ""
+
+#: includes/setup/class-setup-apache-static-capability-trait.php:247
+msgid "Apache Static HTML Delivery verification was inconclusive because the public probe was answered by a Varnish layer before the Apache origin could be observed."
+msgstr ""
+
+#: includes/setup/class-setup-apache-static-capability-trait.php:326
+msgid "The configured Varnish layer could not be invalidated before Apache Static HTML Delivery verification."
+msgstr ""
+
+#: includes/setup/class-setup-apache-static-capability-trait.php:337
+msgid "The configured Varnish object was invalidated before Apache Static HTML Delivery verification."
+msgstr ""
+
+#: includes/settings/class-settings-validation-trait.php:1344
+msgid "Apache Static HTML Delivery cannot be enabled because its capability verification is unavailable."
+msgstr ""
+
+#: includes/settings/class-settings-validation-trait.php:1353
+msgid "Apache Static HTML Delivery could not be verified, so the setting was not enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:600
+msgid "Apache Static HTML Delivery is already enabled; the existing verified delivery mode was preserved."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:610
+msgid "Apache-compatible static delivery verified by the Apache Static switch; Apache Static HTML Delivery enabled."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:615
+msgid "Apache Static HTML Delivery could not be verified by its switch, so UltraCache PHP early cache will be used."
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:670
+msgid "Verifying the existing Varnish integration…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:681
+msgid "Varnish detected; verifying exact invalidation…"
+msgstr ""
+
+#: includes/admin/js/dashboard-settings-actions.js:702
+msgid "Varnish was detected, but automatic setup could not be completed. Existing Varnish settings were left unchanged."
+msgstr ""
+
+
+#: includes/rest/class-rest-action-queue-trait.php:804
+#: includes/rest/class-rest-action-queue-trait.php:821
+msgid "No multilingual language is enabled for Warm Homepage."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:805
+msgid "Homepage warm prepared for resumable per-language processing."
+msgstr ""
+
+#. translators: 1: current target number, 2: total target count.
+#: includes/rest/class-rest-action-queue-trait.php:1130
+msgid "Warming homepage language target %1$d of %2$d."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:1169
+msgid "Foreground warm-up ownership was transferred."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:1181
+msgid "Homepage warm target failed."
+msgstr ""
+
+#. translators: 1: completed target count, 2: total target count.
+#: includes/rest/class-rest-action-queue-trait.php:1210
+msgid "Homepage warm completed %1$d of %2$d language targets."
+msgstr ""
+
+#: includes/rest/class-rest-action-queue-trait.php:1232
+msgid "Homepage warm target is invalid."
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Last LiteSpeed Detection"
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Request"
+msgstr ""
+
+#: includes/admin/js/cache.js
+msgid "Response"
+msgstr ""
+
+#: includes/warmup/class-warm-page-pipeline-trait.php
+msgid "The page cache warmed successfully; one or more auxiliary refills reported a non-blocking warning."
 msgstr ""

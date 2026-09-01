@@ -396,6 +396,7 @@ trait Ultra_Cache_WP_Warm_Decision_Trait
             'warm_menu_css_shared',
             'warm_css_per_page',
             'warm_menu_css_per_page',
+            'runtime_scan',
             'cli_warm',
         );
 

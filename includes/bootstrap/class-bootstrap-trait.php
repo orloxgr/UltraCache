@@ -110,28 +110,49 @@ trait Ultra_Cache_WP_Bootstrap_Trait
     private function register_hooks()
     {
         $this->register_request_profile_hooks();
-        add_action('plugins_loaded', array(__CLASS__, 'maybe_run_public_warm_runtime_upgrade_reset'), 1);
+        add_action('init', array(__CLASS__, 'maybe_run_public_warm_runtime_upgrade_reset'), -1000);
+        add_action('plugins_loaded', array(__CLASS__, 'maybe_run_schema_lifecycle_upgrade'), 1);
         add_action('plugins_loaded', array(__CLASS__, 'maybe_run_final_transient_cleanup'), 2);
+        add_action('plugins_loaded', array(__CLASS__, 'maybe_finalize_litespeed_automation_contract'), 3);
+        add_action('plugins_loaded', array(__CLASS__, 'maybe_migrate_removed_delayed_js_scroll_trigger'), 4);
         add_action('plugins_loaded', array($this, 'bootstrap_components'), 5);
         add_action('rest_api_init', array($this, 'bootstrap_rest_api'), 0);
         if (self::should_run_bootstrap_reconcile_hooks()) {
             add_action('plugins_loaded', array($this, 'reconcile_page_cache_dropin'), 19);
             add_action('plugins_loaded', array($this, 'reconcile_object_cache_dropin'), 20);
         }
-        add_filter('query_vars', array($this, 'register_esi_query_var'));
+        add_filter('query_vars', array($this, 'register_varnish_esi_query_var'));
+        add_filter('query_vars', array($this, 'register_litespeed_esi_query_var'));
         add_filter('query_vars', array($this, 'register_varnish_canary_query_var'));
-        add_filter('posts_pre_query', array($this, 'maybe_bypass_esi_fragment_main_query'), -20000, 2);
+        add_filter('posts_pre_query', array($this, 'maybe_bypass_varnish_esi_fragment_main_query'), -20000, 2);
+        add_filter('posts_pre_query', array($this, 'maybe_bypass_litespeed_esi_fragment_main_query'), -19999, 2);
         add_action('template_redirect', array($this, 'maybe_serve_varnish_canary'), -30000);
-        add_action('template_redirect', array($this, 'maybe_serve_esi_fragment'), -20000);
+        add_action('template_redirect', array($this, 'maybe_serve_varnish_esi_fragment'), -20000);
+        add_action('template_redirect', array($this, 'maybe_serve_litespeed_esi_fragment'), -19999);
         add_action('init', array($this, 'maybe_mark_ultracache_admin_no_cache'), 0);
+        add_action('admin_init', array(__CLASS__, 'maybe_sync_litespeed_cache_rules_schema'), -110);
+        add_action('admin_init', array(__CLASS__, 'maybe_sync_litespeed_semantic_rules_contract'), -100);
+        add_action('admin_init', array(__CLASS__, 'maybe_sync_woocommerce_endpoint_contract'), -90);
         add_action('admin_init', array(__CLASS__, 'register_dashboard_setting'), 0);
+        add_action('updated_option', array(__CLASS__, 'maybe_schedule_woocommerce_endpoint_contract_sync_from_option'), 20, 3);
+        add_action('added_option', array(__CLASS__, 'maybe_schedule_woocommerce_endpoint_contract_sync_from_option'), 20, 2);
+        add_action('activated_plugin', array(__CLASS__, 'maybe_sync_litespeed_rules_for_plugin_state_change'), 20, 2);
+        add_action('deactivated_plugin', array(__CLASS__, 'maybe_sync_litespeed_rules_for_plugin_state_change'), 20, 2);
+        add_action('save_post_page', array(__CLASS__, 'maybe_schedule_woocommerce_endpoint_contract_sync_from_page'), 100, 1);
+        add_action('shutdown', array(__CLASS__, 'maybe_run_scheduled_woocommerce_endpoint_contract_sync'), PHP_INT_MAX - 40);
+        add_action('admin_init', array($this, 'maybe_intercept_plugin_deactivation_request'), -1000);
+        add_action('wp_ajax_ultracache_rcb_scanner_reset_frame', array(__CLASS__, 'ultracache_render_real_cookie_banner_scanner_reset_frame'));
+        add_action('wp_ajax_nopriv_ultracache_rcb_scanner_reset_frame', array(__CLASS__, 'ultracache_render_real_cookie_banner_scanner_reset_frame'));
+        add_action('wp_ajax_ultracache_complianz_scanner_reset_frame', array(__CLASS__, 'ultracache_render_complianz_scanner_reset_frame'));
+        add_action('wp_ajax_nopriv_ultracache_complianz_scanner_reset_frame', array(__CLASS__, 'ultracache_render_complianz_scanner_reset_frame'));
         add_action('admin_init', array(__CLASS__, 'cleanup_legacy_dropin_backup_directory'), 1);
         add_action('template_redirect', array($this, 'maybe_serve_html_compression_probe'), -10000);
         add_action('admin_init', array($this, 'maybe_send_ultracache_admin_no_cache_headers'), 0);
         add_action('admin_menu', array($this, 'register_admin_menu'));
+        add_action('admin_menu', array($this, 'register_plugin_deactivation_page'));
+        add_action('network_admin_menu', array($this, 'register_plugin_deactivation_page'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_plugin_deactivation_assets'));
-        add_action('wp_ajax_ultracache_save_uninstall_cleanup_policy', array($this, 'handle_save_uninstall_cleanup_policy'));
         add_filter('admin_body_class', array($this, 'add_ultracache_admin_theme_body_class'));
         add_action('admin_enqueue_scripts', array($this, 'suppress_conflicting_admin_assets'), 999);
         // This late page-specific hook only dequeues the same dashboard-only conflicting assets after registration.
@@ -142,8 +163,15 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         add_action('init', array($this, 'handle_admin_bar_actions'));
         add_filter('cron_schedules', array($this, 'register_cron_schedules'));
         add_action('ultracache_scheduled_cache_cleanup', array($this, 'handle_scheduled_cache_cleanup'));
+        add_action('ultracache_cache_asset_refs_gc', array($this, 'handle_cache_asset_refs_gc'));
+        add_action('ultracache_cache_asset_refs_gc_catchup', array($this, 'handle_cache_asset_refs_gc_catchup'));
         add_action('ultracache_cron_warm_tick', array($this, 'handle_cron_warm_tick'));
         add_action('ultracache_cron_warm_tick_kickoff', array($this, 'handle_cron_warm_tick_kickoff'));
+        add_action('wp_loaded', array(__CLASS__, 'maybe_reconcile_multilingual_topology_on_wp_loaded'), 40);
+        add_action('wp', array(__CLASS__, 'maybe_reconcile_multilingual_topology_on_wp'), 40);
+        add_action('wpml_update_active_languages', array(__CLASS__, 'mark_wpml_topology_reconciliation_pending'), PHP_INT_MAX, 1);
+        add_action('update_option_trp_settings', array(__CLASS__, 'mark_translatepress_topology_reconciliation_pending'), PHP_INT_MAX, 3);
+        add_action('shutdown', array(__CLASS__, 'maybe_reconcile_multilingual_topology_on_shutdown'), PHP_INT_MAX - 100);
         add_action('wp_loaded', array($this, 'handle_cron_warm_worker_recovery'), 50);
         add_filter('upgrader_install_package_result', array($this, 'track_upgrader_install_package_result'), 20, 2);
         add_action('upgrader_process_complete', array($this, 'handle_upgrader_process_complete'), 20, 2);
@@ -156,6 +184,15 @@ trait Ultra_Cache_WP_Bootstrap_Trait
         add_action('ultracache_esi_fragment_error_contained', array(__CLASS__, 'record_varnish_esi_fragment_contained_error'), 10, 4);
         add_action('ultracache_after_update_purge', array($this, 'handle_litespeed_after_purge_all'), 11, 1);
         add_action('elementor/core/files/clear_cache', array($this, 'handle_elementor_files_cache_clear'), PHP_INT_MAX);
+        add_filter('RCB/Customize/Updated', array(__CLASS__, 'ultracache_handle_real_cookie_banner_customize_updated'), PHP_INT_MAX, 1);
+        add_filter('RCB/Settings/Updated', array(__CLASS__, 'ultracache_handle_real_cookie_banner_settings_updated'), PHP_INT_MAX, 2);
+        add_filter('RCB/Revision/Hash', array(__CLASS__, 'ultracache_handle_real_cookie_banner_revision_hash'), PHP_INT_MAX, 2);
+        add_action('DevOwl/RealProductManager/LicenseActivation/StatusChanged/real-cookie-banner-pro', array(__CLASS__, 'ultracache_handle_real_cookie_banner_license_status_changed'), PHP_INT_MAX, 3);
+        add_action('DevOwl/RealProductManager/LicenseActivation/StatusChanged/real-cookie-banner', array(__CLASS__, 'ultracache_handle_real_cookie_banner_license_status_changed'), PHP_INT_MAX, 3);
+        add_action('update_option_cmplz_options', array(__CLASS__, 'ultracache_handle_complianz_options_updated'), PHP_INT_MAX, 3);
+        add_action('add_option_cmplz_options', array(__CLASS__, 'ultracache_handle_complianz_options_updated'), PHP_INT_MAX, 2);
+        add_action('cmplz_after_saved_fields', array(__CLASS__, 'ultracache_handle_complianz_saved_fields'), PHP_INT_MAX, 1);
+        add_action('cmplz_after_css_generation', array(__CLASS__, 'ultracache_handle_complianz_css_generation'), PHP_INT_MAX, 5);
         add_action('wp_loaded', array($this, 'maybe_fix_revslider_footer_conflict'), 1);
     }
 
@@ -218,6 +255,21 @@ trait Ultra_Cache_WP_Bootstrap_Trait
 
             case 'Every minute for UltraCache':
                 return __('Every minute for UltraCache', 'ultracache');
+
+            case 'Query cache combination limit reached; this new query variant intentionally bypassed cache.':
+                return __('Query cache combination limit reached; this new query variant intentionally bypassed cache.', 'ultracache');
+
+            case 'Run Redetect Varnish Capabilities to verify end-to-end ESI processing.':
+                return __('Run Redetect Varnish Capabilities to verify end-to-end ESI processing.', 'ultracache');
+
+            case 'The ESI capability contract changed. Run Redetect Varnish Capabilities again.':
+                return __('The ESI capability contract changed. Run Redetect Varnish Capabilities again.', 'ultracache');
+
+            case 'The stored public-path ESI behavior proof expired. Run Redetect Varnish Capabilities again.':
+                return __('The stored public-path ESI behavior proof expired. Run Redetect Varnish Capabilities again.', 'ultracache');
+
+            case 'ESI proof is stored, but no active Varnish connection is configured. Registered fragments render inline fallback HTML.':
+                return __('ESI proof is stored, but no active Varnish connection is configured. Registered fragments render inline fallback HTML.', 'ultracache');
 
             case 'No PHP compression support detected on this server.':
                 return __('No PHP compression support detected on this server.', 'ultracache');

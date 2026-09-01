@@ -340,17 +340,11 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $args = is_array($args) ? $args : array();
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $rows = $this->get_media_replacement_metadata_rows($limit);
 
         $prepared = 0;
         $failed = 0;
         foreach ($rows as $row) {
-            if (($prepared + $failed) > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $result = $this->prepare_media_replacement_item_metadata($row);
             if (!empty($result['prepared'])) {
                 $prepared++;
@@ -363,7 +357,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $row_planning_has_more = !empty($summary['remainingToPrepare']);
         $attachment_plans = array('prepared' => 0, 'failed' => 0, 'remaining' => 0);
         if (!$row_planning_has_more && 0 === (int) $summary['metadataFailed']) {
-            $attachment_plans = $this->materialize_media_replacement_attachment_metadata_plans($limit, $deadline);
+            $attachment_plans = $this->materialize_media_replacement_attachment_metadata_plans($limit);
         }
         $has_more = $row_planning_has_more || !empty($attachment_plans['remaining']);
         $total = max(0, (int) $summary['metadataProgressTotal']);
@@ -544,7 +538,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         return false !== $wpdb->insert($table, $row, array('%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s'));
     }
 
-    private function materialize_media_replacement_attachment_metadata_plans($limit = 50, $deadline = 0.0)
+    private function materialize_media_replacement_attachment_metadata_plans($limit = 50)
     {
         global $wpdb;
 
@@ -573,9 +567,6 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $prepared = 0;
         $failed   = 0;
         foreach ((array) $attachment_ids as $attachment_id) {
-            if ($deadline > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $attachment_id = absint($attachment_id);
             $rows = $this->get_media_replacement_attachment_plan_registry_rows($attachment_id);
             $built = $this->build_media_replacement_attachment_metadata_plan_from_rows($attachment_id, $rows);
@@ -636,6 +627,33 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         );
 
         return array('prepared' => $prepared, 'failed' => $failed, 'remaining' => max(0, $remaining));
+    }
+
+    private function get_media_replacement_missing_attachment_metadata_plan_count()
+    {
+        global $wpdb;
+
+        $items_table = $this->get_media_replacement_items_table_name();
+        $plans_table = $this->get_media_replacement_attachment_plans_table_name();
+        if ('' === $items_table || '' === $plans_table || !($wpdb instanceof wpdb)) {
+            return 0;
+        }
+
+        $count = $wpdb->get_var(
+            $wpdb->prepare(
+                'SELECT COUNT(DISTINCT i.attachment_id) FROM %i i LEFT JOIN %i p ON p.attachment_id = i.attachment_id WHERE i.status IN (%s, %s, %s, %s, %s, %s) AND p.id IS NULL',
+                $items_table,
+                $plans_table,
+                'metadata_ready',
+                'metadata_updated',
+                'metadata_failed',
+                'refs_scanned',
+                'cleanup_deleted',
+                'cleanup_failed'
+            )
+        );
+
+        return max(0, (int) $count);
     }
 
     private function get_media_replacement_attachment_metadata_apply_rows($limit = 50)
@@ -1080,22 +1098,20 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $args = is_array($args) ? $args : array();
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
 
-        $materialized = $this->materialize_media_replacement_attachment_metadata_plans(max($limit, 100), $deadline);
-        if (!empty($materialized['failed'])) {
+        $missing_plans = $this->get_media_replacement_missing_attachment_metadata_plan_count();
+        if ($missing_plans > 0) {
             return array(
-                'success' => false,
-                'message' => sprintf(
-                    /* translators: %d: failed attachment-level plan count. */
-                    __('Attachment-level metadata planning failed for %d attachments.', 'ultracache'),
-                    (int) $materialized['failed']
+                'success'     => false,
+                'blocked'     => true,
+                'message'     => sprintf(
+                    /* translators: %d: attachment count missing a prepared attachment-level metadata plan. */
+                    __('Prepared attachment metadata state is inconsistent: %d attachments have no attachment-level plan. Run Restart Replacement Plan before continuing.', 'ultracache'),
+                    $missing_plans
                 ),
-                'status' => 'metadata_plan_failed',
-                'hasMore' => false,
-                'batchFailed' => (int) $materialized['failed'],
+                'status'      => 'metadata_plan_inconsistent',
+                'hasMore'     => false,
+                'batchFailed' => 0,
             );
         }
 
@@ -1105,9 +1121,6 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $recoverable = 0;
 
         foreach ($rows as $row) {
-            if (($updated + $failed + $recoverable) > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $result = $this->apply_media_replacement_attachment_metadata_plan($row);
             if (!empty($result['updated'])) {
                 $updated++;
@@ -1125,7 +1138,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         }
 
         $summary  = $this->get_media_replacement_metadata_apply_summary();
-        $has_more = !empty($summary['remainingToApply']) || !empty($materialized['remaining']);
+        $has_more = !empty($summary['remainingToApply']);
         $total    = max(0, (int) $summary['metadataApplyTotal']);
         $progress = $total > 0 ? min(100, round(((int) $summary['metadataApplyItems'] / $total) * 100, 1)) : 100;
 
@@ -1309,7 +1322,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         return $file === $old_file && ('' === $old_mime || '' === $mime || $mime === $old_mime);
     }
 
-    private function rollback_media_replacement_intermediate_metadata(array $row)
+    private function rollback_media_replacement_intermediate_metadata(array $row, $restore_destination_backup = true)
     {
         $item_id       = isset($row['id']) ? absint($row['id']) : 0;
         $attachment_id = isset($row['attachment_id']) ? absint($row['attachment_id']) : 0;
@@ -1336,9 +1349,20 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         }
 
         $current_entry = $current_metadata['sizes'][$size_name];
-        $current_metadata['sizes'][$size_name] = $plan['old_size_entry'];
-        wp_update_attachment_metadata($attachment_id, $current_metadata);
-        clean_post_cache($attachment_id);
+        $new_size_entry = isset($plan['new_size_entry']) && is_array($plan['new_size_entry']) ? $plan['new_size_entry'] : array();
+        if ($this->media_replacement_metadata_values_match($current_entry, $plan['old_size_entry'])) {
+            $already_restored = true;
+        } elseif (!empty($new_size_entry) && $this->media_replacement_metadata_values_match($current_entry, $new_size_entry)) {
+            $already_restored = false;
+        } else {
+            return array('restored' => false, 'message' => __('Current intermediate attachment metadata changed after UltraCache applied the prepared replacement, so the newer metadata was preserved.', 'ultracache'));
+        }
+
+        if (!$already_restored) {
+            $current_metadata['sizes'][$size_name] = $plan['old_size_entry'];
+            wp_update_attachment_metadata($attachment_id, $current_metadata);
+            clean_post_cache($attachment_id);
+        }
 
         if (!$this->verify_media_replacement_intermediate_metadata_restore($attachment_id, $size_name, $plan['old_size_entry'])) {
             $current_metadata['sizes'][$size_name] = $current_entry;
@@ -1347,9 +1371,11 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
             return array('restored' => false, 'message' => __('Intermediate attachment metadata rollback did not verify and the current replacement state was restored.', 'ultracache'));
         }
 
-        $backup_restore = $this->restore_media_replacement_destination_backup($row);
-        if (empty($backup_restore['restored'])) {
-            return array('restored' => false, 'message' => (string) ($backup_restore['message'] ?? __('The overwritten destination backup could not be restored.', 'ultracache')));
+        if ($restore_destination_backup) {
+            $backup_restore = $this->restore_media_replacement_destination_backup($row);
+            if (empty($backup_restore['restored'])) {
+                return array('restored' => false, 'message' => (string) ($backup_restore['message'] ?? __('The overwritten destination backup could not be restored.', 'ultracache')));
+            }
         }
 
         $plan['metadata_update_pending']    = false;
@@ -1374,10 +1400,10 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
     }
 
 
-    private function rollback_media_replacement_item_metadata(array $row)
+    private function rollback_media_replacement_item_metadata(array $row, $restore_destination_backup = true)
     {
         if ($this->is_media_replacement_intermediate_item_row($row)) {
-            return $this->rollback_media_replacement_intermediate_metadata($row);
+            return $this->rollback_media_replacement_intermediate_metadata($row, $restore_destination_backup);
         }
 
         $item_id       = isset($row['id']) ? absint($row['id']) : 0;
@@ -1401,6 +1427,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $old_mime          = isset($plan['old_post_mime_type']) ? sanitize_mime_type((string) $plan['old_post_mime_type']) : (isset($row['old_mime']) ? sanitize_mime_type((string) $row['old_mime']) : '');
         $planned_mime      = isset($plan['new_post_mime_type']) ? sanitize_mime_type((string) $plan['new_post_mime_type']) : $new_mime;
         $old_metadata      = isset($plan['old_metadata']) && is_array($plan['old_metadata']) ? $plan['old_metadata'] : array();
+        $planned_metadata  = isset($plan['planned_metadata']) && is_array($plan['planned_metadata']) ? $plan['planned_metadata'] : array();
 
         if ('' === $old_attached_file || '' === $old_mime || '' === $new_attached_file || '' === $planned_mime || $new_attached_file !== $new_relative || $planned_mime !== $new_mime) {
             return array('restored' => false, 'message' => __('Replacement metadata rollback plan does not match the copied replacement file.', 'ultracache'));
@@ -1416,12 +1443,15 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
         $current_metadata      = is_array($current_metadata) ? $current_metadata : array();
 
         if ($current_attached_file === $old_attached_file && $current_mime === $old_mime) {
-            if (!$this->verify_media_replacement_attachment_metadata_restore($attachment_id, $old_attached_file, $old_mime, $old_metadata)) {
-                $this->restore_media_replacement_attachment_metadata($attachment_id, $old_attached_file, $old_mime, $old_metadata);
+            if (!$this->media_replacement_metadata_values_match($current_metadata, $old_metadata)) {
+                return array('restored' => false, 'message' => __('Attachment metadata changed independently after it returned to the original file, so the newer metadata was preserved.', 'ultracache'));
             }
         } else {
-            if ($current_attached_file !== $new_attached_file) {
-                return array('restored' => false, 'message' => __('Current attachment file no longer matches the replacement metadata state, so rollback was not applied.', 'ultracache'));
+            if ($current_attached_file !== $new_attached_file || $current_mime !== $planned_mime) {
+                return array('restored' => false, 'message' => __('Current attachment state no longer matches the prepared replacement state, so rollback was not applied.', 'ultracache'));
+            }
+            if (!empty($planned_metadata) && !$this->media_replacement_metadata_values_match($current_metadata, $planned_metadata)) {
+                return array('restored' => false, 'message' => __('Attachment metadata changed independently after UltraCache applied the prepared replacement, so the newer metadata was preserved.', 'ultracache'));
             }
 
             $this->restore_media_replacement_attachment_metadata($attachment_id, $old_attached_file, $old_mime, $old_metadata);
@@ -1432,9 +1462,11 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
             return array('restored' => false, 'message' => __('Attachment metadata rollback did not verify and the current replacement state was restored.', 'ultracache'));
         }
 
-        $backup_restore = $this->restore_media_replacement_destination_backup($row);
-        if (empty($backup_restore['restored'])) {
-            return array('restored' => false, 'message' => (string) ($backup_restore['message'] ?? __('The overwritten destination backup could not be restored.', 'ultracache')));
+        if ($restore_destination_backup) {
+            $backup_restore = $this->restore_media_replacement_destination_backup($row);
+            if (empty($backup_restore['restored'])) {
+                return array('restored' => false, 'message' => (string) ($backup_restore['message'] ?? __('The overwritten destination backup could not be restored.', 'ultracache')));
+            }
         }
 
         $plan['metadata_update_pending']   = false;
@@ -1472,20 +1504,21 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
             return $this->build_media_replacement_empty_registry_response(__('No Media Library replacement registry rows are available for metadata rollback. Restore the database backup, then run Restart Replacement Plan again.', 'ultracache'));
         }
 
-        $database_summary = $this->get_media_replacement_database_preview_summary();
+        $database_summary = $this->get_media_replacement_database_rollback_summary();
         if (!empty($database_summary)) {
-            $total_refs    = isset($database_summary['totalRefs']) ? max(0, (int) $database_summary['totalRefs']) : 0;
-            $restored_refs = isset($database_summary['restoredRefs']) ? max(0, (int) $database_summary['restoredRefs']) : 0;
-            if ($total_refs > 0 && $restored_refs < $total_refs) {
+            $pending_rollback = max(0, (int) ($database_summary['pendingRollback'] ?? 0));
+            $rollback_failed  = max(0, (int) ($database_summary['rollbackFailedRefs'] ?? 0));
+            if ($pending_rollback > 0 || $rollback_failed > 0) {
                 return array(
                     'success' => false,
-                    'message' => __('Rollback DB Replacements first. Attachment metadata rollback is blocked while database references still point to replacement files.', 'ultracache'),
+                    'message' => __('Roll back the applied database references first. Attachment metadata rollback is blocked while replacement references still require restore.', 'ultracache'),
                     'status'  => 'metadata_rollback_blocked',
                 );
             }
         }
 
         $args = is_array($args) ? $args : array();
+        $restore_destination_backups = !array_key_exists('restore_destination_backups', $args) || !empty($args['restore_destination_backups']);
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
         $rows  = $this->get_media_replacement_metadata_rollback_rows($limit);
@@ -1495,7 +1528,7 @@ trait Ultra_Cache_Media_Replacement_Metadata_Trait
 
         foreach ($rows as $row) {
             $item_id = isset($row['id']) ? absint($row['id']) : 0;
-            $result  = $this->rollback_media_replacement_item_metadata($row);
+            $result  = $this->rollback_media_replacement_item_metadata($row, $restore_destination_backups);
             if (!empty($result['restored'])) {
                 $restored++;
             } else {

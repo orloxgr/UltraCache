@@ -43,6 +43,65 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
     }
 
     /**
+     * Resolve the stable public origin for one trusted Varnish cache host.
+     *
+     * Language-domain control must preserve the language host while avoiding a
+     * request-filtered home_url() scheme. Configured home and provider language-home
+     * URLs are the authoritative runtime control topology.
+     *
+     * @param string $host Public host.
+     * @return string
+     */
+    private static function get_varnish_public_origin_for_host($host)
+    {
+        $host = strtolower(rtrim(trim((string) $host), '.'));
+        if ('' === $host) {
+            return '';
+        }
+
+        $candidates = array();
+        if (function_exists('ultracache_get_public_site_topology')) {
+            $topology = ultracache_get_public_site_topology();
+            if (!empty($topology['configuredBase'])) {
+                $candidates[] = (string) $topology['configuredBase'];
+            }
+            foreach ((array) ($topology['multilingualLanguageHomeUrls'] ?? array()) as $language_url) {
+                $candidates[] = (string) $language_url;
+            }
+        }
+        if (empty($candidates) && function_exists('ultracache_get_configured_site_origin')) {
+            $candidates[] = (string) ultracache_get_configured_site_origin();
+        }
+
+        foreach ($candidates as $candidate) {
+            $parts = wp_parse_url($candidate);
+            if (!is_array($parts)) {
+                continue;
+            }
+            $candidate_host = strtolower(rtrim((string) ($parts['host'] ?? ''), '.'));
+            $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+            if ($candidate_host !== $host || !in_array($scheme, array('http', 'https'), true)) {
+                continue;
+            }
+            $origin = $scheme . '://' . $candidate_host;
+            if (!empty($parts['port'])) {
+                $origin .= ':' . (int) $parts['port'];
+            }
+            return $origin;
+        }
+
+        $stable_origin = function_exists('ultracache_get_configured_site_origin')
+            ? (string) ultracache_get_configured_site_origin()
+            : '';
+        $scheme = strtolower((string) wp_parse_url($stable_origin, PHP_URL_SCHEME));
+        if (!in_array($scheme, array('http', 'https'), true)) {
+            return '';
+        }
+        return $scheme . '://' . $host;
+    }
+
+
+    /**
      * Classify one public Varnish response from portable HTTP evidence.
      *
      * This parser is runtime transport code. It is used to summarize actual
@@ -193,22 +252,13 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 if (is_array($parts) && !empty($parts['query'])) {
                     $path .= '?' . (string) $parts['query'];
                 }
-                $home = wp_parse_url(home_url('/'));
-                $scheme = is_array($home) && !empty($home['scheme']) ? strtolower((string) $home['scheme']) : 'https';
-                $public_host = (string) $host_header;
-                $home_host = is_array($home) && !empty($home['host']) ? strtolower(rtrim((string) $home['host'], '.')) : '';
-                if (
-                    '' !== $home_host
-                    && strtolower(rtrim($public_host, '.')) === $home_host
-                    && false === strpos($public_host, ':')
-                ) {
-                    $home_port = absint($home['port'] ?? 0);
-                    $default_port = 'https' === $scheme ? 443 : 80;
-                    if ($home_port > 0 && $home_port !== $default_port) {
-                        $public_host .= ':' . $home_port;
-                    }
+                $public_origin = self::get_varnish_public_origin_for_host((string) $host_header);
+                if ('' === $public_origin) {
+                    $public_origin = function_exists('ultracache_get_configured_site_origin')
+                        ? (string) ultracache_get_configured_site_origin()
+                        : '';
                 }
-                $public_url = $scheme . '://' . $public_host . $path;
+                $public_url = rtrim($public_origin, '/') . $path;
                 $contract_result = self::send_varnish_http_contract_exact_purge(
                     $endpoint_label,
                     $public_url,
@@ -508,42 +558,97 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             return array('ok' => false, 'detail' => self::sanitize_varnish_string($detail));
         }
 
-        private static function send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr)
+        private static function send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr, $max_attempts = 1)
         {
             $expr = self::build_varnish_object_metadata_expression($expr);
             if ('' === $expr) {
                 return array('ok' => false, 'connectionAccepted' => false, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string('Invalid or unsupported Varnish BAN expression.'));
             }
 
-            $connection = self::open_authenticated_varnish_admin_connection($host, $port, $secret, $timeout_s);
-            if (empty($connection['ok']) || !is_resource($connection['fp'] ?? null)) {
-                return array('ok' => false, 'connectionAccepted' => false, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string((string) ($connection['detail'] ?? 'Admin connection failed.')));
+            $max_attempts = max(1, min(3, absint($max_attempts)));
+            $last_response = array('ok' => false, 'connectionAccepted' => false, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string('Admin connection failed.'), 'code' => 0);
+
+            for ($attempt = 1; $attempt <= $max_attempts; ++$attempt) {
+                $connection = self::open_authenticated_varnish_admin_connection($host, $port, $secret, $timeout_s);
+                if (empty($connection['ok']) || !is_resource($connection['fp'] ?? null)) {
+                    $last_response = array(
+                        'ok' => false,
+                        'connectionAccepted' => false,
+                        'commandAccepted' => false,
+                        'detail' => self::sanitize_varnish_string((string) ($connection['detail'] ?? 'Admin connection failed.')),
+                        'code' => 0,
+                    );
+                } else {
+                    $fp = $connection['fp'];
+                    if (!self::write_varnish_admin_command($fp, 'ban ' . $expr . "\n")) {
+                        fclose($fp);
+                        $last_response = array(
+                            'ok' => false,
+                            'connectionAccepted' => true,
+                            'commandAccepted' => false,
+                            'detail' => self::sanitize_varnish_string('Could not write Varnish BAN command.'),
+                            'code' => 0,
+                        );
+                    } else {
+                        $resp = self::read_varnish_admin_response($fp);
+                        fclose($fp);
+
+                        if (empty($resp['ok'])) {
+                            $last_response = array(
+                                'ok' => false,
+                                'connectionAccepted' => true,
+                                'commandAccepted' => false,
+                                'detail' => self::sanitize_varnish_string((string) ($resp['body'] ?? 'No admin response.')),
+                                'code' => 0,
+                            );
+                        } else {
+                            $code = (int) $resp['code'];
+                            $accepted = in_array($code, array(200, 201), true);
+                            $detail = 'Admin ' . $code;
+                            if (!empty($resp['body'])) {
+                                $detail .= ' · ' . self::summarize_varnish_http_body($resp['body']);
+                            }
+
+                            $last_response = array(
+                                'ok' => $accepted,
+                                'connectionAccepted' => true,
+                                'commandAccepted' => $accepted,
+                                'detail' => self::sanitize_varnish_string($detail),
+                                'code' => $code,
+                            );
+                        }
+                    }
+                }
+
+                $last_response['attemptCount'] = $attempt;
+                if (!empty($last_response['ok']) || !self::is_varnish_admin_ban_retryable($last_response) || $attempt >= $max_attempts) {
+                    if ($attempt > 1) {
+                        $last_response['detail'] = self::sanitize_varnish_string(
+                            (string) ($last_response['detail'] ?? '') . ' · attempt ' . $attempt . '/' . $max_attempts
+                        );
+                    }
+                    return $last_response;
+                }
+
+                usleep(200000);
             }
 
-            $fp = $connection['fp'];
-            if (!self::write_varnish_admin_command($fp, 'ban ' . $expr . "\n")) {
-                fclose($fp);
-                return array('ok' => false, 'connectionAccepted' => true, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string('Could not write Varnish BAN command.'));
-            }
-            $resp = self::read_varnish_admin_response($fp);
-            fclose($fp);
+            return $last_response;
+        }
 
-            if (empty($resp['ok'])) {
-                return array('ok' => false, 'connectionAccepted' => true, 'commandAccepted' => false, 'detail' => self::sanitize_varnish_string((string) ($resp['body'] ?? 'No admin response.')));
+        private static function is_varnish_admin_ban_retryable(array $response)
+        {
+            if (!empty($response['ok']) || absint($response['code'] ?? 0) > 0) {
+                return false;
             }
 
-            $detail = 'Admin ' . (int) $resp['code'];
-            if (!empty($resp['body'])) {
-                $detail .= ' · ' . self::summarize_varnish_http_body($resp['body']);
+            $detail = strtolower((string) ($response['detail'] ?? ''));
+            if (preg_match('/\b(?:auth(?:entication)?|secret|challenge|permission denied|access denied|unauthorized|forbidden|invalid|unsupported|blocked)\b/i', $detail)
+                || preg_match('/\bAdmin\s+[1-9]\d{2}\b/i', $detail)) {
+                return false;
             }
 
-            return array(
-                'ok' => (200 === (int) $resp['code']),
-                'connectionAccepted' => true,
-                'commandAccepted' => (200 === (int) $resp['code']),
-                'detail' => self::sanitize_varnish_string($detail),
-                'code' => (int) $resp['code'],
-            );
+            return true;
         }
 
         private static function send_varnish_admin_ban_list($host, $port, $secret, $timeout_s)
@@ -576,7 +681,7 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
 
         // phpcs:enable WordPress.WP.AlternativeFunctions.file_system_operations_fread,WordPress.WP.AlternativeFunctions.file_system_operations_fsockopen,WordPress.WP.AlternativeFunctions.file_system_operations_fclose,WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
 
-        private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method, $diagnostic_probe = false)
+        private static function varnish_command_for_expr($terminal, $secret, $timeout_s, $expr, $method, $diagnostic_probe = false, $admin_max_attempts = 1, $public_host = '')
         {
             $settings = self::get_varnish_cli_settings();
             if ($diagnostic_probe) {
@@ -629,7 +734,7 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
             if ('admin' === ($settings['mode'] ?? 'http')) {
                 list($host, $port) = self::parse_varnish_terminal($terminal);
                 $started_at = microtime(true);
-                $response = self::send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr);
+                $response = self::send_varnish_admin_ban($host, $port, $secret, $timeout_s, $expr, $admin_max_attempts);
                 self::record_varnish_endpoint_result(
                     $terminal,
                     'admin',
@@ -656,7 +761,7 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
 
             $contract_profile = self::get_varnish_http_contract_runtime_profile($terminal, $settings);
             if (!empty($contract_profile) || $diagnostic_probe) {
-                $response = self::send_varnish_http_contract_ban($terminal, $timeout_s, $expr, $settings, (bool) $diagnostic_probe);
+                $response = self::send_varnish_http_contract_ban($terminal, $timeout_s, $expr, $settings, (bool) $diagnostic_probe, $public_host);
                 if (!empty($response['ok'])) {
                     return $response;
                 }
@@ -668,8 +773,14 @@ trait Ultra_Cache_WP_Varnish_Transport_Trait
                 }
             }
 
-            $home = wp_parse_url(home_url('/'));
-            $site_host = !empty($home['host']) ? (string) $home['host'] : $endpoint['host'];
+            $site_host = trim((string) $public_host);
+            if ('' === $site_host) {
+                $stable_origin = function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : home_url('/');
+                $site_host = (string) wp_parse_url($stable_origin, PHP_URL_HOST);
+            }
+            if ('' === $site_host) {
+                $site_host = (string) $endpoint['host'];
+            }
             $target_url = self::build_varnish_target_url($endpoint, '/');
 
             $response = self::send_varnish_http_request($endpoint, $target_url, $site_host, $timeout_s, $expr, $method);

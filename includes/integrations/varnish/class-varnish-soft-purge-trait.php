@@ -96,7 +96,7 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
                         $soft_status,
                         $soft_message,
                         $soft_tested_at,
-                        !empty($endpoint_capability['softPurge']) ? $tested_at + WEEK_IN_SECONDS : 0
+                        0
                     ),
                     $settings
                 );
@@ -112,7 +112,7 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
                         !empty($endpoint_capability['originRevalidation']) ? 'behavior-verified' : $origin_status,
                         $origin_message,
                         $origin_tested_at,
-                        !empty($endpoint_capability['originRevalidation']) ? $tested_at + WEEK_IN_SECONDS : 0
+                        0
                     ),
                     $settings
                 );
@@ -128,7 +128,7 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
                         !empty($endpoint_capability['swr']) ? 'behavior-verified' : $swr_status,
                         $swr_message,
                         $swr_tested_at,
-                        !empty($endpoint_capability['swr']) ? $tested_at + WEEK_IN_SECONDS : 0
+                        0
                     ),
                     $settings
                 );
@@ -157,20 +157,10 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
                 $swr_effective_tested_at = $swr_tested_at > 0
                     ? $swr_tested_at
                     : absint($current['swrTestedAt'] ?? 0);
-                $soft_proof_expires_at = $soft_tested_at > 0
-                    ? ($soft_verified ? $tested_at + WEEK_IN_SECONDS : 0)
-                    : absint($current['softPurgeBehaviorProofExpiresAt'] ?? ($current['softPurgeProofExpiresAt'] ?? 0));
-                $origin_proof_expires_at = $origin_tested_at > 0
-                    ? ($origin_verified ? $tested_at + WEEK_IN_SECONDS : 0)
-                    : absint($current['originRevalidationProofExpiresAt'] ?? ($current['softPurgeProofExpiresAt'] ?? 0));
-                $swr_proof_expires_at = $swr_tested_at > 0
-                    ? ($swr_verified ? $tested_at + WEEK_IN_SECONDS : 0)
-                    : absint($current['swrProofExpiresAt'] ?? ($current['softPurgeProofExpiresAt'] ?? 0));
-                $soft_purge_expiries = array_filter(array(
-                    $soft_proof_expires_at,
-                    $origin_proof_expires_at,
-                    $swr_proof_expires_at,
-                ));
+                $soft_proof_expires_at = 0;
+                $origin_proof_expires_at = 0;
+                $swr_proof_expires_at = 0;
+                $soft_purge_expiries = array();
                 $proof_verified = $soft_verified && $origin_verified && $swr_verified;
                 $any_behavior_verified = $soft_verified || $origin_verified || $swr_verified;
                 $changes = array(
@@ -274,8 +264,6 @@ trait Ultra_Cache_WP_Varnish_Soft_Purge_Trait
             $message = self::maybe_translate('Every configured HTTP Varnish endpoint has current soft-purge, origin-revalidation, and stale-refresh proof.');
         } elseif (empty($diagnostic['configurationChanged']) && '' !== (string) ($diagnostic['message'] ?? '')) {
             $message = self::sanitize_varnish_string((string) $diagnostic['message']);
-        } elseif ('proof-expired' === $status) {
-            $message = self::maybe_translate('The soft-purge behavior proof has expired and must be verified again.');
         } elseif ('configuration-changed' === $status) {
             $message = self::maybe_translate('The soft-purge contract changed and must be verified again.');
         } else {

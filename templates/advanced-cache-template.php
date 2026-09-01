@@ -61,7 +61,8 @@ function ultracache_advanced_cache_query_policy_hard_blocked_defaults() {
         'security', 'token', 'ultracache_bucket', 'ultracache_callback_profile',
         'ultracache_probe_compression', 'ultracache_profile_bypass', 'ultracache_profile_run',
         'ultracache_revalidate', 'ultracache_rt', 'ultracache_runtime_js_scan',
-        'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_nonce', 'ultracache_rv',
+        'ultracache_runtime_js_scan_id', 'ultracache_runtime_js_scan_token', 'ultracache_runtime_js_scan_nonce',
+        'ultracache_runtime_js_scan_mode', 'ultracache_runtime_js_scan_context', 'ultracache_rv',
         'ultracache_sqlite_exposure_probe', 'ultracache_store_profile',
         'ultracache_store_profile_verbose', 'ultracache_store_profile_verbose_settings',
         'ultracache_varnish_canary',
@@ -107,6 +108,50 @@ function ultracache_advanced_cache_normalize_query_cache_policy($policy, $fallba
         (array) ($fallback['excluded_query_args'] ?? array())
     );
     return ultracache_advanced_cache_build_query_cache_policy($enabled, $allowlist, $excluded);
+}
+
+function ultracache_advanced_cache_normalize_wpml_parameter_cache_contract($contract) {
+    $contract = is_array($contract) ? $contract : array();
+    $languages = array();
+    foreach ((array) ($contract['languages'] ?? array()) as $language_code) {
+        if (is_array($language_code) || is_object($language_code)) {
+            continue;
+        }
+        $language_code = strtolower(trim((string) $language_code));
+        if ('' !== $language_code && 1 === preg_match('/^[a-z0-9_-]+$/', $language_code)) {
+            $languages[$language_code] = true;
+        }
+    }
+    $languages = array_keys($languages);
+    sort($languages, SORT_STRING);
+
+    $default_language = strtolower(trim((string) ($contract['default_language'] ?? '')));
+    if ('' === $default_language || 1 !== preg_match('/^[a-z0-9_-]+$/', $default_language) || !in_array($default_language, $languages, true)) {
+        $default_language = '';
+    }
+
+    $query_key = strtolower(trim((string) ($contract['query_key'] ?? 'lang')));
+    if ('lang' !== $query_key) {
+        $query_key = 'lang';
+    }
+
+    $enabled = !empty($contract['enabled']) && !empty($languages);
+    $fingerprint_material = implode("\n", array(
+        'ultracache-wpml-parameter-cache-v1',
+        $enabled ? '1' : '0',
+        $query_key,
+        implode(',', $languages),
+        $default_language,
+    ));
+
+    return array(
+        'version' => 1,
+        'enabled' => $enabled,
+        'query_key' => $query_key,
+        'languages' => $languages,
+        'default_language' => $default_language,
+        'fingerprint' => hash('sha256', $fingerprint_material),
+    );
 }
 
 function ultracache_advanced_cache_build_litespeed_query_cache_key_proof($policy = array()) {
@@ -577,6 +622,49 @@ function ultracache_advanced_cache_get_esi_metadata($cache_file, $base_dir) {
     );
 }
 
+function ultracache_advanced_cache_get_litespeed_esi_metadata($cache_file, $base_dir) {
+    $cache_file = is_string($cache_file) ? trim($cache_file) : '';
+    $base_dir = is_string($base_dir) ? trim($base_dir) : '';
+    if (
+        '' === $cache_file ||
+        '' === $base_dir ||
+        !ultracache_advanced_cache_is_valid_cache_payload_file($cache_file, $base_dir)
+    ) {
+        return array();
+    }
+
+    $marker = $cache_file . '.lsesi';
+    if (
+        !ultracache_advanced_cache_is_cache_path($marker, $base_dir, true) ||
+        1 !== preg_match('/\Aindex-(?:orig|avif|webp)-[a-f0-9]{32}\.html\.lsesi\z/', basename($marker)) ||
+        !is_readable($marker)
+    ) {
+        return array();
+    }
+
+    $size = filesize($marker);
+    if (!is_int($size) || $size <= 0 || $size > 1024) {
+        return array();
+    }
+
+    $raw = ultracache_advanced_cache_safe_file_get_contents($marker);
+    $metadata = is_string($raw) ? json_decode($raw, true) : null;
+    if (!is_array($metadata) || 1 !== (int) ($metadata['version'] ?? 0)) {
+        return array();
+    }
+
+    $fragment_count = max(0, min(64, (int) ($metadata['fragmentCount'] ?? 0)));
+    if ($fragment_count <= 0) {
+        return array();
+    }
+
+    return array(
+        'version' => 1,
+        'fragmentCount' => $fragment_count,
+        'woocommerceMiniCart' => !empty($metadata['woocommerceMiniCart']),
+    );
+}
+
 function ultracache_advanced_cache_create_runtime_control_token($secret, $issued_at = null) {
     $secret = is_string($secret) ? trim($secret) : '';
     if ('' === $secret) {
@@ -773,9 +861,6 @@ foreach (array_keys((array) ($_COOKIE ?? array())) as $cookie_name) {
         'wordpress_sec_',
         'comment_author_',
         'wp-postpass_',
-        'woocommerce_items_in_cart',
-        'woocommerce_cart_hash',
-        'wp_woocommerce_session_',
     ) as $needle) {
         if (false !== strpos((string) $cookie_name, $needle)) {
             return;
@@ -785,9 +870,6 @@ foreach (array_keys((array) ($_COOKIE ?? array())) as $cookie_name) {
 
 $runtime_config = array(
     'excluded_paths' => array(
-        '/cart/',
-        '/checkout/',
-        '/my-account/',
         '/wp-admin/',
         '/wp-login.php',
         '/wc-api/',
@@ -820,13 +902,17 @@ $runtime_config = array(
         'ultracache_profile_run',
         'ultracache_runtime_js_scan',
         'ultracache_runtime_js_scan_id',
+        'ultracache_runtime_js_scan_token',
         'ultracache_runtime_js_scan_nonce',
+        'ultracache_runtime_js_scan_mode',
+        'ultracache_runtime_js_scan_context',
         'ultracache_probe_compression',
         'ultracache_sqlite_exposure_probe',
     ),
     'cache_query_strings'            => false,
     'cache_query_allowlist'          => array(),
     'query_cache_policy'             => ultracache_advanced_cache_build_query_cache_policy(false, array(), array()),
+    'wpml_parameter_cache'            => ultracache_advanced_cache_normalize_wpml_parameter_cache_contract(array()),
     'litespeed_query_cache_key_proof' => ultracache_advanced_cache_build_litespeed_query_cache_key_proof(ultracache_advanced_cache_build_query_cache_policy(false, array(), array())),
     'cache_safe_tracking_cookies'    => true,
     'safe_tracking_cookie_patterns'  => array(),
@@ -840,6 +926,12 @@ $runtime_config = array(
         'wp_woocommerce_session_',
     ),
     'woo_safe_mode'                  => false,
+    'woocommerce_contract_active'    => false,
+    'woocommerce_contract_available' => false,
+    'woocommerce_contract_fingerprint' => '',
+    'woocommerce_dynamic_paths'      => array(),
+    'woocommerce_dynamic_query_rules' => array(),
+    'woocommerce_dynamic_query_keys' => array(),
     'cache_stats_enabled'            => false,
     'debug_headers_enabled'          => false,
     'shared_cache_delivery_enabled'  => false,
@@ -853,6 +945,7 @@ $runtime_config = array(
     'varnish_stale_while_revalidate_seconds' => 0,
     'litespeed_enabled'               => false,
     'litespeed_site_tag'              => '',
+    'configured_site_base'           => '',
     'home_url'                       => '',
     'html_vary_accept'               => false,
     'html_variant_buckets'           => array('orig'),
@@ -918,17 +1011,52 @@ $ultracache_normalize_runtime_path_list = static function ($value) use ($ultraca
             $path_rule = substr($path_rule, 0, -1);
         }
         $path_rule = $ultracache_normalize_runtime_path($path_rule);
-        if ('/' === $path_rule) {
-            continue;
-        }
-        $paths[$path_rule . ($wildcard ? '*' : '')] = true;
+        $paths[$path_rule . ($wildcard && '/' !== $path_rule ? '*' : '')] = true;
     }
 
     $paths = array_keys($paths);
     sort($paths);
     return $paths;
 };
-$ultracache_normalize_runtime_config = static function ($config) use ($runtime_config, $ultracache_normalize_runtime_string_list, $ultracache_normalize_runtime_path_list) {
+$ultracache_normalize_woocommerce_query_rules = static function ($rules) use ($ultracache_normalize_runtime_path) {
+    $normalized = array();
+    foreach ((array) $rules as $rule) {
+        if (!is_array($rule) || empty($rule['query']) || !is_array($rule['query'])) {
+            continue;
+        }
+
+        $path = $ultracache_normalize_runtime_path($rule['path'] ?? '/');
+        $query = array();
+        $valid = true;
+        foreach ($rule['query'] as $key => $value) {
+            if (is_array($value) || is_object($value)) {
+                $valid = false;
+                break;
+            }
+            $key = strtolower((string) $key);
+            $key = preg_replace('/[^a-z0-9_-]/', '', $key);
+            if (!is_string($key) || '' === $key) {
+                $valid = false;
+                break;
+            }
+            $query[$key] = (string) $value;
+        }
+        if (!$valid || empty($query)) {
+            continue;
+        }
+        ksort($query);
+        $encoded = json_encode(array('path' => $path, 'query' => $query));
+        $fingerprint = hash('sha256', is_string($encoded) ? $encoded : serialize($query));
+        $normalized[$fingerprint] = array('path' => $path, 'query' => $query);
+    }
+
+    $normalized = array_values($normalized);
+    usort($normalized, static function ($a, $b) {
+        return strcmp((string) json_encode($a), (string) json_encode($b));
+    });
+    return $normalized;
+};
+$ultracache_normalize_runtime_config = static function ($config) use ($runtime_config, $ultracache_normalize_runtime_string_list, $ultracache_normalize_runtime_path_list, $ultracache_normalize_woocommerce_query_rules) {
     $config = is_array($config) ? $config : array();
 
     $excluded_query_args = $ultracache_normalize_runtime_string_list($config['excluded_query_args'] ?? $runtime_config['excluded_query_args'], '/[^a-z0-9_-]/');
@@ -941,6 +1069,9 @@ $ultracache_normalize_runtime_config = static function ($config) use ($runtime_c
         )
     );
     $cache_query_allowlist = (array) ($query_cache_policy['allowlist'] ?? array());
+    $wpml_parameter_cache = ultracache_advanced_cache_normalize_wpml_parameter_cache_contract(
+        $config['wpml_parameter_cache'] ?? ($runtime_config['wpml_parameter_cache'] ?? array())
+    );
     $litespeed_query_cache_key_proof = ultracache_advanced_cache_build_litespeed_query_cache_key_proof($query_cache_policy);
     $fresh_ttl_minutes = isset($config['cache_fresh_ttl_minutes']) ? (int) $config['cache_fresh_ttl_minutes'] : (int) $runtime_config['cache_fresh_ttl_minutes'];
     $fresh_ttl_minutes = max(1, min(525600, $fresh_ttl_minutes));
@@ -961,11 +1092,18 @@ $ultracache_normalize_runtime_config = static function ($config) use ($runtime_c
         'cache_query_strings'            => !empty($query_cache_policy['enabled']),
         'cache_query_allowlist'          => $cache_query_allowlist,
         'query_cache_policy'             => $query_cache_policy,
+        'wpml_parameter_cache'            => $wpml_parameter_cache,
         'litespeed_query_cache_key_proof' => $litespeed_query_cache_key_proof,
         'cache_safe_tracking_cookies'    => array_key_exists('cache_safe_tracking_cookies', (array) $config) ? !empty($config['cache_safe_tracking_cookies']) : !empty($runtime_config['cache_safe_tracking_cookies']),
         'safe_tracking_cookie_patterns'  => $ultracache_normalize_runtime_string_list($config['safe_tracking_cookie_patterns'] ?? $runtime_config['safe_tracking_cookie_patterns'], '/[^a-z0-9_\-.\*]/'),
         'unsafe_cache_cookie_patterns'   => $ultracache_normalize_runtime_string_list($config['unsafe_cache_cookie_patterns'] ?? $runtime_config['unsafe_cache_cookie_patterns'], '/[^a-z0-9_\-.\*]/'),
         'woo_safe_mode'                  => !empty($config['woo_safe_mode']),
+        'woocommerce_contract_active'    => !empty($config['woocommerce_contract_active']),
+        'woocommerce_contract_available' => !empty($config['woocommerce_contract_available']),
+        'woocommerce_contract_fingerprint' => isset($config['woocommerce_contract_fingerprint']) && 1 === preg_match('/\A[a-f0-9]{64}\z/', (string) $config['woocommerce_contract_fingerprint']) ? (string) $config['woocommerce_contract_fingerprint'] : '',
+        'woocommerce_dynamic_paths'      => $ultracache_normalize_runtime_path_list($config['woocommerce_dynamic_paths'] ?? $runtime_config['woocommerce_dynamic_paths']),
+        'woocommerce_dynamic_query_rules' => $ultracache_normalize_woocommerce_query_rules($config['woocommerce_dynamic_query_rules'] ?? $runtime_config['woocommerce_dynamic_query_rules']),
+        'woocommerce_dynamic_query_keys' => $ultracache_normalize_runtime_string_list($config['woocommerce_dynamic_query_keys'] ?? $runtime_config['woocommerce_dynamic_query_keys'], '/[^a-z0-9_-]/'),
         'cache_stats_enabled'            => !empty($config['cache_stats_enabled']),
         'debug_headers_enabled'          => !empty($config['debug_headers_enabled']),
         'shared_cache_delivery_enabled'  => !empty($config['shared_cache_delivery_enabled']),
@@ -979,6 +1117,7 @@ $ultracache_normalize_runtime_config = static function ($config) use ($runtime_c
         'varnish_stale_while_revalidate_seconds' => max(0, min(86400, isset($config['varnish_stale_while_revalidate_seconds']) ? (int) $config['varnish_stale_while_revalidate_seconds'] : 0)),
         'litespeed_enabled'               => !empty($config['litespeed_enabled']),
         'litespeed_site_tag'              => isset($config['litespeed_site_tag']) && 1 === preg_match('/\Auc_s_[a-f0-9]{20}\z/', (string) $config['litespeed_site_tag']) ? (string) $config['litespeed_site_tag'] : '',
+        'configured_site_base'           => isset($config['configured_site_base']) && is_scalar($config['configured_site_base']) ? trim(preg_replace('/[\x00-\x1F\x7F]/', '', (string) $config['configured_site_base'])) : '',
         'home_url'                       => isset($config['home_url']) && is_scalar($config['home_url']) ? trim(preg_replace('/[\x00-\x1F\x7F]/', '', (string) $config['home_url'])) : '',
         'html_vary_accept'               => !empty($config['html_vary_accept']) && count($html_variant_buckets) > 1,
         'html_variant_buckets'           => $html_variant_buckets,
@@ -1004,6 +1143,9 @@ if (is_array($embedded_runtime_config)) {
     $runtime_config = array_merge($runtime_config, $embedded_runtime_config);
 }
 $runtime_config = $ultracache_normalize_runtime_config($runtime_config);
+if (!empty($runtime_config['woocommerce_contract_active']) && empty($runtime_config['woocommerce_contract_available'])) {
+    return;
+}
 
 $ultracache_runtime_control_secret = ultracache_advanced_cache_runtime_control_secret();
 $ultracache_redis_credentials = ultracache_advanced_cache_redis_credentials();
@@ -1033,8 +1175,24 @@ $ultracache_cookie_name_matches_any_pattern = static function ($cookie_name, $pa
     return false;
 };
 
+$ultracache_is_woocommerce_session_cookie_name = static function ($cookie_name) {
+    $cookie_name = strtolower(trim((string) $cookie_name));
+    if ('' === $cookie_name) {
+        return false;
+    }
+
+    return in_array($cookie_name, array('woocommerce_items_in_cart', 'woocommerce_cart_hash'), true)
+        || 0 === strpos($cookie_name, 'wp_woocommerce_session_');
+};
+
+$ultracache_has_woocommerce_session_cookie = false;
 foreach (array_keys((array) ($_COOKIE ?? array())) as $cookie_name) {
     $cookie_name = ultracache_advanced_cache_clean_server_text($cookie_name);
+    if ($ultracache_is_woocommerce_session_cookie_name($cookie_name)) {
+        $ultracache_has_woocommerce_session_cookie = true;
+        continue;
+    }
+
     if ($ultracache_cookie_name_matches_any_pattern($cookie_name, $runtime_config['unsafe_cache_cookie_patterns'] ?? array())) {
         return;
     }
@@ -1093,7 +1251,10 @@ if (!empty($ultracache_initial_query_vars) && is_array($ultracache_initial_query
         'ultracache_profile_run' => true,
         'ultracache_runtime_js_scan' => true,
         'ultracache_runtime_js_scan_id' => true,
+        'ultracache_runtime_js_scan_token' => true,
         'ultracache_runtime_js_scan_nonce' => true,
+        'ultracache_runtime_js_scan_mode' => true,
+        'ultracache_runtime_js_scan_context' => true,
     );
     foreach (array_keys($ultracache_initial_query_vars) as $ultracache_initial_query_key) {
         $ultracache_initial_query_key = preg_replace('/[^a-z0-9_-]/', '', strtolower((string) $ultracache_initial_query_key));
@@ -1491,7 +1652,7 @@ $ultracache_try_acquire_revalidate_lock = static function ($lock_file, $max_stal
 
     return false;
 };
-$ultracache_queue_revalidate = static function ($target_url, $secret, $home_url) {
+$ultracache_queue_revalidate = static function ($target_url, $secret, $configured_site_base) {
     $secret = (string) $secret;
     if ('' === $target_url || '' === $secret) {
         return false;
@@ -1511,7 +1672,7 @@ $ultracache_queue_revalidate = static function ($target_url, $secret, $home_url)
     // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- The advanced-cache drop-in loads before wp_parse_url() is available.
     $parts = parse_url($request_url);
     // phpcs:ignore WordPress.WP.AlternativeFunctions.parse_url_parse_url -- The advanced-cache drop-in loads before wp_parse_url() is available.
-    $home_parts = parse_url((string) $home_url);
+    $home_parts = parse_url((string) $configured_site_base);
     if (empty($parts['host']) || empty($home_parts['host'])) {
         return false;
     }
@@ -1523,7 +1684,7 @@ $ultracache_queue_revalidate = static function ($target_url, $secret, $home_url)
         return false;
     }
 
-    $signature = hash_hmac('sha256', 'ultracache-varnish-origin-revalidation|' . (string) $home_url, $secret);
+    $signature = hash_hmac('sha256', 'ultracache-varnish-origin-revalidation|' . (string) $configured_site_base, $secret);
     if ('' === $signature) {
         return false;
     }
@@ -1652,6 +1813,138 @@ $ultracache_normalize_query_key = static function ($query_key) {
     return is_string($query_key) ? $query_key : '';
 };
 
+$ultracache_evaluate_query_for_cache = static function ($query_vars, $runtime_config) use ($ultracache_sort_query_value, $ultracache_normalize_query_key) {
+    if (!is_array($query_vars) || empty($query_vars)) {
+        return array(
+            'cacheable' => true,
+            'reason' => '',
+            'rejected_key' => '',
+            'normalized_vars' => array(),
+            'normalized_query' => '',
+            'wpml_parameter_candidate' => false,
+            'wpml_parameter_language' => '',
+        );
+    }
+
+    $query_policy = (array) ($runtime_config['query_cache_policy'] ?? array());
+    $generic_enabled = !empty($query_policy['enabled']);
+    $generic_allowlist = (array) ($query_policy['allowlist'] ?? ($runtime_config['cache_query_allowlist'] ?? array()));
+    $generic_lookup = array();
+    foreach ($generic_allowlist as $allowed_key) {
+        $allowed_key = $ultracache_normalize_query_key($allowed_key);
+        if ('' !== $allowed_key) {
+            $generic_lookup[$allowed_key] = true;
+        }
+    }
+
+    $wpml_contract = ultracache_advanced_cache_normalize_wpml_parameter_cache_contract(
+        $runtime_config['wpml_parameter_cache'] ?? array()
+    );
+    $wpml_enabled = !empty($wpml_contract['enabled']);
+    $wpml_key = $wpml_enabled ? (string) ($wpml_contract['query_key'] ?? 'lang') : '';
+    $wpml_languages = $wpml_enabled ? (array) ($wpml_contract['languages'] ?? array()) : array();
+
+    $normalized = array();
+    $wpml_candidate = false;
+    $wpml_language = '';
+
+    foreach ($query_vars as $query_key => $query_value) {
+        $raw_key = (string) $query_key;
+        $normalized_key = $ultracache_normalize_query_key($raw_key);
+        if ('' === $normalized_key) {
+            return array(
+                'cacheable' => false,
+                'reason' => 'query-arg-not-allowlisted',
+                'rejected_key' => $raw_key,
+                'normalized_vars' => array(),
+                'normalized_query' => '',
+                'wpml_parameter_candidate' => $wpml_candidate,
+                'wpml_parameter_language' => $wpml_language,
+            );
+        }
+
+        if ($wpml_enabled && $raw_key === $wpml_key) {
+            $wpml_candidate = true;
+            if (!is_string($query_value) || !in_array($query_value, $wpml_languages, true)) {
+                return array(
+                    'cacheable' => false,
+                    'reason' => 'wpml-language-invalid',
+                    'rejected_key' => $raw_key,
+                    'normalized_vars' => array(),
+                    'normalized_query' => '',
+                    'wpml_parameter_candidate' => true,
+                    'wpml_parameter_language' => '',
+                );
+            }
+
+            $wpml_language = $query_value;
+            $normalized[$wpml_key] = $query_value;
+            continue;
+        }
+
+        if (!$generic_enabled) {
+            return array(
+                'cacheable' => false,
+                'reason' => 'query-strings-disabled',
+                'rejected_key' => $raw_key,
+                'normalized_vars' => array(),
+                'normalized_query' => '',
+                'wpml_parameter_candidate' => $wpml_candidate,
+                'wpml_parameter_language' => $wpml_language,
+            );
+        }
+
+        if (empty($generic_lookup)) {
+            return array(
+                'cacheable' => false,
+                'reason' => 'query-allowlist-empty',
+                'rejected_key' => $raw_key,
+                'normalized_vars' => array(),
+                'normalized_query' => '',
+                'wpml_parameter_candidate' => $wpml_candidate,
+                'wpml_parameter_language' => $wpml_language,
+            );
+        }
+
+        if (!isset($generic_lookup[$normalized_key])) {
+            return array(
+                'cacheable' => false,
+                'reason' => 'query-arg-not-allowlisted',
+                'rejected_key' => $raw_key,
+                'normalized_vars' => array(),
+                'normalized_query' => '',
+                'wpml_parameter_candidate' => $wpml_candidate,
+                'wpml_parameter_language' => $wpml_language,
+            );
+        }
+
+        $normalized[$normalized_key] = $ultracache_sort_query_value($query_value);
+    }
+
+    if (empty($normalized)) {
+        return array(
+            'cacheable' => false,
+            'reason' => 'invalid-query',
+            'rejected_key' => '',
+            'normalized_vars' => array(),
+            'normalized_query' => '',
+            'wpml_parameter_candidate' => $wpml_candidate,
+            'wpml_parameter_language' => $wpml_language,
+        );
+    }
+
+    ksort($normalized);
+    return array(
+        'cacheable' => true,
+        'reason' => '',
+        'rejected_key' => '',
+        'normalized_vars' => $normalized,
+        'normalized_query' => http_build_query($normalized, '', '&', PHP_QUERY_RFC3986),
+        'wpml_parameter_candidate' => $wpml_candidate,
+        'wpml_parameter_language' => $wpml_language,
+    );
+};
+
 $ultracache_get_first_non_allowlisted_query_key = static function ($query_vars, $allowlist) use ($ultracache_normalize_query_key) {
     if (!is_array($query_vars) || empty($query_vars)) {
         return '';
@@ -1679,23 +1972,20 @@ $ultracache_get_first_non_allowlisted_query_key = static function ($query_vars, 
     return '';
 };
 
-$ultracache_hard_security_paths = array(
-    '/wp-admin/',
-    '/wp-login.php',
-    '/wp-json/',
-    '/xmlrpc.php',
-    '/wp-cron.php',
-    '/wp-comments-post.php',
-    '/wc-api/',
-    '/cart/',
-    '/checkout/',
-    '/my-account/',
-    '/order-pay/',
-    '/order-received/',
-    '/add-payment-method/',
-    '/lost-password/',
-    '/ultracache-varnishtest/',
+$ultracache_hard_security_paths = array_merge(
+    array(
+        '/wp-admin/',
+        '/wp-login.php',
+        '/wp-json/',
+        '/xmlrpc.php',
+        '/wp-cron.php',
+        '/wp-comments-post.php',
+        '/wc-api/',
+        '/ultracache-varnishtest/',
+    ),
+    (array) ($runtime_config['woocommerce_dynamic_paths'] ?? array())
 );
+$ultracache_hard_security_paths = array_values(array_unique($ultracache_hard_security_paths));
 
 $ultracache_internal_control_query_args = array(
     'ultracache_revalidate',
@@ -1710,7 +2000,10 @@ $ultracache_internal_control_query_args = array(
     'ultracache_profile_run',
     'ultracache_runtime_js_scan',
     'ultracache_runtime_js_scan_id',
+    'ultracache_runtime_js_scan_token',
     'ultracache_runtime_js_scan_nonce',
+    'ultracache_runtime_js_scan_mode',
+    'ultracache_runtime_js_scan_context',
 );
 
 $ultracache_has_internal_control_query_marker = static function ($query_vars) use ($ultracache_normalize_query_key, $ultracache_internal_control_query_args) {
@@ -1862,6 +2155,49 @@ if (!empty($parts['query'])) {
     parse_str((string) $parts['query'], $query_vars);
 }
 
+$ultracache_normalize_woo_query_key = static function ($key) {
+    $key = strtolower((string) $key);
+    $key = preg_replace('/[^a-z0-9_-]/', '', $key);
+    return is_string($key) ? $key : '';
+};
+$normalized_woo_query_vars = array();
+foreach ((array) $query_vars as $query_key => $query_value) {
+    if (is_array($query_value) || is_object($query_value)) {
+        continue;
+    }
+    $query_key = $ultracache_normalize_woo_query_key($query_key);
+    if ('' !== $query_key) {
+        $normalized_woo_query_vars[$query_key] = (string) $query_value;
+    }
+}
+
+foreach ((array) ($runtime_config['woocommerce_dynamic_query_rules'] ?? array()) as $woo_query_rule) {
+    if (!is_array($woo_query_rule) || $path !== (string) ($woo_query_rule['path'] ?? '/')) {
+        continue;
+    }
+    $required = (array) ($woo_query_rule['query'] ?? array());
+    if (empty($required)) {
+        continue;
+    }
+    $matched = true;
+    foreach ($required as $query_key => $query_value) {
+        if (!array_key_exists($query_key, $normalized_woo_query_vars) || (string) $normalized_woo_query_vars[$query_key] !== (string) $query_value) {
+            $matched = false;
+            break;
+        }
+    }
+    if ($matched) {
+        return;
+    }
+}
+
+$woo_dynamic_query_keys = array_fill_keys((array) ($runtime_config['woocommerce_dynamic_query_keys'] ?? array()), true);
+foreach (array_keys($normalized_woo_query_vars) as $query_key) {
+    if (isset($woo_dynamic_query_keys[$query_key])) {
+        return;
+    }
+}
+
 $excluded_query_args_lookup = array_fill_keys(
     (array) (($runtime_config['query_cache_policy']['hard_blocked_keys'] ?? array())),
     true
@@ -1875,27 +2211,14 @@ foreach (array_keys($query_vars) as $query_key) {
 
 $normalized_query_vars = array();
 if (!empty($query_vars)) {
-    $query_policy = (array) ($runtime_config['query_cache_policy'] ?? array());
-    $query_allowlist = (array) ($query_policy['allowlist'] ?? ($runtime_config['cache_query_allowlist'] ?? array()));
-    if (empty($query_policy['enabled']) || empty($query_allowlist)) {
+    $query_evaluation = $ultracache_evaluate_query_for_cache($query_vars, $runtime_config);
+    if (empty($query_evaluation['cacheable'])) {
         return;
     }
 
-    if ('' !== $ultracache_get_first_non_allowlisted_query_key($query_vars, $query_allowlist)) {
-        return;
-    }
-
-    $normalized_query_vars = $ultracache_normalize_query_vars($query_vars, $query_allowlist);
+    $normalized_query_vars = (array) ($query_evaluation['normalized_vars'] ?? array());
     if (empty($normalized_query_vars)) {
         return;
-    }
-}
-
-if (!empty($runtime_config['woo_safe_mode'])) {
-    foreach (array('/cart/', '/checkout/', '/my-account/', '/order-pay/', '/order-received/', '/add-payment-method/', '/lost-password/') as $dynamic_path) {
-        if ($path_matches_rule($path, $dynamic_path)) {
-            return;
-        }
     }
 }
 
@@ -1963,6 +2286,30 @@ if (!ultracache_advanced_cache_is_valid_cache_payload_file($cache_file, $ultraca
 
 $esi_metadata = ultracache_advanced_cache_get_esi_metadata($cache_file, $ultracache_cache_base_dir);
 $is_esi_parent = !empty($esi_metadata);
+$litespeed_esi_metadata = !empty($runtime_config['litespeed_enabled'])
+    ? ultracache_advanced_cache_get_litespeed_esi_metadata($cache_file, $ultracache_cache_base_dir)
+    : array();
+$is_litespeed_esi_parent = !empty($litespeed_esi_metadata);
+
+/*
+ * WooCommerce session cookies remain a normal full-page cache bypass unless
+ * this exact cache object is a verified native LiteSpeed Woo mini-cart ESI
+ * parent. The exception is intentionally evaluated only after the canonical
+ * cache file and its `.lsesi` sidecar have both been validated, so it cannot
+ * affect Varnish, non-ESI LiteSpeed pages, dynamic WooCommerce paths, query
+ * requests, logged-in sessions, or any other unsafe cookie.
+ */
+$ultracache_litespeed_woocommerce_shared_parent = false;
+if ($ultracache_has_woocommerce_session_cookie) {
+    $ultracache_litespeed_woocommerce_shared_parent = !empty($runtime_config['litespeed_enabled'])
+        && empty($runtime_config['varnish_enabled'])
+        && $is_litespeed_esi_parent
+        && !empty($litespeed_esi_metadata['woocommerceMiniCart']);
+
+    if (!$ultracache_litespeed_woocommerce_shared_parent) {
+        return;
+    }
+}
 
 $ultracache_get_accept_encoding_quality = static function ($header_value, $encoding_name) {
     $header_value = strtolower((string) $header_value);
@@ -2007,7 +2354,7 @@ $encoding_candidates = array();
 $brotli_quality = $ultracache_get_accept_encoding_quality($encoding, 'br');
 $gzip_quality = $ultracache_get_accept_encoding_quality($encoding, 'gzip');
 
-if (!$is_esi_parent && $brotli_quality > 0.0) {
+if (!$is_esi_parent && !$is_litespeed_esi_parent && $brotli_quality > 0.0) {
     $encoding_candidates[] = array(
         'file'     => $cache_file . '.br',
         'bucket'   => 'brotli',
@@ -2016,7 +2363,7 @@ if (!$is_esi_parent && $brotli_quality > 0.0) {
         'priority' => 2,
     );
 }
-if ($gzip_quality > 0.0) {
+if (!$is_litespeed_esi_parent && $gzip_quality > 0.0) {
     $encoding_candidates[] = array(
         'file'     => $cache_file . '.gz',
         'bucket'   => 'gzip',
@@ -2130,6 +2477,44 @@ function ultracache_advanced_cache_get_litespeed_url_tag($url, $home_url = '')
     return '' !== $url ? 'uc_u_' . substr(hash('sha256', $url), 0, 24) : '';
 }
 
+
+/** Read bounded semantic LiteSpeed tags stored beside one cached HTML object. */
+function ultracache_advanced_cache_get_litespeed_semantic_tags($cache_file, $base_dir)
+{
+    $cache_file = (string) $cache_file;
+    $marker = $cache_file . '.lstags';
+    if (!ultracache_advanced_cache_is_valid_cache_payload_file($cache_file, $base_dir)
+        || !ultracache_advanced_cache_is_allowed_file_path($marker, true)
+        || !is_readable($marker)) {
+        return array();
+    }
+
+    $raw = ultracache_advanced_cache_safe_file_get_contents($marker);
+    if (!is_string($raw) || '' === trim($raw)) {
+        return array();
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded) || 1 !== (int) ($decoded['version'] ?? 0) || !is_array($decoded['tags'] ?? null)) {
+        return array();
+    }
+
+    $tags = array();
+    foreach ($decoded['tags'] as $tag) {
+        $tag = is_scalar($tag) ? trim((string) $tag) : '';
+        if ('' === $tag || 1 !== preg_match('/^[A-Za-z0-9_.:-]{1,128}$/', $tag)) {
+            continue;
+        }
+        if (0 === strpos($tag, 'uc_s_') || 0 === strpos($tag, 'uc_u_')) {
+            continue;
+        }
+        $tags[$tag] = $tag;
+        if (count($tags) >= 48) {
+            break;
+        }
+    }
+    return array_values($tags);
+}
+
 /**
  * Send the public shared-cache contract for an UltraCache HTML object.
  *
@@ -2138,16 +2523,23 @@ function ultracache_advanced_cache_get_litespeed_url_tag($url, $home_url = '')
  * @param string $bucket    Active UltraCache HTML bucket.
  * @param string    $url                 Exact public request URL.
  * @param bool|null $litespeed_cacheable Optional LSCache-specific override.
- * @param array     $esi_metadata        Optional normalized ESI parent metadata.
+ * @param array     $esi_metadata        Optional normalized Varnish ESI parent metadata.
+ * @param array     $litespeed_semantic_tags Optional LiteSpeed semantic cache tags.
+ * @param array     $litespeed_esi_metadata Optional native LiteSpeed ESI parent metadata.
+ * @param bool      $litespeed_woocommerce_shared_parent Whether this request uses the Woo ESI shared-parent vary bucket.
  * @return void
  */
-function ultracache_advanced_cache_send_shared_html_headers(array $config, $cacheable = true, $bucket = 'orig', $url = '', $litespeed_cacheable = null, array $esi_metadata = array())
+function ultracache_advanced_cache_send_shared_html_headers(array $config, $cacheable = true, $bucket = 'orig', $url = '', $litespeed_cacheable = null, array $esi_metadata = array(), array $litespeed_semantic_tags = array(), array $litespeed_esi_metadata = array(), $litespeed_woocommerce_shared_parent = false)
 {
     $shared_cache_enabled = !empty($config['shared_cache_delivery_enabled']);
     $shared_cache_proof_expires_at = max(0, (int) ($config['shared_cache_control_proof_expires_at'] ?? 0));
     $shared_cache_control_verified = !empty($config['shared_cache_control_verified'])
         && (0 === $shared_cache_proof_expires_at || $shared_cache_proof_expires_at > time());
     $litespeed_enabled = !empty($config['litespeed_enabled']);
+    $litespeed_esi_parent = $litespeed_enabled
+        && !empty($litespeed_esi_metadata)
+        && 1 === (int) ($litespeed_esi_metadata['version'] ?? 0)
+        && (int) ($litespeed_esi_metadata['fragmentCount'] ?? 0) > 0;
     if (headers_sent() || (!$shared_cache_enabled && !$litespeed_enabled)) {
         return;
     }
@@ -2228,7 +2620,10 @@ function ultracache_advanced_cache_send_shared_html_headers(array $config, $cach
     $litespeed_cacheable = null === $litespeed_cacheable ? $cacheable : (bool) $litespeed_cacheable;
     $litespeed_cacheable = $litespeed_cacheable && (!is_array($url_parts) || empty($url_parts['query']));
     if (!$litespeed_cacheable) {
-        header('X-LiteSpeed-Cache-Control: no-cache', true);
+        header('X-LiteSpeed-Cache-Control: no-cache' . ($litespeed_esi_parent ? ',esi=on' : ''), true);
+        if ($litespeed_esi_parent) {
+            header('X-UltraCache-LiteSpeed-ESI: 1', true);
+        }
         return;
     }
 
@@ -2242,17 +2637,31 @@ function ultracache_advanced_cache_send_shared_html_headers(array $config, $cach
     if ('' !== $url_tag) {
         $tags[] = $url_tag;
     }
+    foreach ($litespeed_semantic_tags as $semantic_tag) {
+        $semantic_tag = is_scalar($semantic_tag) ? trim((string) $semantic_tag) : '';
+        if ('' !== $semantic_tag && 1 === preg_match('/^[A-Za-z0-9_.:-]{1,128}$/', $semantic_tag)) {
+            $tags[] = $semantic_tag;
+        }
+    }
 
-    header('X-LiteSpeed-Cache-Control: public,max-age=' . (string) $litespeed_seconds, true);
+    header('X-LiteSpeed-Cache-Control: public,max-age=' . (string) $litespeed_seconds . ($litespeed_esi_parent ? ',esi=on' : ''), true);
+    if ($litespeed_esi_parent) {
+        header('X-UltraCache-LiteSpeed-ESI: 1', true);
+    }
     if (!empty($tags)) {
         header('X-LiteSpeed-Tag: ' . implode(',', array_values(array_unique($tags))), true);
     }
 
     if (!empty($config['html_vary_accept'])) {
         $bucket = in_array((string) $bucket, array('orig', 'webp', 'avif'), true) ? (string) $bucket : 'orig';
-        header('X-LiteSpeed-Vary: value=uc_' . $bucket, true);
+        $vary_value = $litespeed_woocommerce_shared_parent ? 'uc_woo_esi_' . $bucket : 'uc_' . $bucket;
+        header('X-LiteSpeed-Vary: value=' . $vary_value, true);
+    } elseif ($litespeed_woocommerce_shared_parent) {
+        header('X-LiteSpeed-Vary: value=uc_woo_esi', true);
     }
 }
+
+$litespeed_semantic_tags = ultracache_advanced_cache_get_litespeed_semantic_tags($cache_file, $ultracache_cache_base_dir);
 
 $fresh_ttl = max(60, (int) ($runtime_config['cache_fresh_ttl_minutes'] ?? 1440) * 60);
 $max_stale = max($fresh_ttl, (int) ($runtime_config['cache_max_stale_minutes'] ?? 2880) * 60);
@@ -2271,15 +2680,18 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
     $should_revalidate = $ultracache_try_acquire_revalidate_lock($lock_file, $max_stale);
 
     $ultracache_record_hit($bucket, $encoding_bucket, true);
-    $validator_metadata = empty($esi_metadata)
+    $validator_metadata = (empty($esi_metadata) && !$is_litespeed_esi_parent)
         ? ultracache_advanced_cache_get_validator_metadata($serve_file, $encoding_bucket)
         : array();
     header('Content-Type: text/html; charset=UTF-8');
     header('Vary: ' . (!empty($runtime_config['html_vary_accept']) ? 'Accept, Accept-Encoding' : 'Accept-Encoding'), false);
-    ultracache_advanced_cache_send_shared_html_headers($runtime_config, false, $bucket, $normalized, null, $esi_metadata);
+    ultracache_advanced_cache_send_shared_html_headers($runtime_config, false, $bucket, $normalized, null, $esi_metadata, $litespeed_semantic_tags, $litespeed_esi_metadata, $ultracache_litespeed_woocommerce_shared_parent);
     ultracache_advanced_cache_send_validator_headers($validator_metadata);
     if (!empty($esi_metadata) && ultracache_advanced_cache_debug_headers_enabled()) {
         header('X-UltraCache-ESI-Validators: disabled');
+    }
+    if ($is_litespeed_esi_parent && ultracache_advanced_cache_debug_headers_enabled()) {
+        header('X-UltraCache-LiteSpeed-ESI-Validators: disabled');
     }
     if (!empty($runtime_config['shared_cache_delivery_enabled']) || !empty($runtime_config['varnish_enabled']) || ultracache_advanced_cache_debug_headers_enabled()) {
         header('X-UltraCache-Variant: ' . $bucket);
@@ -2310,7 +2722,7 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
             @flush();
         }
 
-        $queued = $ultracache_queue_revalidate($normalized, $ultracache_runtime_control_secret, (string) ($runtime_config['home_url'] ?? ''));
+        $queued = $ultracache_queue_revalidate($normalized, $ultracache_runtime_control_secret, (string) ($runtime_config['configured_site_base'] ?? ''));
         if ($queued) {
             $ultracache_record_background_revalidation();
         } else {
@@ -2322,10 +2734,11 @@ if (!empty($runtime_config['stale_while_revalidate_enabled']) && $age > $fresh_t
 
 $ultracache_record_hit($bucket, $encoding_bucket, false);
 $is_esi_parent = !empty($esi_metadata);
-$validator_metadata = $is_esi_parent
+$is_dynamic_esi_parent = $is_esi_parent || $is_litespeed_esi_parent;
+$validator_metadata = $is_dynamic_esi_parent
     ? array()
     : ultracache_advanced_cache_get_validator_metadata($serve_file, $encoding_bucket);
-$not_modified = !$is_esi_parent
+$not_modified = !$is_dynamic_esi_parent
     && !headers_sent()
     && !empty($validator_metadata)
     && ultracache_advanced_cache_request_is_not_modified($validator_metadata, $method);
@@ -2334,10 +2747,13 @@ if (!$not_modified) {
     header('Content-Type: text/html; charset=UTF-8');
 }
 header('Vary: ' . (!empty($runtime_config['html_vary_accept']) ? 'Accept, Accept-Encoding' : 'Accept-Encoding'), false);
-ultracache_advanced_cache_send_shared_html_headers($runtime_config, true, $bucket, $normalized, !$not_modified, $esi_metadata);
+ultracache_advanced_cache_send_shared_html_headers($runtime_config, true, $bucket, $normalized, !$not_modified, $esi_metadata, $litespeed_semantic_tags, $litespeed_esi_metadata, $ultracache_litespeed_woocommerce_shared_parent);
 ultracache_advanced_cache_send_validator_headers($validator_metadata);
 if ($is_esi_parent && ultracache_advanced_cache_debug_headers_enabled()) {
     header('X-UltraCache-ESI-Validators: disabled');
+}
+if ($is_litespeed_esi_parent && ultracache_advanced_cache_debug_headers_enabled()) {
+    header('X-UltraCache-LiteSpeed-ESI-Validators: disabled');
 }
 if (!empty($runtime_config['shared_cache_delivery_enabled']) || !empty($runtime_config['varnish_enabled']) || ultracache_advanced_cache_debug_headers_enabled()) {
     header('X-UltraCache-Variant: ' . $bucket);

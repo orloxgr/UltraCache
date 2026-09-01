@@ -19,10 +19,7 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
      */
     private static function should_refill_after_targeted_litespeed_invalidation()
     {
-        $settings = self::get_dashboard_settings();
-
-        return self::is_native_litespeed_html_cache_enabled()
-            && !empty($settings['liteSpeedRefillAfterTargetedInvalidation']);
+        return self::is_native_litespeed_html_cache_enabled();
     }
 
     /**
@@ -32,10 +29,7 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
      */
     private static function should_warm_litespeed_during_site_warmup()
     {
-        $settings = self::get_dashboard_settings();
-
-        return self::is_native_litespeed_html_cache_enabled()
-            && !empty($settings['liteSpeedWarmDuringSiteWarmup']);
+        return self::is_native_litespeed_html_cache_enabled();
     }
 
     /**
@@ -78,7 +72,7 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
             return array(
                 'enabled' => false,
                 'buckets' => array(),
-                'message' => self::maybe_translate('LiteSpeed warm-up with site warm-up is disabled.'),
+                'message' => self::maybe_translate('Native LiteSpeed HTML Cache is not enabled for site warm-up.'),
             );
         }
 
@@ -236,7 +230,9 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
 
         return array(
             'method' => 'GET',
-            'timeout' => 10,
+            'timeout' => method_exists(static::class, 'get_litespeed_http_timeout')
+                ? self::get_litespeed_http_timeout()
+                : max(0, (int) ini_get('max_execution_time')),
             'redirection' => 0,
             'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-LiteSpeed-Refill/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; +https://wordpress.org)',
             'headers' => array(
@@ -299,6 +295,10 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
      */
     private static function summarize_litespeed_refill_response($response)
     {
+        if (method_exists(static::class, 'observe_litespeed_http_response')) {
+            self::observe_litespeed_http_response($response, 'refill-response');
+        }
+
         if (is_wp_error($response)) {
             return array(
                 'success' => false,
@@ -313,36 +313,68 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
         $http_code = (int) wp_remote_retrieve_response_code($response);
         $headers = array(
             'server' => self::get_litespeed_refill_response_header($response, 'server'),
+            'cacheControl' => self::get_litespeed_refill_response_header($response, 'cache-control'),
             'xLiteSpeedCache' => self::get_litespeed_refill_response_header($response, 'x-litespeed-cache'),
+            'xLiteSpeedCacheControl' => self::get_litespeed_refill_response_header($response, 'x-litespeed-cache-control'),
             'xQcCache' => self::get_litespeed_refill_response_header($response, 'x-qc-cache'),
             'xLiteSpeedVary' => self::get_litespeed_refill_response_header($response, 'x-litespeed-vary'),
             'ultraCache' => self::get_litespeed_refill_response_header($response, 'x-ultra-cache'),
+            'ultraCacheReason' => self::get_litespeed_refill_response_header($response, 'x-ultra-cache-reason'),
             'ultraCacheSource' => self::get_litespeed_refill_response_header($response, 'x-ultra-cache-source'),
             'ultraCacheVariant' => self::get_litespeed_refill_response_header($response, 'x-ultracache-variant'),
+            'ultraCacheCacheable' => self::get_litespeed_refill_response_header($response, 'x-ultracache-cacheable'),
+            'ultraCachePageCacheable' => self::get_litespeed_refill_response_header($response, 'x-ultracache-page-cacheable'),
+            'sharedCacheState' => self::get_litespeed_refill_response_header($response, 'x-ultracache-shared-cache-state'),
+            'sharedCacheReason' => self::get_litespeed_refill_response_header($response, 'x-ultracache-shared-cache-reason'),
         );
         $status_header = strtolower(trim((string) ($headers['xLiteSpeedCache'] ?: $headers['xQcCache'])));
+        $litespeed_control = strtolower(trim((string) $headers['xLiteSpeedCacheControl']));
         $cache_status = 'INCONCLUSIVE';
-        if (false !== strpos($status_header, 'hit')) {
+        if (false !== strpos($status_header, 'bypass')
+            || false !== strpos($status_header, 'no-cache')
+            || false !== strpos($litespeed_control, 'no-cache')) {
+            // An explicit no-cache contract overrides a simultaneous MISS
+            // status: LiteSpeed reached the origin but was instructed not to
+            // store this representation.
+            $cache_status = 'BYPASS';
+        } elseif (false !== strpos($status_header, 'hit')) {
             $cache_status = 'HIT';
         } elseif (false !== strpos($status_header, 'miss')) {
             $cache_status = 'MISS';
-        } elseif (false !== strpos($status_header, 'bypass') || false !== strpos($status_header, 'no-cache')) {
-            $cache_status = 'BYPASS';
         }
         $is_redirect = in_array($http_code, array(301, 302, 303, 307, 308), true);
         $explicit_bypass = 200 === $http_code && 'BYPASS' === $cache_status;
+        $cookie_names = function_exists('ultracache_get_http_response_set_cookie_names')
+            ? ultracache_get_http_response_set_cookie_names($response)
+            : array();
+        $cookie_policy = function_exists('ultracache_response_cookie_cache_policy')
+            ? ultracache_response_cookie_cache_policy($cookie_names, self::get_settings())
+            : array('decision' => empty($cookie_names) ? 'none' : 'reject', 'reason' => 'response-cookie-policy-unavailable');
+        $ultra_status = strtoupper(trim((string) $headers['ultraCache']));
+        $cookie_handoff_deferred = 200 === $http_code
+            && !empty($cookie_names)
+            && 'allow' === (string) ($cookie_policy['decision'] ?? '')
+            && in_array($ultra_status, array('STORE', 'HIT'), true)
+            && ('deferred-response-cookie' === sanitize_key((string) $headers['sharedCacheState']) || $explicit_bypass);
 
         return array(
-            'success' => 200 === $http_code && !$explicit_bypass,
+            'success' => 200 === $http_code && (!$explicit_bypass || $cookie_handoff_deferred),
+            'warning' => 200 === $http_code && 'INCONCLUSIVE' === $cache_status,
             'httpCode' => $http_code,
             'cacheStatus' => $is_redirect ? 'REDIRECT' : $cache_status,
-            'errorCode' => $explicit_bypass ? 'litespeed_cache_bypass' : '',
+            'errorCode' => $explicit_bypass && !$cookie_handoff_deferred ? 'litespeed_cache_bypass' : '',
             'detail' => $is_redirect
                 ? self::maybe_translate_sprintf('HTTP %d redirect refused; the exact queued URL was not warmed.', $http_code)
-                : ($explicit_bypass
-                    ? self::maybe_translate('LiteSpeed explicitly bypassed this refill request.')
-                    : 'HTTP ' . $http_code),
+                : ($cookie_handoff_deferred
+                    ? self::maybe_translate('The public UltraCache response carried an allowed response cookie; LiteSpeed handoff is deferred to one clean follow-up request.')
+                    : ($explicit_bypass
+                        ? self::maybe_translate('LiteSpeed explicitly bypassed this refill request.')
+                        : 'HTTP ' . $http_code)),
             'headers' => $headers,
+            'setCookieNames' => $cookie_names,
+            'responseCookiePolicy' => $cookie_policy,
+            'cookieHandoffDeferred' => $cookie_handoff_deferred,
+            'sharedCacheState' => sanitize_key((string) $headers['sharedCacheState']),
         );
     }
 
@@ -396,6 +428,8 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
         $refilled_count = 0;
         $retryable_failures = 0;
         $terminal_failures = 0;
+        $inconclusive_successes = 0;
+        $verified_count = 0;
 
         foreach ($buckets as $bucket) {
             if (!self::invoke_litespeed_refill_heartbeat($heartbeat, 'litespeed-refill-before', $bucket)) {
@@ -413,14 +447,139 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
             }
 
             $started = microtime(true);
-            $summary = self::summarize_litespeed_refill_response(
+            $first_summary = self::summarize_litespeed_refill_response(
                 self::send_single_litespeed_refill_request($url, $bucket)
             );
+            $summary = $first_summary;
+            $initial_cache_status = sanitize_key(strtolower((string) ($first_summary['cacheStatus'] ?? 'inconclusive')));
+            $verification_cache_status = '';
+            $request_count = 1;
+            $verified = 'hit' === $initial_cache_status;
+            $cookie_handoff_required = !empty($first_summary['cookieHandoffDeferred']);
+            $cookie_handoff_completed = false;
+
+            if (!empty($first_summary['success']) && $cookie_handoff_required) {
+                if (!self::invoke_litespeed_refill_heartbeat($heartbeat, 'litespeed-cookie-handoff-before', $bucket)) {
+                    return self::normalize_litespeed_refill_result_state(array(
+                        'success' => false,
+                        'retryable' => true,
+                        'terminal' => false,
+                        'ownershipLost' => true,
+                        'failureClass' => 'ownership-lost',
+                        'message' => self::maybe_translate('Warm-up ownership expired before the clean LiteSpeed cookie handoff completed.'),
+                        'variantCount' => count($details),
+                        'refilledCount' => $refilled_count,
+                        'verifiedCount' => $verified_count,
+                        'details' => $details,
+                    ));
+                }
+
+                $clean_summary = self::summarize_litespeed_refill_response(
+                    self::send_single_litespeed_refill_request($url, $bucket)
+                );
+                ++$request_count;
+                $clean_status = sanitize_key(strtolower((string) ($clean_summary['cacheStatus'] ?? 'inconclusive')));
+                $verification_cache_status = $clean_status;
+
+                if (!empty($clean_summary['success']) && empty($clean_summary['cookieHandoffDeferred'])) {
+                    $summary = $clean_summary;
+                    $cookie_handoff_completed = true;
+                    if ('hit' === $clean_status) {
+                        $verified = true;
+                        $summary['warning'] = false;
+                    } elseif ('miss' === $clean_status) {
+                        if (!self::invoke_litespeed_refill_heartbeat($heartbeat, 'litespeed-cookie-handoff-verify-before', $bucket)) {
+                            return self::normalize_litespeed_refill_result_state(array(
+                                'success' => false,
+                                'retryable' => true,
+                                'terminal' => false,
+                                'ownershipLost' => true,
+                                'failureClass' => 'ownership-lost',
+                                'message' => self::maybe_translate('Warm-up ownership expired before LiteSpeed cookie-handoff verification.'),
+                                'variantCount' => count($details),
+                                'refilledCount' => $refilled_count,
+                                'verifiedCount' => $verified_count,
+                                'details' => $details,
+                            ));
+                        }
+                        $verify_summary = self::summarize_litespeed_refill_response(
+                            self::send_single_litespeed_refill_request($url, $bucket)
+                        );
+                        ++$request_count;
+                        $verify_status = sanitize_key(strtolower((string) ($verify_summary['cacheStatus'] ?? 'inconclusive')));
+                        $verification_cache_status = $verify_status;
+                        if (!empty($verify_summary['success']) && 'hit' === $verify_status) {
+                            $summary = $verify_summary;
+                            $verified = true;
+                            $summary['warning'] = false;
+                        } elseif (!empty($verify_summary['success'])) {
+                            $summary = $verify_summary;
+                            $summary['success'] = true;
+                            $summary['warning'] = true;
+                            $summary['detail'] = self::maybe_translate('LiteSpeed completed a clean handoff after an incidental response cookie, but the final request did not verify a stored HIT.');
+                        } else {
+                            $summary = $verify_summary;
+                        }
+                    } else {
+                        $summary['warning'] = true;
+                        $summary['detail'] = self::maybe_translate('LiteSpeed completed a clean handoff after an incidental response cookie, but storage could not be verified from the returned cache status.');
+                    }
+                } else {
+                    $summary = $clean_summary;
+                    if (!empty($summary['success'])) {
+                        $summary['warning'] = true;
+                        $summary['detail'] = self::maybe_translate('The public page remained cacheable in UltraCache, but the clean LiteSpeed handoff still carried a response cookie and could not populate LSCache in this pass.');
+                    }
+                }
+            } elseif (!empty($first_summary['success']) && 'miss' === $initial_cache_status) {
+                if (!self::invoke_litespeed_refill_heartbeat($heartbeat, 'litespeed-refill-verify-before', $bucket)) {
+                    return self::normalize_litespeed_refill_result_state(array(
+                        'success' => false,
+                        'retryable' => true,
+                        'terminal' => false,
+                        'ownershipLost' => true,
+                        'failureClass' => 'ownership-lost',
+                        'message' => self::maybe_translate('Warm-up ownership expired before LiteSpeed storage verification.'),
+                        'variantCount' => count($details),
+                        'refilledCount' => $refilled_count,
+                        'verifiedCount' => $verified_count,
+                        'details' => $details,
+                    ));
+                }
+                $verification_summary = self::summarize_litespeed_refill_response(
+                    self::send_single_litespeed_refill_request($url, $bucket)
+                );
+                ++$request_count;
+                $verification_cache_status = sanitize_key(strtolower((string) ($verification_summary['cacheStatus'] ?? 'inconclusive')));
+                if (!empty($verification_summary['success']) && 'hit' === $verification_cache_status) {
+                    $summary = $verification_summary;
+                    $verified = true;
+                    $summary['warning'] = false;
+                } elseif (!empty($verification_summary['success'])) {
+                    $summary = $verification_summary;
+                    $summary['success'] = true;
+                    $summary['warning'] = true;
+                    $summary['detail'] = self::maybe_translate('LiteSpeed accepted the refill request, but a follow-up request did not verify a stored HIT.');
+                } else {
+                    $summary = $verification_summary;
+                }
+            }
+
             $summary['durationMs'] = max(0, (int) round((microtime(true) - $started) * 1000));
+            $summary['verified'] = $verified;
+            $summary['requestCount'] = $request_count;
+            $summary['initialCacheStatus'] = strtoupper($initial_cache_status);
+            $summary['verificationCacheStatus'] = '' !== $verification_cache_status ? strtoupper($verification_cache_status) : '';
             $success = !empty($summary['success']);
             $all_ok = $all_ok && $success;
             if ($success) {
                 ++$refilled_count;
+                if ($verified) {
+                    ++$verified_count;
+                }
+                if (!empty($summary['warning']) || !$verified) {
+                    ++$inconclusive_successes;
+                }
             } elseif (self::is_litespeed_refill_failure_retryable($summary)) {
                 ++$retryable_failures;
             } else {
@@ -430,6 +589,14 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
             $details[] = array(
                 'bucket' => $bucket,
                 'success' => $success,
+                'verified' => $verified,
+                'requestCount' => $request_count,
+                'initialCacheStatus' => strtoupper($initial_cache_status),
+                'verificationCacheStatus' => '' !== $verification_cache_status ? strtoupper($verification_cache_status) : '',
+                'cookieHandoffRequired' => $cookie_handoff_required,
+                'cookieHandoffCompleted' => $cookie_handoff_completed,
+                'setCookieNames' => array_values((array) ($first_summary['setCookieNames'] ?? array())),
+                'responseCookiePolicy' => sanitize_key((string) (($first_summary['responseCookiePolicy']['reason'] ?? ''))),
                 'httpCode' => (int) ($summary['httpCode'] ?? 0),
                 'cacheStatus' => (string) ($summary['cacheStatus'] ?? 'INCONCLUSIVE'),
                 'detail' => (string) ($summary['detail'] ?? ''),
@@ -455,18 +622,23 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
         }
 
         $retryable = !$all_ok && $retryable_failures > 0 && 0 === $terminal_failures;
+        $all_verified = $all_ok && count($details) > 0 && $verified_count === count($details);
 
         return self::normalize_litespeed_refill_result_state(array(
             'success' => $all_ok,
+            'verified' => $all_verified,
             'retryable' => $retryable,
             'terminal' => !$all_ok && !$retryable,
-            'warning' => false,
+            'warning' => $all_ok && (!$all_verified || $inconclusive_successes > 0),
             'failureClass' => $all_ok ? '' : ($retryable ? 'litespeed-http-transient' : 'litespeed-http-terminal'),
-            'message' => $all_ok
-                ? self::maybe_translate_sprintf('LiteSpeed public refill completed for %d HTML variant(s).', count($details))
-                : self::maybe_translate('LiteSpeed public refill failed for one or more HTML variants.'),
+            'message' => $all_verified
+                ? self::maybe_translate_sprintf('LiteSpeed public refill verified a stored HIT for %d HTML variant(s).', count($details))
+                : ($all_ok
+                    ? self::maybe_translate_sprintf('LiteSpeed public refill completed for %d HTML variant(s), but one or more stored HITs could not be verified.', count($details))
+                    : self::maybe_translate('LiteSpeed public refill failed for one or more HTML variants.')),
             'variantCount' => count($details),
             'refilledCount' => $refilled_count,
+            'verifiedCount' => $verified_count,
             'details' => $details,
         ));
     }
@@ -484,13 +656,12 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
     public static function refill_litespeed_after_site_warm($url, array $warm_result = array(), $context = 'manual', $requires_verified_origin = false, $heartbeat = null)
     {
         unset($warm_result, $requires_verified_origin);
-
         $context = sanitize_key((string) $context);
-        if (!in_array($context, array('manual', 'cron', 'warm-after-flush', 'scheduled-cleanup', 'targeted-purge', 'refresh-ahead', 'affected-save', 'cli'), true)) {
+        if (!in_array($context, array('manual', 'cron', 'warm-after-flush', 'scheduled-cleanup', 'targeted-purge', 'queued-invalidation', 'affected-save', 'cli'), true)) {
             $context = 'manual';
         }
 
-        $targeted_context = in_array($context, array('targeted-purge', 'refresh-ahead', 'affected-save'), true);
+        $targeted_context = in_array($context, array('targeted-purge', 'queued-invalidation', 'affected-save'), true);
         $enabled = $targeted_context
             ? self::should_refill_after_targeted_litespeed_invalidation()
             : self::should_warm_litespeed_during_site_warmup();
@@ -499,8 +670,8 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
                 'success' => true,
                 'skipped' => true,
                 'message' => $targeted_context
-                    ? self::maybe_translate('Affected-page LiteSpeed refill is disabled.')
-                    : self::maybe_translate('LiteSpeed warm-up with site warm-up is disabled.'),
+                    ? self::maybe_translate('Native LiteSpeed HTML Cache is not enabled for affected-page refill.')
+                    : self::maybe_translate('Native LiteSpeed HTML Cache is not enabled for site warm-up.'),
             ));
         }
 
@@ -542,7 +713,17 @@ trait Ultra_Cache_WP_LiteSpeed_Refill_Trait
             ));
         }
 
-        $invalidation = self::invalidate_litespeed_before_warm_refill($url);
+        $invalidation = ('queued-invalidation' === $context)
+            ? array(
+                'success' => true,
+                'skipped' => true,
+                'alreadyCompleted' => true,
+                'retryable' => false,
+                'terminal' => false,
+                'failureClass' => '',
+                'message' => self::maybe_translate('Durable LiteSpeed invalidation already completed before this refill entered the shared page-warm pipeline.'),
+            )
+            : self::invalidate_litespeed_before_warm_refill($url);
         if (empty($invalidation['success'])) {
             return self::normalize_litespeed_refill_result_state(array(
                 'success' => false,

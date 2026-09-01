@@ -32,6 +32,38 @@ trait Ultra_Cache_WP_Varnish_Settings_Trait
         private static $varnish_capability_probe_stack = array();
 
         /**
+         * Request-local normalized Varnish settings used by isolated diagnostics.
+         *
+         * This never persists configuration. It lets the existing capability
+         * machinery verify a discovered candidate before the normal settings
+         * flow saves or enables that candidate.
+         *
+         * @var array<string,mixed>
+         */
+        private static $varnish_cli_settings_diagnostic_override = array();
+
+        /**
+         * Set one request-local normalized Varnish settings override.
+         *
+         * @param array<string,mixed> $settings Normalized CLI settings.
+         * @return void
+         */
+        private static function set_varnish_cli_settings_diagnostic_override(array $settings)
+        {
+            self::$varnish_cli_settings_diagnostic_override = $settings;
+        }
+
+        /**
+         * Clear the request-local Varnish settings override.
+         *
+         * @return void
+         */
+        private static function clear_varnish_cli_settings_diagnostic_override()
+        {
+            self::$varnish_cli_settings_diagnostic_override = array();
+        }
+
+        /**
          * Normalize one capability-probe endpoint set.
          *
          * @param array $endpoints Candidate endpoint labels.
@@ -766,28 +798,8 @@ trait Ultra_Cache_WP_Varnish_Settings_Trait
             $site_wide_control_verified = !empty($method_capability['htmlInvalidationSupported'])
                 || !empty($method_capability['hostInvalidationSupported']);
             $control_proof_expires_at = 0;
-            if ('http' === $mode && $exact_control_verified && $site_wide_control_verified) {
-                $proof_expiries = array();
-                $exact_proof_expires_at = absint($exact_capability['proofExpiresAt'] ?? 0);
-                if ($exact_proof_expires_at > 0) {
-                    $proof_expiries[] = $exact_proof_expires_at;
-                }
-                $topology_proof_expires_at = absint($topology['proofExpiresAt'] ?? 0);
-                if ($topology_proof_expires_at > 0) {
-                    $proof_expiries[] = $topology_proof_expires_at;
-                } else {
-                    $topology_tested_at = absint($topology['testedAt'] ?? 0);
-                    if ($topology_tested_at > 0) {
-                        $proof_expiries[] = $topology_tested_at + WEEK_IN_SECONDS;
-                    }
-                }
-                $control_proof_expires_at = !empty($proof_expiries) ? min($proof_expiries) : 0;
-            }
-            $proof_is_current = 'admin' === $mode
-                || ($control_proof_expires_at > time());
             $managed_control_verified = $exact_control_verified
-                && $site_wide_control_verified
-                && $proof_is_current;
+                && $site_wide_control_verified;
             $delivery_mode = !$enabled ? 'disabled' : ($managed_control_verified ? 'managed' : 'ttl-only');
             $ttl_minutes = !$enabled ? 0 : ($managed_control_verified ? $managed_ttl_minutes : $ttl_only_minutes);
             $control_status = $managed_control_verified
@@ -845,6 +857,10 @@ trait Ultra_Cache_WP_Varnish_Settings_Trait
 
         public static function get_varnish_cli_settings()
         {
+            if (!empty(self::$varnish_cli_settings_diagnostic_override)) {
+                return self::$varnish_cli_settings_diagnostic_override;
+            }
+
             $settings = self::get_dashboard_settings();
             $mode = self::sanitize_varnish_mode($settings['varnishCliMode']);
             $servers_raw = self::sanitize_varnish_servers_string($settings['varnishCliServers'], $mode);

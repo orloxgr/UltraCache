@@ -149,6 +149,60 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
         return $this->media_replacement_table_exists($this->get_media_replacement_theme_css_files_table_name());
     }
 
+    private function backfill_media_replacement_old_path_hashes($items_table)
+    {
+        global $wpdb;
+
+        $items_table = (string) $items_table;
+        if ('' === $items_table || !($wpdb instanceof wpdb)) {
+            return false;
+        }
+
+        $batch_size = 250;
+
+        do {
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT id, old_relative_path FROM %i WHERE old_path_hash = '' AND old_relative_path <> '' ORDER BY id ASC LIMIT %d",
+                    $items_table,
+                    $batch_size
+                ),
+                ARRAY_A
+            );
+
+            if (!is_array($rows)) {
+                return false;
+            }
+
+            if (empty($rows)) {
+                return true;
+            }
+
+            foreach ($rows as $row) {
+                $item_id           = absint($row['id'] ?? 0);
+                $old_relative_path = (string) ($row['old_relative_path'] ?? '');
+
+                if ($item_id <= 0 || '' === $old_relative_path) {
+                    return false;
+                }
+
+                $updated = $wpdb->update(
+                    $items_table,
+                    array('old_path_hash' => md5($old_relative_path)),
+                    array('id' => $item_id),
+                    array('%s'),
+                    array('%d')
+                );
+
+                if (false === $updated) {
+                    return false;
+                }
+            }
+        } while (count($rows) === $batch_size);
+
+        return true;
+    }
+
     private function media_replacement_schema_ready_for_current_version()
     {
         return self::MEDIA_REPLACEMENT_DB_VERSION === (string) get_option(self::MEDIA_REPLACEMENT_DB_VERSION_OPTION, '')
@@ -388,7 +442,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_cursor (job_id, id),
                 KEY target_format (target_format),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             $attachment_plans_sql = "CREATE TABLE {$attachment_plans_table} (
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -413,14 +467,14 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY main_item_id (main_item_id),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             $refs_sql = "CREATE TABLE {$refs_table} (
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
                 job_id varchar(64) NOT NULL DEFAULT '',
                 item_id bigint(20) unsigned NOT NULL DEFAULT 0,
                 ref_hash char(32) NOT NULL DEFAULT '',
-                table_name varchar(191) NOT NULL DEFAULT '',
+                table_name varchar(64) NOT NULL DEFAULT '',
                 primary_key_column varchar(64) NOT NULL DEFAULT '',
                 primary_key_value varchar(191) NOT NULL DEFAULT '',
                 row_identity varchar(191) NOT NULL DEFAULT '',
@@ -441,17 +495,17 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY job_cursor (job_id, id),
                 KEY job_table_column (job_id, table_name, column_name),
-                KEY job_row_identity (job_id, row_identity),
+                KEY job_row_identity (job_id, row_identity(160)),
                 KEY table_name (table_name),
                 KEY column_name (column_name),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             $ref_index_sql = "CREATE TABLE {$ref_index_table} (
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
                 job_id varchar(64) NOT NULL DEFAULT '',
                 ref_hash char(32) NOT NULL DEFAULT '',
-                table_name varchar(191) NOT NULL DEFAULT '',
+                table_name varchar(64) NOT NULL DEFAULT '',
                 primary_key_column varchar(64) NOT NULL DEFAULT '',
                 primary_key_value varchar(191) NOT NULL DEFAULT '',
                 row_identity varchar(191) NOT NULL DEFAULT '',
@@ -474,11 +528,11 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY job_cursor (job_id, id),
                 KEY job_table_column (job_id, table_name, column_name),
-                KEY job_row_identity (job_id, row_identity),
+                KEY job_row_identity (job_id, row_identity(160)),
                 KEY table_name (table_name),
                 KEY column_name (column_name),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             $file_refs_sql = "CREATE TABLE {$file_refs_table} (
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -506,7 +560,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_status (job_id, status),
                 KEY job_cursor (job_id, id),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             $theme_css_files_sql = "CREATE TABLE {$theme_css_files_table} (
                 id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -530,7 +584,7 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 KEY job_validation (job_id, validation_status, id),
                 KEY job_cursor (job_id, id),
                 KEY updated_at (updated_at)
-            ) {$charset_collate};";
+            ) ENGINE=InnoDB {$charset_collate};";
 
             dbDelta($items_sql);
             dbDelta($attachment_plans_sql);
@@ -547,7 +601,9 @@ trait Ultra_Cache_Media_Replacement_Schema_Trait
                 }
 
                 $wpdb->query($wpdb->prepare("UPDATE %i SET item_scope = %s WHERE item_scope = '' OR item_scope IS NULL", $items_table, 'main'));
-                $wpdb->query($wpdb->prepare("UPDATE %i SET old_path_hash = MD5(old_relative_path) WHERE old_path_hash = '' AND old_relative_path <> ''", $items_table));
+                if (!$this->backfill_media_replacement_old_path_hashes($items_table)) {
+                    return false;
+                }
             }
 
             if ($this->media_replacement_items_table_exists()

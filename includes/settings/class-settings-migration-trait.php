@@ -11,6 +11,136 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Settings_Migration_Trait
 {
+
+
+    /**
+     * Migrate the removed Scroll delayed-JS release trigger once its legacy
+     * value is encountered in stored settings.
+     *
+     * Scroll could fire without intentional user interaction on some pages.
+     * Existing Scroll users are therefore moved to Mouse move, Keyboard,
+     * Touch / pointer, and Click while Scroll is permanently disabled.
+     *
+     * @return array<string,mixed>
+     */
+    public static function maybe_migrate_removed_delayed_js_scroll_trigger()
+    {
+        $missing = '__ultracache_missing_' . md5(__METHOD__);
+        $stored = get_option(ULTRACACHE_SETTINGS_KEY, $missing);
+        if ($missing === $stored || !is_array($stored)) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'settings_missing');
+        }
+
+        $scroll_enabled = self::normalize_boolean_setting_value(
+            $stored['delayedJsAutostartScrollEnabled'] ?? false,
+            false
+        );
+        if (!$scroll_enabled) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'scroll_not_enabled');
+        }
+
+        $stored['delayedJsAutostartScrollEnabled'] = false;
+        $stored['delayedJsAutostartMousemoveEnabled'] = true;
+        $stored['delayedJsAutostartKeyboardEnabled'] = true;
+        $stored['delayedJsAutostartTouchPointerEnabled'] = true;
+        $stored['delayedJsAutostartClickEnabled'] = true;
+        update_option(ULTRACACHE_SETTINGS_KEY, $stored, false);
+
+        return array('success' => true, 'skipped' => false, 'reason' => 'scroll_migrated');
+    }
+
+
+    /**
+     * Finalize the 3.05 LiteSpeed Automation contract once per installation.
+     *
+     * Retired LiteSpeed warm/refill/stale/refresh-ahead settings are removed
+     * from the canonical stored dashboard option. The old refresh-ahead
+     * candidate/state stores are also deleted. This migration does not purge
+     * cache, schedule warm work, or change active Automation settings.
+     *
+     * @return array<string,mixed>
+     */
+    public static function maybe_finalize_litespeed_automation_contract()
+    {
+        $marker_key = 'ultracache_litespeed_automation_contract';
+        $target = '1';
+        if ($target === (string) get_option($marker_key, '')) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'already_complete');
+        }
+
+        $missing = '__ultracache_missing_' . md5(__METHOD__);
+        $stored = get_option(ULTRACACHE_SETTINGS_KEY, $missing);
+        if ($missing !== $stored && is_array($stored)) {
+            foreach (array(
+                'liteSpeedRefillAfterTargetedInvalidation',
+                'liteSpeedWarmDuringSiteWarmup',
+                'liteSpeedStalePurgeEnabled',
+                'liteSpeedRefreshAheadEnabled',
+                'liteSpeedRefreshAheadThresholdPercent',
+                'liteSpeedRefreshAheadMaxPages',
+                'liteSpeedRefreshAheadPinnedUrls',
+            ) as $retired_key) {
+                unset($stored[$retired_key]);
+            }
+            update_option(ULTRACACHE_SETTINGS_KEY, $stored, false);
+        }
+
+        delete_option('ultracache_litespeed_refresh_ahead_state_v1');
+        delete_option('ultracache_litespeed_refresh_candidates_v1');
+        update_option($marker_key, $target, false);
+
+        return array('success' => true, 'skipped' => false, 'reason' => 'finalized');
+    }
+
+    /** Return the persistent LiteSpeed semantic server-rule contract marker. */
+    private static function get_litespeed_semantic_rules_contract_option_key()
+    {
+        return 'ultracache_litespeed_semantic_rules_contract';
+    }
+
+    /**
+     * Synchronize the one-time server-rule transition required by semantic
+     * LiteSpeed tags. When native LSCache is active, direct Apache static HTML
+     * aliases must be removed so outer-cache MISS requests pass through the
+     * advanced-cache drop-in, which can emit the per-page semantic tag sidecar.
+     *
+     * This runs only from admin_init and persists completion in a normal
+     * WordPress option; it is never backed by a transient.
+     *
+     * @return array<string,mixed>
+     */
+    public static function maybe_sync_litespeed_semantic_rules_contract()
+    {
+        $target = '1';
+        $option_key = self::get_litespeed_semantic_rules_contract_option_key();
+        if ($target === (string) get_option($option_key, '')) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'already_complete');
+        }
+
+        $settings = self::get_settings();
+        $litespeed_enabled = (!empty($settings['litespeed_cache_enabled']) || !empty($settings['liteSpeedCacheEnabled']))
+            && (!empty($settings['enabled']) || !empty($settings['pageCacheEnabled']));
+
+        if (!$litespeed_enabled) {
+            update_option($option_key, $target, false);
+            return array('success' => true, 'skipped' => true, 'reason' => 'litespeed_disabled');
+        }
+
+        $apache_static_sync = self::sync_apache_static_html_delivery_rules();
+        $litespeed_sync = self::sync_litespeed_cache_rules();
+        if (false === $apache_static_sync || false === $litespeed_sync) {
+            return array(
+                'success' => false,
+                'reason' => 'server_rules_sync_failed',
+                'apacheStatic' => false !== $apache_static_sync,
+                'liteSpeed' => false !== $litespeed_sync,
+            );
+        }
+
+        update_option($option_key, $target, false);
+        return array('success' => true, 'skipped' => false, 'reason' => 'synchronized');
+    }
+
     /**
      * Return the only public warm-runtime reset target.
      *
@@ -540,26 +670,65 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
     }
 
 
-    private static function get_known_cache_plugin_signatures()
+    private static function get_cache_plugin_registry()
     {
         return array(
-            'w3-total-cache' => array('label' => self::maybe_translate('W3 Total Cache'), 'markers' => array('W3 Total Cache', 'W3TC', 'w3-total-cache', 'w3tc_')),
-            'wp-rocket' => array('label' => self::maybe_translate('WP Rocket'), 'markers' => array('WP Rocket', 'WP_ROCKET', 'rocket_clean_domain', 'wp-rocket')),
-            'wp-super-cache' => array('label' => self::maybe_translate('WP Super Cache'), 'markers' => array('WP Super Cache', 'WPCACHEHOME', 'wp-cache-phase1', 'wp-super-cache')),
-            'litespeed-cache' => array('label' => self::maybe_translate('LiteSpeed Cache'), 'markers' => array('LiteSpeed Cache', 'LSCWP', 'litespeed-cache', 'LiteSpeed_Cache')),
-            'sg-cachepress' => array('label' => self::maybe_translate('SiteGround Optimizer'), 'markers' => array('SiteGround Optimizer', 'SG Optimizer', 'sg-cachepress', 'SiteGround_Optimizer')),
-            'wp-fastest-cache' => array('label' => self::maybe_translate('WP Fastest Cache'), 'markers' => array('WP Fastest Cache', 'WpFastestCache', 'wp-fastest-cache')),
-            'breeze' => array('label' => self::maybe_translate('Breeze'), 'markers' => array('Breeze', 'BREEZE', 'breeze-cache')),
-            'redis-cache' => array('label' => self::maybe_translate('Redis Object Cache'), 'markers' => array('Redis Object Cache', 'Redis_Object_Cache', 'redis-cache', 'Rhubarb\\RedisCache')),
-            'docket-cache' => array('label' => self::maybe_translate('Docket Cache'), 'markers' => array('Docket Cache', 'DocketCache', 'docket-cache')),
-            'object-cache-pro' => array('label' => self::maybe_translate('Object Cache Pro'), 'markers' => array('Object Cache Pro', 'objectcache.pro', 'ObjectCachePro')),
-            'memcached' => array('label' => self::maybe_translate('Memcached Object Cache'), 'markers' => array('Memcached', 'Memcache', 'memcached', 'memcache')),
-            'powered-cache' => array('label' => self::maybe_translate('Powered Cache'), 'markers' => array('Powered Cache', 'powered-cache')),
-            'cache-enabler' => array('label' => self::maybe_translate('Cache Enabler'), 'markers' => array('Cache Enabler', 'cache-enabler')),
-            'autoptimize' => array('label' => self::maybe_translate('Autoptimize'), 'markers' => array('Autoptimize', 'autoptimize')),
+            'w3-total-cache' => array('label' => self::maybe_translate('W3 Total Cache'), 'aliases' => array('w3-total-cache'), 'pageCache' => true, 'objectCache' => true, 'markers' => array('W3 Total Cache', 'W3TC', 'w3-total-cache', 'w3tc_')),
+            'wp-rocket' => array('label' => self::maybe_translate('WP Rocket'), 'aliases' => array('wp-rocket'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('WP Rocket', 'WP_ROCKET', 'rocket_clean_domain', 'wp-rocket')),
+            'wp-super-cache' => array('label' => self::maybe_translate('WP Super Cache'), 'aliases' => array('wp-super-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('WP Super Cache', 'WPCACHEHOME', 'wp-cache-phase1', 'wp-super-cache')),
+            'litespeed-cache' => array('label' => self::maybe_translate('LiteSpeed Cache'), 'aliases' => array('litespeed-cache'), 'pageCache' => true, 'objectCache' => true, 'markers' => array('LiteSpeed Cache', 'LSCWP', 'litespeed-cache', 'LiteSpeed_Cache')),
+            'sg-cachepress' => array('label' => self::maybe_translate('SiteGround Speed Optimizer'), 'aliases' => array('sg-cachepress'), 'pageCache' => true, 'objectCache' => true, 'markers' => array('SiteGround Optimizer', 'Speed Optimizer', 'SG Optimizer', 'sg-cachepress', 'SiteGround_Optimizer')),
+            'wp-fastest-cache' => array('label' => self::maybe_translate('WP Fastest Cache'), 'aliases' => array('wp-fastest-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('WP Fastest Cache', 'WpFastestCache', 'wp-fastest-cache')),
+            'breeze' => array('label' => self::maybe_translate('Breeze'), 'aliases' => array('breeze'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Breeze', 'BREEZE', 'breeze-cache')),
+            'cache-enabler' => array('label' => self::maybe_translate('Cache Enabler'), 'aliases' => array('cache-enabler'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Cache Enabler', 'cache-enabler')),
+            'wp-optimize' => array('label' => self::maybe_translate('WP-Optimize'), 'aliases' => array('wp-optimize'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('WP-Optimize', 'WP_Optimize', 'wp-optimize')),
+            'hummingbird-performance' => array('label' => self::maybe_translate('Hummingbird'), 'aliases' => array('hummingbird-performance'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Hummingbird', 'wphb', 'hummingbird-performance')),
+            'comet-cache' => array('label' => self::maybe_translate('Comet Cache'), 'aliases' => array('comet-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Comet Cache', 'COMET_CACHE', 'comet-cache')),
+            'powered-cache' => array('label' => self::maybe_translate('Powered Cache'), 'aliases' => array('powered-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Powered Cache', 'powered-cache')),
+            'nitropack' => array('label' => self::maybe_translate('NitroPack'), 'aliases' => array('nitropack', 'nitropackio'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('NitroPack', 'nitropack')),
+            'flying-press' => array('label' => self::maybe_translate('FlyingPress'), 'aliases' => array('flying-press', 'flyingpress'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('FlyingPress', 'flying-press', 'flyingpress')),
+            'swift-performance-lite' => array('label' => self::maybe_translate('Swift Performance Lite'), 'aliases' => array('swift-performance-lite'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Swift Performance', 'swift-performance-lite')),
+            'swift-performance' => array('label' => self::maybe_translate('Swift Performance'), 'aliases' => array('swift-performance'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Swift Performance', 'SWIFT_PERFORMANCE', 'swift-performance')),
+            'speedycache' => array('label' => self::maybe_translate('SpeedyCache'), 'aliases' => array('speedycache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('SpeedyCache', 'speedycache')),
+            'seraphinite-accelerator' => array('label' => self::maybe_translate('Seraphinite Accelerator'), 'aliases' => array('seraphinite-accelerator'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Seraphinite Accelerator', 'seraphinite-accelerator')),
+            'tenweb-speed-optimizer' => array('label' => self::maybe_translate('10Web Booster'), 'aliases' => array('tenweb-speed-optimizer', '10web-booster'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('10Web Booster', 'TENWEB', 'tenweb-speed-optimizer')),
+            'wp-cloudflare-page-cache' => array('label' => self::maybe_translate('Super Page Cache for Cloudflare'), 'aliases' => array('wp-cloudflare-page-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Super Page Cache', 'WP Cloudflare Super Page Cache', 'wp-cloudflare-page-cache')),
+            'cachify' => array('label' => self::maybe_translate('Cachify'), 'aliases' => array('cachify'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Cachify', 'cachify')),
+            'hyper-cache' => array('label' => self::maybe_translate('Hyper Cache'), 'aliases' => array('hyper-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Hyper Cache', 'hyper-cache')),
+            'simple-cache' => array('label' => self::maybe_translate('Simple Cache'), 'aliases' => array('simple-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Simple Cache', 'simple-cache')),
+            'atec-cache-apcu' => array('label' => self::maybe_translate('atec Cache APCu'), 'aliases' => array('atec-cache-apcu'), 'pageCache' => true, 'objectCache' => true, 'markers' => array('atec Cache APCu', 'atec-cache-apcu')),
+            'ezcache' => array('label' => self::maybe_translate('ezCache'), 'aliases' => array('ezcache'), 'pageCache' => true, 'objectCache' => true, 'markers' => array('ezCache', 'ezcache')),
+            'batcache' => array('label' => self::maybe_translate('Batcache'), 'aliases' => array('batcache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Batcache', 'batcache')),
+            'vendi-cache' => array('label' => self::maybe_translate('Vendi Cache'), 'aliases' => array('vendi-cache'), 'pageCache' => true, 'objectCache' => false, 'markers' => array('Vendi Cache', 'vendi-cache')),
+
+            'redis-cache' => array('label' => self::maybe_translate('Redis Object Cache'), 'aliases' => array('redis-cache'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Redis Object Cache', 'Redis_Object_Cache', 'redis-cache', 'Rhubarb\\RedisCache')),
+            'object-cache-pro' => array('label' => self::maybe_translate('Object Cache Pro'), 'aliases' => array('object-cache-pro'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Object Cache Pro', 'objectcache.pro', 'ObjectCachePro')),
+            'docket-cache' => array('label' => self::maybe_translate('Docket Cache'), 'aliases' => array('docket-cache'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Docket Cache', 'DocketCache', 'docket-cache')),
+            'sqlite-object-cache' => array('label' => self::maybe_translate('SQLite Object Cache'), 'aliases' => array('sqlite-object-cache'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('SQLite Object Cache', 'sqlite-object-cache')),
+            'wp-redis' => array('label' => self::maybe_translate('WP Redis'), 'aliases' => array('wp-redis'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('WP Redis', 'wp-redis')),
+            'object-cache-4-everyone' => array('label' => self::maybe_translate('Object Cache 4 everyone'), 'aliases' => array('object-cache-4-everyone'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Object Cache 4 everyone', 'object-cache-4-everyone')),
+            'memcached-redux' => array('label' => self::maybe_translate('Memcached Redux'), 'aliases' => array('memcached-redux'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Memcached Redux', 'memcached-redux')),
+            'memcached' => array('label' => self::maybe_translate('Memcached Object Cache'), 'aliases' => array('memcached'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('Memcached Object Cache', 'Memcached', 'Memcache', 'memcached', 'memcache')),
+            'memcached-is-your-friend' => array('label' => self::maybe_translate('MemcacheD Is Your Friend'), 'aliases' => array('memcached-is-your-friend'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('MemcacheD Is Your Friend', 'memcached-is-your-friend')),
+            'apcu-object-cache' => array('label' => self::maybe_translate('APCu Object Cache'), 'aliases' => array('apcu-object-cache', 'zapcu'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('APCu Object Cache', 'ZapCu', 'apcu-object-cache')),
+            'eacobjectcache' => array('label' => self::maybe_translate('{eac}ObjectCache'), 'aliases' => array('eacobjectcache'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('{eac}ObjectCache', 'eacObjectCache', 'eacobjectcache')),
+            'snapcache' => array('label' => self::maybe_translate('SnapCache'), 'aliases' => array('snapcache'), 'pageCache' => false, 'objectCache' => true, 'markers' => array('SnapCache', 'snapcache')),
+
+            // Optimization-only plugins are intentionally omitted from Page/Object hard conflicts.
+            // Hosting integrations are recognized for diagnostics/fingerprints but are not treated
+            // as user-deactivatable hard conflicts by this registry.
+            'kinsta-mu-plugins' => array('label' => self::maybe_translate('Kinsta MU Plugin'), 'aliases' => array('kinsta-mu-plugins', 'kinsta-mu-plugin'), 'pageCache' => false, 'objectCache' => false, 'infrastructureCache' => true, 'markers' => array('Kinsta MU Plugin', 'kinsta-mu-plugins')),
+            'wpengine-common' => array('label' => self::maybe_translate('WP Engine MU Plugin'), 'aliases' => array('wpengine-common', 'wpengine'), 'pageCache' => false, 'objectCache' => false, 'infrastructureCache' => true, 'markers' => array('WP Engine', 'wpengine-common')),
+            'pressable' => array('label' => self::maybe_translate('Pressable Cache Integration'), 'aliases' => array('pressable', 'pressable-mu-plugin'), 'pageCache' => false, 'objectCache' => false, 'infrastructureCache' => true, 'markers' => array('Pressable', 'Batcache')),
+            'flywp' => array('label' => self::maybe_translate('FlyWP Helper'), 'aliases' => array('flywp'), 'pageCache' => false, 'objectCache' => false, 'infrastructureCache' => true, 'markers' => array('FlyWP', 'flywp')),
         );
     }
 
+
+    private static function get_known_cache_plugin_signatures()
+    {
+        return self::get_cache_plugin_registry();
+    }
 
 
     private static function is_ultracache_managed_cache_dropin($basename, $contents)
@@ -579,7 +748,6 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
     }
 
 
-
     private static function detect_cache_dropin_owner($contents, $basename = '')
     {
         $contents = (string) $contents;
@@ -591,7 +759,7 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
             return 'UltraCache';
         }
 
-        foreach (self::get_known_cache_plugin_signatures() as $signature) {
+        foreach (self::get_cache_plugin_registry() as $signature) {
             $label = (string) ($signature['label'] ?? 'Unknown');
             $markers = isset($signature['markers']) && is_array($signature['markers']) ? $signature['markers'] : array();
             foreach ($markers as $marker) {
@@ -605,11 +773,16 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
     }
 
 
-
     private static function get_cache_dropin_conflict_status()
     {
         $dropins = array();
         $detected = false;
+        $active_page_cache = false;
+        $active_object_cache = false;
+        foreach (self::get_active_cache_implementations() as $active_implementation) {
+            $active_page_cache = $active_page_cache || !empty($active_implementation['pageCache']);
+            $active_object_cache = $active_object_cache || !empty($active_implementation['objectCache']);
+        }
 
         $targets = array(
             'advanced-cache.php' => self::maybe_translate('Page cache drop-in'),
@@ -624,6 +797,8 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
             $managed = $exists && self::is_ultracache_managed_cache_dropin($basename, $contents);
             $owner = $exists ? self::detect_cache_dropin_owner($contents, $basename) : '';
             $is_conflict = $exists && !$managed;
+            $active_owner_protected = ('advanced-cache.php' === $basename && $active_page_cache)
+                || ('object-cache.php' === $basename && $active_object_cache);
 
             if ($is_conflict) {
                 $detected = true;
@@ -636,7 +811,8 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
                 'exists' => (bool) $exists,
                 'managed' => (bool) $managed,
                 'owner' => $exists ? $owner : '',
-                'removable' => (bool) $is_conflict,
+                'removable' => (bool) ($is_conflict && !$active_owner_protected),
+                'activeOwnerProtected' => (bool) ($is_conflict && $active_owner_protected),
                 'size' => $exists ? ultracache_dropin_filesize($basename) : 0,
                 'modified' => $exists ? ultracache_dropin_filemtime($basename) : 0,
             );
@@ -645,69 +821,252 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
         return array(
             'detected' => (bool) $detected,
             'dropins' => $dropins,
-            'message' => $detected ? self::maybe_translate('Conflicting WordPress cache drop-ins detected. UltraCache can remove them if you choose.') : '',
+            'message' => $detected ? self::maybe_translate('Conflicting WordPress cache drop-ins detected.') : '',
         );
     }
 
 
-
-    private static function get_active_cache_plugin_conflict_status()
+    private static function match_cache_plugin_registry_entry($plugin_file)
     {
-        $known = array(
-            'w3-total-cache' => 'W3 Total Cache',
-            'wp-rocket' => 'WP Rocket',
-            'wp-super-cache' => 'WP Super Cache',
-            'litespeed-cache' => 'LiteSpeed Cache',
-            'sg-cachepress' => 'SiteGround Optimizer',
-            'wp-fastest-cache' => 'WP Fastest Cache',
-            'breeze' => 'Breeze',
-            'redis-cache' => 'Redis Object Cache',
-            'docket-cache' => 'Docket Cache',
-            'object-cache-pro' => 'Object Cache Pro',
-            'memcached' => 'Memcached Object Cache',
-            'powered-cache' => 'Powered Cache',
-            'cache-enabler' => 'Cache Enabler',
-            'comet-cache' => 'Comet Cache',
-            'hummingbird-performance' => 'Hummingbird',
-            'nitropack' => 'NitroPack',
-            'autoptimize' => 'Autoptimize',
-            'wp-optimize' => 'WP-Optimize',
-        );
+        $plugin_file = wp_normalize_path((string) $plugin_file);
+        if ('' === $plugin_file) {
+            return array();
+        }
 
+        $trimmed = trim($plugin_file, '/');
+        $parts = array_values(array_filter(explode('/', $trimmed), 'strlen'));
+        $basename = strtolower((string) pathinfo(basename($trimmed), PATHINFO_FILENAME));
+        $parent = count($parts) > 1 ? strtolower((string) $parts[count($parts) - 2]) : '';
+        $first = !empty($parts) ? strtolower((string) $parts[0]) : '';
+        $identities = array_values(array_unique(array_filter(array($first, $parent, $basename))));
+
+        foreach (self::get_cache_plugin_registry() as $slug => $entry) {
+            $aliases = isset($entry['aliases']) && is_array($entry['aliases']) ? $entry['aliases'] : array();
+            $aliases[] = $slug;
+            $aliases = array_values(array_unique(array_filter(array_map(static function ($value) {
+                return strtolower(trim((string) $value));
+            }, $aliases))));
+
+            if (array_intersect($identities, $aliases)) {
+                $entry['slug'] = (string) $slug;
+                return $entry;
+            }
+        }
+
+        return array();
+    }
+
+
+    private static function get_active_cache_implementations()
+    {
         $active = array();
         $site_plugins = get_option('active_plugins', array());
         if (is_array($site_plugins)) {
-            $active = array_merge($active, $site_plugins);
+            foreach ($site_plugins as $plugin_file) {
+                $active[] = array('file' => (string) $plugin_file, 'source' => 'site');
+            }
         }
 
         if (is_multisite()) {
             $network_plugins = get_site_option('active_sitewide_plugins', array());
             if (is_array($network_plugins)) {
-                $active = array_merge($active, array_keys($network_plugins));
+                foreach (array_keys($network_plugins) as $plugin_file) {
+                    $active[] = array('file' => (string) $plugin_file, 'source' => 'network');
+                }
+            }
+        }
+
+        if (!function_exists('get_mu_plugins')) {
+            $plugin_api = defined('ABSPATH') ? ABSPATH . 'wp-admin/includes/plugin.php' : '';
+            if ('' !== $plugin_api && file_exists($plugin_api)) {
+                require_once $plugin_api;
+            }
+        }
+        if (function_exists('get_mu_plugins')) {
+            $mu_plugins = get_mu_plugins();
+            if (is_array($mu_plugins)) {
+                foreach (array_keys($mu_plugins) as $plugin_file) {
+                    $active[] = array('file' => (string) $plugin_file, 'source' => 'mu');
+                }
             }
         }
 
         $items = array();
-        foreach (array_unique(array_filter(array_map('strval', $active))) as $plugin_file) {
-            $slug = strtolower(trim(strtok($plugin_file, '/')));
-            if ('' === $slug || 'ultracache' === $slug || !isset($known[$slug])) {
+        foreach ($active as $active_plugin) {
+            $plugin_file = (string) ($active_plugin['file'] ?? '');
+            $entry = self::match_cache_plugin_registry_entry($plugin_file);
+            if (empty($entry['slug']) || 'ultracache' === $entry['slug']) {
                 continue;
             }
 
-            $items[] = array(
+            $slug = (string) $entry['slug'];
+            if (isset($items[$slug])) {
+                $sources = isset($items[$slug]['sources']) && is_array($items[$slug]['sources']) ? $items[$slug]['sources'] : array();
+                $source = (string) ($active_plugin['source'] ?? 'site');
+                if ('' !== $source && !in_array($source, $sources, true)) {
+                    $sources[] = $source;
+                }
+                $items[$slug]['sources'] = $sources;
+                continue;
+            }
+
+            $items[$slug] = array(
                 'slug' => $slug,
-                'name' => $known[$slug],
+                'name' => (string) ($entry['label'] ?? $slug),
                 'pluginFile' => $plugin_file,
+                'sources' => array((string) ($active_plugin['source'] ?? 'site')),
+                'pageCache' => !empty($entry['pageCache']),
+                'objectCache' => !empty($entry['objectCache']),
+                'infrastructureCache' => !empty($entry['infrastructureCache']),
             );
         }
 
+        return array_values($items);
+    }
+
+
+    private static function get_active_cache_plugin_conflict_status()
+    {
+        $items = array_values(array_filter(self::get_active_cache_implementations(), static function ($item) {
+            return !empty($item['pageCache']) || !empty($item['objectCache']);
+        }));
+
         return array(
             'detected' => !empty($items),
-            'items' => array_values($items),
-            'message' => !empty($items) ? self::maybe_translate('Potential cache plugin conflict detected. Running multiple cache/performance plugins together can cause stale pages, purge loops, or object cache conflicts.') : '',
+            'items' => $items,
+            'message' => !empty($items) ? self::maybe_translate('Another active Page Cache or Object Cache implementation was detected.') : '',
         );
     }
 
+
+    public static function get_cache_conflict_preflight_status($page_cache_requested = true, $object_cache_requested = false)
+    {
+        $page_cache_requested = (bool) $page_cache_requested;
+        $object_cache_requested = (bool) $object_cache_requested;
+        $conflicts = array();
+
+        foreach (self::get_active_cache_implementations() as $item) {
+            $page_conflict = $page_cache_requested && !empty($item['pageCache']);
+            $object_conflict = $object_cache_requested && !empty($item['objectCache']);
+            if (!$page_conflict && !$object_conflict) {
+                continue;
+            }
+
+            $item['pageConflict'] = $page_conflict;
+            $item['objectConflict'] = $object_conflict;
+            $conflicts[] = $item;
+        }
+
+        $parts = array();
+        foreach ($conflicts as $item) {
+            $capabilities = array();
+            if (!empty($item['pageConflict'])) {
+                $capabilities[] = self::maybe_translate('Page Cache');
+            }
+            if (!empty($item['objectConflict'])) {
+                $capabilities[] = self::maybe_translate('Object Cache');
+            }
+            $parts[] = (string) ($item['name'] ?? $item['slug'] ?? 'Unknown') . ' (' . implode(' + ', $capabilities) . ')';
+        }
+
+        $message = '';
+        if (!empty($parts)) {
+            $message = self::maybe_translate('Another active cache implementation conflicts with the UltraCache options selected in the Setup Wizard: ')
+                . implode(', ', $parts)
+                . '. '
+                . self::maybe_translate('Please deactivate the conflicting plugin first, then run the Setup Wizard again.');
+            if ($object_cache_requested) {
+                $message .= ' ' . self::maybe_translate('If you want to keep an existing Object Cache plugin, choose “Do not manage Object Cache with UltraCache”.');
+            }
+        }
+
+        return array(
+            'success' => true,
+            'blocked' => !empty($conflicts),
+            'pageCacheRequested' => $page_cache_requested,
+            'objectCacheRequested' => $object_cache_requested,
+            'conflicts' => $conflicts,
+            'message' => $message,
+        );
+    }
+
+
+    private static function remove_foreign_cache_dropin_for_takeover($basename)
+    {
+        $basename = basename((string) $basename);
+        if (!in_array($basename, array('advanced-cache.php', 'object-cache.php'), true)) {
+            return new WP_Error('ultracache_cache_dropin_invalid', self::maybe_translate('UltraCache received an invalid cache drop-in takeover target.'));
+        }
+        if (!ultracache_dropin_exists($basename)) {
+            return true;
+        }
+
+        $read = ultracache_read_dropin($basename);
+        $contents = is_string($read) ? $read : '';
+        if (self::is_ultracache_managed_cache_dropin($basename, $contents)) {
+            return true;
+        }
+
+        if (!ultracache_delete_dropin($basename)) {
+            return new WP_Error(
+                'ultracache_cache_dropin_remove_failed',
+                sprintf(
+                    /* translators: %s: WordPress cache drop-in file name. */
+                    self::maybe_translate('UltraCache could not remove the inactive cache helper %s. Check wp-content permissions and retry.'),
+                    $basename
+                )
+            );
+        }
+
+        if (ultracache_dropin_exists($basename)) {
+            return new WP_Error(
+                'ultracache_cache_dropin_remove_verification_failed',
+                sprintf(
+                    /* translators: %s: WordPress cache drop-in file name. */
+                    self::maybe_translate('UltraCache removed %s but could not verify that the file is gone. Check wp-content permissions and retry.'),
+                    $basename
+                )
+            );
+        }
+
+        return true;
+    }
+
+
+    private static function preflight_cache_takeover($page_cache_requested, $object_cache_requested)
+    {
+        $status = self::get_cache_conflict_preflight_status($page_cache_requested, $object_cache_requested);
+        if (!empty($status['blocked'])) {
+            return new WP_Error(
+                'ultracache_active_cache_plugin_conflict',
+                (string) ($status['message'] ?? self::maybe_translate('Another active cache plugin must be deactivated before UltraCache can take over the selected cache layer.')),
+                array('conflicts' => $status['conflicts'] ?? array())
+            );
+        }
+
+        if ($page_cache_requested && method_exists(static::class, 'validate_wp_cache_takeover_preflight')) {
+            $wp_cache_preflight = self::validate_wp_cache_takeover_preflight();
+            if (is_wp_error($wp_cache_preflight)) {
+                return $wp_cache_preflight;
+            }
+        }
+
+        if ($page_cache_requested) {
+            $cleanup = self::remove_foreign_cache_dropin_for_takeover('advanced-cache.php');
+            if (is_wp_error($cleanup)) {
+                return $cleanup;
+            }
+        }
+
+        if ($object_cache_requested) {
+            $cleanup = self::remove_foreign_cache_dropin_for_takeover('object-cache.php');
+            if (is_wp_error($cleanup)) {
+                return $cleanup;
+            }
+        }
+
+        return true;
+    }
 
 
     private static function get_legacy_cache_conflict_status()
@@ -826,6 +1185,19 @@ trait Ultra_Cache_WP_Settings_Migration_Trait
             }
 
             if (!ultracache_dropin_exists($basename)) {
+                continue;
+            }
+
+            $active_conflict = self::get_cache_conflict_preflight_status(
+                'advanced-cache.php' === $basename,
+                'object-cache.php' === $basename
+            );
+            if (!empty($active_conflict['blocked'])) {
+                $failed[] = array(
+                    'file' => $basename,
+                    'owner' => 'Active plugin',
+                    'message' => (string) ($active_conflict['message'] ?? self::maybe_translate('An active cache plugin still owns this cache layer.')),
+                );
                 continue;
             }
 

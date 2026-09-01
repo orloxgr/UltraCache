@@ -35,6 +35,7 @@ trait Ultra_Cache_Engine_JS_Exclusions_Trait
     private function get_user_force_deferred_script_dependency_groups(array $records, array $settings = array())
     {
         $protected = array();
+        $native_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
 
         foreach ($records as $record) {
             if (!$this->script_record_matches_user_force_defer($record, $settings)) {
@@ -42,7 +43,7 @@ trait Ultra_Cache_Engine_JS_Exclusions_Trait
             }
 
             $group = isset($record['group']) ? (string) $record['group'] : '';
-            if ('' !== $group) {
+            if ('' !== $group && empty($native_groups[$group])) {
                 $protected[$group] = true;
             }
         }
@@ -269,9 +270,6 @@ trait Ultra_Cache_Engine_JS_Exclusions_Trait
             'jquery-migrate',
             'functions.js',
             'themes/',
-            'woocommerce-coupon-box',
-            'wcb_params',
-            'elementor',
         );
         if (function_exists('ultracache_themes_public_paths')) {
             foreach (ultracache_themes_public_paths() as $theme_marker) {
@@ -363,9 +361,9 @@ private function script_record_matches_user_defer_exclusion(array $record, array
     private function is_script_force_blocking($handle, $src, $tag = '', array $settings = array())
     {
         /*
-         * Do not silently force-block core/WooCommerce/Elementor/theme
-         * scripts. The user-visible Do Not Defer or Delay list is the
-         * authoritative compatibility fallback.
+         * Generic engine force-blocking contains no vendor/plugin policy.
+         * Compatibility belongs to visible lists or explicit integration
+         * switches handled before this fallback.
          */
         return false;
     }
@@ -591,7 +589,7 @@ private function script_record_matches_user_defer_exclusion(array $record, array
 
 
 
-    private function is_js_excluded_by_user_patterns($handle, $src, $tag = '', $inline_code = '', array $settings = array())
+    private function is_js_directly_excluded_by_user_patterns($handle, $src, $tag = '', $inline_code = '', array $settings = array())
     {
         $fragments = $this->get_unified_js_user_exclude_fragments($settings);
         if (empty($fragments)) {
@@ -602,6 +600,115 @@ private function script_record_matches_user_defer_exclusion(array $record, array
             $this->build_js_exclusion_match_haystacks($handle, $src, $tag, $inline_code),
             $fragments
         );
+    }
+
+
+
+    private function get_user_excluded_registered_script_dependency_handles(array $settings = array())
+    {
+        global $wp_scripts;
+
+        if (!is_object($wp_scripts) || !isset($wp_scripts->registered) || !is_array($wp_scripts->registered) || empty($wp_scripts->registered)) {
+            return array();
+        }
+
+        $fragments = $this->get_unified_js_user_exclude_fragments($settings);
+        if (empty($fragments)) {
+            return array();
+        }
+
+        static $cache = array();
+
+        $registry_identity = function_exists('spl_object_hash') ? spl_object_hash($wp_scripts) : get_class($wp_scripts);
+        $cache_key = hash(
+            'sha256',
+            $registry_identity . '|' . count($wp_scripts->registered) . '|' . implode("\n", array_map('strval', $fragments))
+        );
+        if (isset($cache[$cache_key])) {
+            return $cache[$cache_key];
+        }
+
+        $protected = array();
+        $pending = array();
+
+        foreach ($wp_scripts->registered as $registered_handle => $dependency) {
+            $registered_handle = trim((string) $registered_handle);
+            if ('' === $registered_handle || !is_object($dependency)) {
+                continue;
+            }
+
+            $registered_src = isset($dependency->src) ? (string) $dependency->src : '';
+            $synthetic_tag = '<script id="' . str_replace('"', '', $registered_handle) . '-js"></script>';
+            if (!$this->is_js_directly_excluded_by_user_patterns($registered_handle, $registered_src, $synthetic_tag, '', $settings)) {
+                continue;
+            }
+
+            $key = strtolower($registered_handle);
+            $protected[$key] = true;
+            $pending[] = $registered_handle;
+        }
+
+        while (!empty($pending)) {
+            $current = array_pop($pending);
+            if (!isset($wp_scripts->registered[$current]) || !is_object($wp_scripts->registered[$current])) {
+                continue;
+            }
+
+            $dependency = $wp_scripts->registered[$current];
+            $deps = isset($dependency->deps) && is_array($dependency->deps) ? $dependency->deps : array();
+            foreach ($deps as $dep_handle) {
+                $dep_handle = trim((string) $dep_handle);
+                if ('' === $dep_handle) {
+                    continue;
+                }
+
+                $key = strtolower($dep_handle);
+                if (isset($protected[$key])) {
+                    continue;
+                }
+
+                $protected[$key] = true;
+                if (isset($wp_scripts->registered[$dep_handle]) && is_object($wp_scripts->registered[$dep_handle])) {
+                    $pending[] = $dep_handle;
+                }
+            }
+        }
+
+        $cache[$cache_key] = $protected;
+
+        return $protected;
+    }
+
+
+
+    private function is_js_protected_by_user_exclusion_dependency_closure($handle, array $settings = array())
+    {
+        $handle = strtolower(trim((string) $handle));
+        if ('' === $handle) {
+            return false;
+        }
+
+        $protected = $this->get_user_excluded_registered_script_dependency_handles($settings);
+
+        return isset($protected[$handle]);
+    }
+
+
+
+    private function is_js_excluded_by_user_patterns($handle, $src, $tag = '', $inline_code = '', array $settings = array())
+    {
+        if ($this->is_js_directly_excluded_by_user_patterns($handle, $src, $tag, $inline_code, $settings)) {
+            return true;
+        }
+
+        /*
+         * A visible Do Not Defer or Delay exclusion must not create an
+         * impossible WordPress execution order. Once an explicitly excluded
+         * registered handle is identified, inherit that blocking protection
+         * through its real registered dependency closure for this request.
+         * No provider names or plugin paths are hardcoded here.
+         */
+        return $this->is_js_protected_by_user_exclusion_dependency_closure($handle, $settings);
     }
 
 
@@ -741,7 +848,6 @@ private function get_force_blocking_script_handles(array $settings = array())
         }
 
         return in_array($fragment, array(
-            'woocommerce',
             'wordpress',
             'frontend',
             'main',
@@ -776,15 +882,6 @@ private function get_force_blocking_script_handles(array $settings = array())
                 return true;
             }
 
-            if ('woocommerce' === $fragment) {
-                if ((function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($haystack, ultracache_plugins_public_path('woocommerce'))) || false !== strpos($haystack, '/woocommerce/assets/')) {
-                    return true;
-                }
-
-                if (preg_match('/(?:^|[\s"\'=\/])woocommerce(?:-js(?:-(?:before|after|extra|translations))?|\.min\.js|\.js)?(?:$|[\s"\'<>\/])/', $haystack)) {
-                    return true;
-                }
-            }
         }
 
         return false;

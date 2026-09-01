@@ -115,7 +115,7 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
                         $html_status,
                         $html_message,
                         $html_tested ? $tested_at : 0,
-                        !empty($endpoint_capability['htmlFlush']) ? $tested_at + WEEK_IN_SECONDS : 0
+                        0
                     ),
                     $settings
                 );
@@ -131,7 +131,7 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
                         $host_status,
                         $host_message,
                         $host_tested ? $tested_at : 0,
-                        !empty($endpoint_capability['hostFlush']) ? $tested_at + WEEK_IN_SECONDS : 0
+                        0
                     ),
                     $settings
                 );
@@ -155,16 +155,9 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
                 $host_tested_at = $host_tested
                     ? $tested_at
                     : absint($current['hostFlushTestedAt'] ?? 0);
-                $html_proof_expires_at = $html_tested
-                    ? ($html_verified ? $tested_at + WEEK_IN_SECONDS : 0)
-                    : absint($current['htmlFlushProofExpiresAt'] ?? ($current['topologyProofExpiresAt'] ?? 0));
-                $host_proof_expires_at = $host_tested
-                    ? ($host_verified ? $tested_at + WEEK_IN_SECONDS : 0)
-                    : absint($current['hostFlushProofExpiresAt'] ?? ($current['topologyProofExpiresAt'] ?? 0));
-                $topology_expiries = array_filter(array(
-                    $html_proof_expires_at,
-                    $host_proof_expires_at,
-                ));
+                $html_proof_expires_at = 0;
+                $host_proof_expires_at = 0;
+                $topology_expiries = array();
                 $changes = array(
                     'htmlFlush' => $html_verified,
                     'hostFlush' => $host_verified,
@@ -289,9 +282,6 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
             $aggregate_status = 'untested';
             if (!empty($registry['mixedTopology'])) {
                 $aggregate_status = 'mixed-topology-unverified';
-            } elseif ('proof-expired' === (string) ($html_state['state'] ?? '')
-                || 'proof-expired' === (string) ($host_state['state'] ?? '')) {
-                $aggregate_status = 'proof-expired';
             } elseif ($diagnostic_tested_at > 0 && '' !== $diagnostic_status) {
                 $aggregate_status = $diagnostic_status;
             } elseif (!empty($html_state['tested']) || !empty($host_state['tested'])) {
@@ -300,14 +290,12 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
 
             if ('mixed-topology-unverified' === $aggregate_status) {
                 $message = self::maybe_translate('Site-wide invalidation is not enabled because every configured Varnish endpoint must independently prove the requested scope.');
-            } elseif ('proof-expired' === $aggregate_status) {
-                $message = self::maybe_translate('The stored HTML-only or entire-host behavior proof has expired. Run Test Varnish to renew it.');
             } elseif ($diagnostic_current && '' !== (string) ($diagnostic['message'] ?? '')) {
                 $message = self::sanitize_varnish_string((string) $diagnostic['message']);
             } elseif ('configuration-changed' === $aggregate_status) {
-                $message = self::maybe_translate('The Varnish invalidation contract changed. Run Test Varnish to verify HTML-only or entire-host invalidation again.');
+                $message = self::maybe_translate('The Varnish invalidation contract changed. Run Redetect Varnish Capabilities to verify HTML-only or entire-host invalidation again.');
             } elseif ('untested' === $aggregate_status) {
-                $message = self::maybe_translate('Run Test Varnish to verify HTML-only or entire-host invalidation for every configured endpoint.');
+                $message = self::maybe_translate('Run Redetect Varnish Capabilities to verify HTML-only or entire-host invalidation for every configured endpoint.');
             } else {
                 $message = self::maybe_translate('The configured Varnish transport did not pass the HTML-only or entire-host behavior proof.');
             }
@@ -430,9 +418,52 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
      */
     private static function get_varnish_current_site_host()
     {
-        $parsed = wp_parse_url(home_url('/'));
+        $origin = function_exists('ultracache_get_configured_site_origin')
+            ? ultracache_get_configured_site_origin()
+            : home_url('/');
+        $parsed = wp_parse_url($origin);
 
         return is_array($parsed) && !empty($parsed['host']) ? strtolower((string) $parsed['host']) : '';
+    }
+
+    /**
+     * Return every unique public host that can own Varnish cache for this site.
+     *
+     * Directory-mode languages collapse to one host. Provider domain-per-language
+     * installations return every active language host. This is runtime scope,
+     * not a separate capability proof per language.
+     *
+     * @return array<int,string>
+     */
+    private static function get_varnish_site_flush_hosts()
+    {
+        $hosts = array();
+        if (function_exists('ultracache_get_public_site_topology')) {
+            $topology = ultracache_get_public_site_topology();
+            $candidates = array();
+            if (!empty($topology['configuredBase'])) {
+                $candidates[] = (string) $topology['configuredBase'];
+            }
+            foreach ((array) ($topology['multilingualLanguageHomeUrls'] ?? array()) as $language_url) {
+                $candidates[] = (string) $language_url;
+            }
+            foreach ($candidates as $candidate) {
+                $host = strtolower(rtrim((string) wp_parse_url($candidate, PHP_URL_HOST), '.'));
+                if ('' !== $host) {
+                    $hosts[$host] = $host;
+                }
+            }
+        }
+
+        if (empty($hosts)) {
+            $host = self::get_varnish_current_site_host();
+            if ('' !== $host) {
+                $hosts[$host] = $host;
+            }
+        }
+
+        ksort($hosts, SORT_STRING);
+        return array_values($hosts);
     }
 
 
@@ -703,12 +734,30 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
             return $result;
         }
 
-        $host = self::get_varnish_current_site_host();
-        if ('' === $host) {
+        $hosts = array();
+        if ($probe_authorized) {
+            $probe_host = '';
+            foreach ($probe_urls as $probe_url) {
+                $probe_host = strtolower(rtrim((string) wp_parse_url((string) $probe_url, PHP_URL_HOST), '.'));
+                if ('' !== $probe_host) {
+                    break;
+                }
+            }
+            if ('' === $probe_host) {
+                $probe_host = self::get_varnish_current_site_host();
+            }
+            if ('' !== $probe_host) {
+                $hosts[] = $probe_host;
+            }
+        } else {
+            $hosts = self::get_varnish_site_flush_hosts();
+        }
+
+        if (empty($hosts)) {
             $result = array(
                 'success' => false,
                 'partial' => false,
-                'message' => self::maybe_translate('Could not determine site host for Varnish.'),
+                'message' => self::maybe_translate('Could not determine any trusted public site host for Varnish.'),
                 'time' => time(),
                 'operationType' => 'site-flush',
             );
@@ -723,16 +772,90 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
             : ($probe_authorized && '' !== $probe_method
                 ? $probe_method
                 : ('ban' === sanitize_key((string) ($strategy_status['verifiedHardStrategy'] ?? '')) ? 'BAN' : 'PURGE'));
-        $expr = 'html' === $effective
-            ? self::build_varnish_html_host_ban_expression($host)
-            : self::build_varnish_ban_expression($host, '/', true);
         $label = 'html' === $effective ? 'html-host' : 'entire-host';
-        $result = self::varnish_send_expr_to_all(
-            $expr,
-            $label,
-            $probe_authorized ? $probe_endpoints : array(),
-            $probe_authorized,
-            $site_flush_method
+
+        $host_results = array();
+        $details = array();
+        $successful_endpoint_requests = 0;
+        $failed_endpoint_requests = 0;
+        $successful_host_count = 0;
+        $successful_endpoint_targets = array();
+        $failed_endpoint_targets = array();
+        foreach ($hosts as $host) {
+            $expr = 'html' === $effective
+                ? self::build_varnish_html_host_ban_expression($host)
+                : self::build_varnish_ban_expression($host, '/', true);
+            if ('' === $expr) {
+                $host_result = array(
+                    'success' => false,
+                    'partial' => false,
+                    'message' => self::maybe_translate('Could not build the Varnish host invalidation expression.'),
+                    'successfulEndpointRequestCount' => 0,
+                    'failedEndpointRequestCount' => count((array) ($settings['servers'] ?? array())),
+                    'details' => array(),
+                );
+            } else {
+                $host_result = self::varnish_send_expr_to_all(
+                    $expr,
+                    $label,
+                    $probe_authorized ? $probe_endpoints : array(),
+                    $probe_authorized,
+                    $site_flush_method,
+                    $host
+                );
+            }
+            $host_result['host'] = $host;
+            $host_results[] = $host_result;
+            $successful_endpoint_requests += absint($host_result['successfulEndpointRequestCount'] ?? 0);
+            $failed_endpoint_requests += absint($host_result['failedEndpointRequestCount'] ?? 0);
+            if (!empty($host_result['success'])) {
+                ++$successful_host_count;
+            }
+            foreach ((array) ($host_result['successfulEndpointTargets'] ?? array()) as $target) {
+                $successful_endpoint_targets[$host . '|' . (string) $target] = $host . ' @ ' . (string) $target;
+            }
+            foreach ((array) ($host_result['failedEndpointTargets'] ?? array()) as $target) {
+                $failed_endpoint_targets[$host . '|' . (string) $target] = $host . ' @ ' . (string) $target;
+            }
+            foreach ((array) ($host_result['details'] ?? array()) as $detail) {
+                if (is_array($detail)) {
+                    $detail['host'] = $host;
+                    $details[] = $detail;
+                }
+            }
+        }
+
+        $host_count = count($hosts);
+        $all_hosts_ok = $successful_host_count === $host_count;
+        $result = array(
+            'success' => $all_hosts_ok,
+            'partial' => !$all_hosts_ok && ($successful_host_count > 0 || $successful_endpoint_requests > 0),
+            'message' => '',
+            'time' => time(),
+            'mode' => (string) ($settings['mode'] ?? 'http'),
+            'method' => $site_flush_method,
+            'effectiveMethod' => 'admin' === self::sanitize_varnish_mode($settings['mode'] ?? 'http') ? 'admin BAN' : $site_flush_method,
+            'endpointCount' => $successful_endpoint_requests + $failed_endpoint_requests,
+            'configuredEndpointCount' => count((array) ($settings['servers'] ?? array())),
+            'successfulEndpointRequestCount' => $successful_endpoint_requests,
+            'failedEndpointRequestCount' => $failed_endpoint_requests,
+            'successfulEndpointTargets' => array_values($successful_endpoint_targets),
+            'failedEndpointTargets' => array_values($failed_endpoint_targets),
+            'attemptedEndpointTargets' => array_values(array_unique(array_merge(
+                array_values($successful_endpoint_targets),
+                array_values($failed_endpoint_targets)
+            ))),
+            'adminModeUsed' => ('admin' === ($settings['mode'] ?? 'http')),
+            'httpEndpointModeUsed' => ('http' === ($settings['mode'] ?? 'http')),
+            'secretConfigured' => !empty($settings['key']),
+            'label' => $label,
+            'requestCount' => $successful_endpoint_requests + $failed_endpoint_requests,
+            'details' => $details,
+            'hostCount' => $host_count,
+            'successfulHostCount' => $successful_host_count,
+            'failedHostCount' => max(0, $host_count - $successful_host_count),
+            'hosts' => array_values($hosts),
+            'hostResults' => $host_results,
         );
 
         $result['operationType'] = 'site-flush';
@@ -750,16 +873,16 @@ trait Ultra_Cache_WP_Varnish_Flush_Scope_Trait
         $result['capabilityProbeAuthorized'] = $probe_authorized;
         $result['verifiedHardMethod'] = $site_flush_method;
 
-        $successful_endpoints = absint($result['successfulEndpointRequestCount'] ?? 0);
-        $failed_endpoints = absint($result['failedEndpointRequestCount'] ?? 0);
         if (!empty($result['success'])) {
             $result['message'] = 'html' === $effective
-                ? self::maybe_translate_sprintf('Varnish HTML-page flush succeeded on %d endpoint(s).', $successful_endpoints)
-                : self::maybe_translate_sprintf('Varnish entire-host flush succeeded on %d endpoint(s).', $successful_endpoints);
+                ? self::maybe_translate_sprintf('Varnish HTML-page flush succeeded for %1$d public host(s) with %2$d endpoint request(s).', $host_count, $successful_endpoint_requests)
+                : self::maybe_translate_sprintf('Varnish entire-host flush succeeded for %1$d public host(s) with %2$d endpoint request(s).', $host_count, $successful_endpoint_requests);
         } elseif (!empty($result['partial'])) {
             $result['message'] = 'html' === $effective
-                ? self::maybe_translate_sprintf('Varnish HTML-page flush succeeded on %1$d endpoint(s) and failed on %2$d endpoint(s).', $successful_endpoints, $failed_endpoints)
-                : self::maybe_translate_sprintf('Varnish entire-host flush succeeded on %1$d endpoint(s) and failed on %2$d endpoint(s).', $successful_endpoints, $failed_endpoints);
+                ? self::maybe_translate_sprintf('Varnish HTML-page flush succeeded for %1$d/%2$d public host(s); %3$d endpoint request(s) failed.', $successful_host_count, $host_count, $failed_endpoint_requests)
+                : self::maybe_translate_sprintf('Varnish entire-host flush succeeded for %1$d/%2$d public host(s); %3$d endpoint request(s) failed.', $successful_host_count, $host_count, $failed_endpoint_requests);
+        } else {
+            $result['message'] = self::maybe_translate_sprintf('Varnish site flush failed for all %d public host(s).', $host_count);
         }
 
         self::set_varnish_last_result($result);

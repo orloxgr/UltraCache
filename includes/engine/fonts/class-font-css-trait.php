@@ -747,8 +747,12 @@ private function prepare_font_url_for_inline_replacement($url, $slash_escaped = 
         }
 
         $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-        if ('' !== $host && '' !== $home_host && $host === $home_host) {
+        $is_local = '' !== $host && (
+            function_exists('ultracache_is_local_site_url')
+                ? ultracache_is_local_site_url($url)
+                : $host === strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST))
+        );
+        if ($is_local) {
             $path = (string) wp_parse_url($url, PHP_URL_PATH);
             $query = (string) wp_parse_url($url, PHP_URL_QUERY);
             if ('' !== $path) {

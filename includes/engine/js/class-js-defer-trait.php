@@ -67,98 +67,72 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
         }
     }
 
-    public function defer_scripts($tag, $handle, $src)
+    /**
+     * Attach an opaque parser-early helper configuration to the external script.
+     *
+     * The payload is base64url JSON produced server-side. Keeping tracker names
+     * out of executable inline JavaScript prevents CMP content classifiers from
+     * disarming UltraCache's bootstrap configuration as marketing code.
+     *
+     * @param string $tag            Rendered script tag.
+     * @param string $opaque_config  Base64url-encoded JSON payload.
+     * @return string
+     */
+    private function add_ultracache_opaque_config_to_script_tag($tag, $opaque_config)
     {
-        $settings = $this->get_settings();
-        if (is_admin()) {
+        $opaque_config = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $opaque_config);
+        if ('' === $opaque_config) {
             return $tag;
         }
 
-        if ($this->is_ultracache_frontend_js_helper_handle($handle)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        $defer_stage = $this->get_defer_stage_level($settings);
-        $defer_all_js = !empty($settings['defer_all_js']);
-        $delay_all_js = !empty($settings['delay_all_js']);
-
-        if (!$defer_all_js && 0 < $defer_stage && $this->is_script_absolute_defer_blocking($handle, $src, $tag, $settings)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        if (0 < $defer_stage && $this->is_script_user_defer_excluded($handle, $src, $settings, $tag)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        if (!$defer_all_js && $this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
-            return $this->add_defer_or_parallel_attribute_to_script_tag($tag, $src, $settings, true);
-        }
-
-        /*
-         * Avoid splitting WordPress script groups at script_loader_tag time.
-         * If a handle has registered before/after/extra/translation inline
-         * companions, leave the external tag untouched here so later HTML
-         * passes can either keep or delay the whole group consistently.
-         */
-        if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        /*
-         * Delay-all final HTML processing owns the full ordered decision.
-         * Do not emit native defer while that delayed-loader pass is active,
-         * because that would create mixed defer/delay execution classes.
-         */
-        if ($delay_all_js && $this->is_defer_all_js_candidate($handle, $src, $tag, $settings)) {
-            return $tag;
-        }
-
-        if (!$defer_all_js && 0 < $defer_stage && $this->is_script_force_blocking($handle, $src, $tag, $settings)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        if (!$defer_all_js && 0 < $defer_stage && $this->is_script_safe_stage_excluded($handle, $src, $tag, $settings)) {
-            return $this->strip_native_loading_attributes_from_script_tag($tag);
-        }
-
-        if (2 <= $defer_stage) {
-            $third_party_delay_match = $this->get_third_party_delay_match($handle, $src, $tag, $settings);
-            if (!empty($third_party_delay_match['matched'])) {
-                return $this->build_delayed_script_tag($tag, $handle, $src, $third_party_delay_match['reason']);
+        if (class_exists('WP_HTML_Tag_Processor')) {
+            try {
+                $processor = new WP_HTML_Tag_Processor((string) $tag);
+                if ($processor->next_tag('SCRIPT')) {
+                    $processor->set_attribute('data-ultracache-config', $opaque_config);
+                    $updated = $processor->get_updated_html();
+                    if (is_string($updated) && '' !== $updated) {
+                        return $updated;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Fall through to the conservative string insertion below.
             }
         }
 
-        if (2 <= $defer_stage && !empty($settings['delay_non_critical_js']) && $this->should_delay_non_critical_script($handle, $src, $tag, $settings)) {
-            return $this->build_delayed_script_tag($tag, $handle, $src);
-        }
+        $attribute = ' data-ultracache-config="' . esc_attr($opaque_config) . '"';
+        $updated = preg_replace('/<script\b/i', '<script' . $attribute, (string) $tag, 1);
+        return is_string($updated) && '' !== $updated ? $updated : $tag;
+    }
 
-        if (!empty($settings['async_external_scripts']) && $this->should_async_external_script($handle, $src, $tag, $settings)) {
-            return $this->add_async_attribute_to_script_tag($tag);
-        }
-
-        if (0 === $defer_stage || (empty($settings['defer_js']) && !$defer_all_js)) {
+    public function defer_scripts($tag, $handle, $src)
+    {
+        $settings = $this->get_settings();
+        if (is_admin() || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return $tag;
         }
 
-        if ($delay_all_js) {
-            return $tag;
-        }
-
-        return $this->add_defer_or_parallel_attribute_to_script_tag($tag, $src, $settings, false);
+        $route = $this->ultracache_build_registered_script_route($tag, $handle, $src, $settings);
+        return $this->ultracache_apply_registered_script_route($route, $tag, $handle, $src, $settings);
     }
 
 
 
     private function should_keep_script_blocking_for_defer_all($handle, $src, $tag = '', array $settings = array())
     {
-        // Defer all JS is intentionally literal/aggressive: the only scripts
+
+        if ($this->is_script_force_blocking($handle, $src, $tag, $settings)) {
+            return true;
+        }
+
+        if (method_exists($this, 'should_protect_woocommerce_variable_product_interaction_script')
+            && $this->should_protect_woocommerce_variable_product_interaction_script($handle, $src, $tag, $settings)) {
+            return true;
+        }
+
+        // Defer all JS is intentionally literal/aggressive: other scripts
         // kept blocking are those matching the visible Do Not Defer or Delay
-        // fallback field. WordPress/core/slider protections belong in that
-        // editable list via Populate Defaults, not in hidden runtime rules.
+        // fallback field.
         return $this->is_script_user_defer_excluded($handle, $src, $settings, $tag);
     }
 
@@ -170,7 +144,7 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
          * 2.56.122 regression guard: 2.56.120 bypassed the ordered
          * delayed-loader for every same-host script when Defer all JS was
          * enabled. That broke grouped inline-before / inline-after config
-         * scripts for Complianz, Site Kit, WooCommerce and similar assets.
+         * scripts with WordPress inline-before / inline-after companions.
          * Keep this helper as a no-op so the dependency-aware ordered path
          * remains authoritative.
          */
@@ -193,6 +167,33 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
         $protected_groups = $this->get_user_excluded_script_dependency_groups($records, $settings);
         $protected_indexes = $this->get_user_excluded_script_dependency_indexes($records, $settings);
         $force_defer_groups = $this->get_user_force_deferred_script_dependency_groups($records, $settings);
+        $wpbakery_force_defer_groups = array();
+        $elementor_force_defer_groups = array();
+        $optimizer_opt_out_groups = array();
+        foreach ($records as $record) {
+            $record_group = isset($record['group']) ? (string) $record['group'] : '';
+            if ('' === $record_group) {
+                continue;
+            }
+            $record_handle = isset($record['handle']) ? (string) $record['handle'] : '';
+            $record_src = isset($record['src']) ? (string) $record['src'] : '';
+            $record_tag = (string) ($record['tag'] ?? '');
+            // Explicit optimizer opt-outs remain group-wide interoperability
+            // contracts for this legacy dependency-group pass. Vendor/CMP identity
+            // does not participate in scheduling here.
+            if ($this->is_script_tag_optimizer_opted_out($record_tag)) {
+                $optimizer_opt_out_groups[$record_group] = true;
+            }
+            if (empty($record['has_src'])) {
+                continue;
+            }
+            if ($this->should_protect_wpbakery_animation_script($record_handle, $record_src, $record_tag, $settings)) {
+                $wpbakery_force_defer_groups[$record_group] = true;
+            }
+            if ($this->should_protect_elementor_compatibility_script($record_handle, $record_src, $record_tag, $settings)) {
+                $elementor_force_defer_groups[$record_group] = true;
+            }
+        }
         $replacements = array();
 
         foreach ($records as $index => $record) {
@@ -203,13 +204,16 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
             $handle = isset($record['handle']) ? (string) $record['handle'] : '';
             $src = isset($record['src']) ? (string) $record['src'] : '';
             $group = isset($record['group']) ? (string) $record['group'] : '';
-            $force_defer = $this->script_record_matches_user_force_defer($record, $settings) || ('' !== $group && !empty($force_defer_groups[$group]));
+            $optimizer_opted_out = $this->is_script_tag_optimizer_opted_out((string) $record['tag'])
+                || ('' !== $group && !empty($optimizer_opt_out_groups[$group]));
+            $elementor_force_defer = $this->should_protect_elementor_compatibility_script($handle, $src, (string) $record['tag'], $settings)
+                || ('' !== $group && !empty($elementor_force_defer_groups[$group]));
+            $force_defer = $elementor_force_defer
+                || $this->script_record_matches_user_force_defer($record, $settings)
+                || $this->should_protect_wpbakery_animation_script($handle, $src, (string) $record['tag'], $settings)
+                || ('' !== $group && (!empty($force_defer_groups[$group]) || !empty($wpbakery_force_defer_groups[$group])));
 
             if ($this->is_ultracache_frontend_js_helper_record($record)) {
-                continue;
-            }
-
-            if (isset($protected_indexes[(int) $index]) || $this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
                 continue;
             }
 
@@ -218,12 +222,22 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
                 $source_tag = (string) $record['tag'];
             }
 
+            if ($optimizer_opted_out) {
+                continue;
+            }
+
+            if (isset($protected_indexes[(int) $index]) || $this->script_record_matches_user_defer_exclusion($record, $settings) || ('' !== $group && !empty($protected_groups[$group]))) {
+                continue;
+            }
+
             if (!empty($record['has_src'])) {
                 if ('' === $src) {
                     continue;
                 }
                 if ($force_defer) {
-                    $deferred = $this->add_defer_or_parallel_attribute_to_script_tag($source_tag, $src, $settings, true);
+                    $deferred = $elementor_force_defer
+                        ? $this->add_defer_attribute_to_script_tag($source_tag, true)
+                        : $this->add_defer_or_parallel_attribute_to_script_tag($source_tag, $src, $settings, true);
                     if (is_string($deferred) && '' !== $deferred && $deferred !== (string) $record['tag']) {
                         $replacements[(int) $index] = $deferred;
                     }
@@ -238,7 +252,7 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
             }
 
             if ($force_defer) {
-                $externalized = $this->build_deferred_external_inline_script_tag($record, $settings);
+                $externalized = $this->build_deferred_external_inline_script_tag($record, $settings, $elementor_force_defer);
                 if (is_string($externalized) && '' !== $externalized && $externalized !== (string) $record['tag']) {
                     $replacements[(int) $index] = $externalized;
                 }
@@ -340,10 +354,12 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
 
 
 
-    private function build_deferred_external_inline_script_tag(array $record, array $settings = array())
+    private function build_deferred_external_inline_script_tag(array $record, array $settings = array(), $force_ordered_defer = false)
     {
+        unset($settings, $force_ordered_defer);
+
         $tag = isset($record['tag']) ? (string) $record['tag'] : '';
-        if ('' === $tag || !preg_match('/^<script\b[^>]*>(.*?)<\/script>$/is', $tag, $content_match)) {
+        if ('' === $tag || !preg_match('/^<script\\b[^>]*>(.*?)<\\/script>$/is', $tag, $content_match)) {
             return $tag;
         }
 
@@ -352,16 +368,18 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
             return $tag;
         }
 
-        $asset = $this->write_deferred_inline_js_asset($content, $record);
-        if (empty($asset['url'])) {
-            return $tag;
-        }
-
+        /*
+         * 3.12.36: DEFER inline JavaScript is no longer externalized into one
+         * generated file per occurrence. Keep the exact source inline during
+         * server-side lane normalization, mark it as a DEFER candidate, and let
+         * the final Unified Inline Registry pass collect the source once into the
+         * page manifest. This intermediate tag is never sent to the browser.
+         */
         $original_attributes = $this->extract_html_tag_attributes($tag);
         $attrs = array();
         foreach ($original_attributes as $name => $value) {
             $name_lc = strtolower((string) $name);
-            if (in_array($name_lc, array('src', 'async', 'defer', 'type', 'data-wp-strategy'), true)) {
+            if (in_array($name_lc, array('src', 'async', 'defer', 'data-wp-strategy'), true)) {
                 continue;
             }
             if (0 === strpos($name_lc, 'data-ultracache-')) {
@@ -375,20 +393,11 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
             }
         }
 
-        $attrs['src'] = (string) $asset['url'];
-        if ($this->should_parallelize_deferred_script((string) $asset['url'], $settings)) {
-            $attrs['async'] = true;
-        } else {
-            $attrs['defer'] = true;
-        }
-        $attrs['data-ultracache-deferred-inline'] = '1';
-        if (!empty($asset['hash'])) {
-            $attrs['data-ultracache-deferred-inline-hash'] = (string) $asset['hash'];
-        }
+        $attrs['defer'] = true;
+        $attrs['data-ultracache-inline-defer-candidate'] = '1';
+        $attrs['data-ultracache-inline-defer-hash'] = substr(hash('sha256', $content), 0, 32);
 
-        // This replaces an already-rendered inline script during final HTML optimization, after the enqueue phase.
-        // Use the WordPress script-tag API so attributes are filtered and serialized by core instead of manual markup.
-        return rtrim(wp_get_script_tag($attrs), "\r\n");
+        return rtrim(wp_get_inline_script_tag($content, $attrs), "\r\n");
     }
 
 
@@ -516,6 +525,10 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
             return false;
         }
 
+        if ($this->should_protect_elementor_compatibility_script('', $src, '', $settings)) {
+            return false;
+        }
+
         if ($this->is_third_party_script_src($src)) {
             return !empty($settings['third_party_js_parallel_execution']);
         }
@@ -596,48 +609,28 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
         }
 
         $src_host = (string) wp_parse_url($src, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $src_host || '' === $home_host || strtolower($src_host) === strtolower($home_host)) {
+        if ('' === $src_host) {
             return false;
         }
-
-        $haystack = strtolower((string) $handle . ' ' . $src . ' ' . $tag);
-        /*
-         * Matching list only: used to add async to already-enqueued
-         * external scripts. It does not add external services to the site.
-         */
-        $patterns = array(
-            'googletagmanager.com',
-            'google-analytics.com',
-            'googleanalytics.com',
-            'gtag/js',
-            'googleadservices.com',
-            'g.doubleclick.net',
-            'connect.facebook.net',
-            'facebook.com/tr',
-            'bat.bing.com',
-            'clarity.ms',
-            'usefathom.com',
-            'plausible.io',
-            'analytics.tiktok.com',
-            'static.hotjar.com',
-            'script.hotjar.com',
-            'snap.licdn.com',
-            'px.ads.linkedin.com',
-            'pinimg.com/ct/',
-            'redditstatic.com/ads/',
-            'mc.yandex.ru',
-        );
-
-        foreach ($patterns as $pattern) {
-            if (false !== strpos($haystack, strtolower($pattern))) {
-                return true;
+        if (function_exists('ultracache_is_public_site_url')) {
+            if (ultracache_is_public_site_url($src)) {
+                return false;
+            }
+        } else {
+            $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+            if ('' === $home_host || strtolower($src_host) === strtolower($home_host)) {
+                return false;
             }
         }
 
-        return false;
+        /*
+         * Async external transport has no private vendor allowlist. When the
+         * legacy switch is enabled it reuses the same user-visible third-party
+         * pattern list shown as Delay third-party JS Patterns.
+         */
+        $patterns = $this->get_safe_third_party_delay_patterns($settings);
+        return '' !== $this->get_matching_third_party_delay_pattern($handle, $src, $tag, $patterns);
     }
-
 
 
     private function is_defer_all_js_candidate($handle, $src, $tag = '', array $settings = array())
@@ -646,6 +639,10 @@ trait Ultra_Cache_Engine_JS_Defer_Trait
         $tag = (string) $tag;
 
         if ('' === $src || false === stripos($tag, '<script')) {
+            return false;
+        }
+
+        if ($this->is_script_tag_optimizer_opted_out($tag)) {
             return false;
         }
 

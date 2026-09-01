@@ -153,14 +153,21 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
     private static function sanitize_varnish_capability_outcome(array $outcome)
     {
         $state = sanitize_key((string) ($outcome['state'] ?? 'not-tested'));
-        if (!in_array($state, array('supported', 'not-supported', 'not-applicable', 'not-tested', 'observation-incomplete', 'proof-expired', 'configuration-changed'), true)) {
+        $legacy_proof_expired = 'proof-expired' === $state;
+        if ($legacy_proof_expired) {
+            $state = 'supported';
+        } elseif (!in_array($state, array('supported', 'not-supported', 'not-applicable', 'not-tested', 'observation-incomplete', 'configuration-changed'), true)) {
             $state = 'not-tested';
         }
-        $reason_code = sanitize_key((string) ($outcome['reasonCode'] ?? 'probe-not-run'));
+        $reason_code = $legacy_proof_expired
+            ? 'behavior-verified'
+            : sanitize_key((string) ($outcome['reasonCode'] ?? 'probe-not-run'));
         if ('' === $reason_code) {
             $reason_code = 'probe-not-run';
         }
-        $message = self::sanitize_varnish_string((string) ($outcome['message'] ?? ''));
+        $message = $legacy_proof_expired
+            ? self::maybe_translate('The capability behavior was verified.')
+            : self::sanitize_varnish_string((string) ($outcome['message'] ?? ''));
         if ('' === $message) {
             $reason_label = str_replace('-', ' ', $reason_code);
             if ('supported' === $state) {
@@ -171,8 +178,6 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                 $message = self::maybe_translate_sprintf('The capability probe did not produce a conclusive behavior observation (%s).', $reason_label);
             } elseif ('not-supported' === $state) {
                 $message = self::maybe_translate_sprintf('The capability probe completed without verifying the required behavior (%s).', $reason_label);
-            } elseif ('proof-expired' === $state) {
-                $message = self::maybe_translate_sprintf('The stored capability proof expired (%s).', $reason_label);
             } elseif ('configuration-changed' === $state) {
                 $message = self::maybe_translate_sprintf('The configured endpoint contract changed after the stored capability proof (%s).', $reason_label);
             } else {
@@ -188,7 +193,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
             'applicable' => !array_key_exists('applicable', $outcome) || !empty($outcome['applicable']),
             'conclusive' => !empty($outcome['conclusive']),
             'testedAt' => absint($outcome['testedAt'] ?? 0),
-            'proofExpiresAt' => absint($outcome['proofExpiresAt'] ?? 0),
+            'proofExpiresAt' => 0,
         );
     }
 
@@ -516,27 +521,19 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
         $clean['softPurgeTestedAt'] = absint($profile['softPurgeTestedAt'] ?? 0);
         $clean['originRevalidationTestedAt'] = absint($profile['originRevalidationTestedAt'] ?? 0);
         $clean['swrTestedAt'] = absint($profile['swrTestedAt'] ?? 0);
-        $clean['proofExpiresAt'] = absint($profile['proofExpiresAt'] ?? 0);
-        $clean['exactProofExpiresAt'] = absint($profile['exactProofExpiresAt'] ?? $clean['proofExpiresAt']);
-        $clean['batchProofExpiresAt'] = absint($profile['batchProofExpiresAt'] ?? 0);
-        $legacy_topology_proof_expires_at = absint($profile['topologyProofExpiresAt'] ?? 0);
-        $clean['htmlFlushProofExpiresAt'] = absint($profile['htmlFlushProofExpiresAt'] ?? (!empty($profile['htmlFlush']) ? $legacy_topology_proof_expires_at : 0));
-        $clean['hostFlushProofExpiresAt'] = absint($profile['hostFlushProofExpiresAt'] ?? (!empty($profile['hostFlush']) ? $legacy_topology_proof_expires_at : 0));
-        $topology_expiries = array_filter(array(
-            $clean['htmlFlushProofExpiresAt'],
-            $clean['hostFlushProofExpiresAt'],
-        ));
-        $clean['topologyProofExpiresAt'] = !empty($topology_expiries) ? min($topology_expiries) : 0;
-        $legacy_soft_purge_proof_expires_at = absint($profile['softPurgeProofExpiresAt'] ?? 0);
-        $clean['softPurgeBehaviorProofExpiresAt'] = absint($profile['softPurgeBehaviorProofExpiresAt'] ?? (!empty($profile['softPurge']) ? $legacy_soft_purge_proof_expires_at : 0));
-        $clean['originRevalidationProofExpiresAt'] = absint($profile['originRevalidationProofExpiresAt'] ?? (!empty($profile['originRevalidation']) ? $legacy_soft_purge_proof_expires_at : 0));
-        $clean['swrProofExpiresAt'] = absint($profile['swrProofExpiresAt'] ?? (!empty($profile['swr']) ? $legacy_soft_purge_proof_expires_at : 0));
-        $soft_purge_expiries = array_filter(array(
-            $clean['softPurgeBehaviorProofExpiresAt'],
-            $clean['originRevalidationProofExpiresAt'],
-            $clean['swrProofExpiresAt'],
-        ));
-        $clean['softPurgeProofExpiresAt'] = !empty($soft_purge_expiries) ? min($soft_purge_expiries) : 0;
+        // Capability proofs do not expire by age. Keep these legacy fields
+        // in the serialized schema as inert zeros for compatibility with older
+        // readers while configuration fingerprints remain authoritative.
+        $clean['proofExpiresAt'] = 0;
+        $clean['exactProofExpiresAt'] = 0;
+        $clean['batchProofExpiresAt'] = 0;
+        $clean['htmlFlushProofExpiresAt'] = 0;
+        $clean['hostFlushProofExpiresAt'] = 0;
+        $clean['topologyProofExpiresAt'] = 0;
+        $clean['softPurgeBehaviorProofExpiresAt'] = 0;
+        $clean['originRevalidationProofExpiresAt'] = 0;
+        $clean['swrProofExpiresAt'] = 0;
+        $clean['softPurgeProofExpiresAt'] = 0;
         $clean['softPurgeConfigurationFingerprint'] = substr((string) ($profile['softPurgeConfigurationFingerprint'] ?? ''), 0, 64);
         $current_soft_purge_fingerprint = self::get_varnish_registry_soft_purge_fingerprint($settings);
         if ('' === $clean['softPurgeConfigurationFingerprint']
@@ -554,13 +551,6 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
             $clean['originRevalidationTestedAt'] = 0;
             $clean['swrTestedAt'] = 0;
         }
-        $active_expiries = array_filter(array(
-            $clean['exactProofExpiresAt'],
-            $clean['batchProofExpiresAt'],
-            $clean['topologyProofExpiresAt'],
-            $clean['softPurgeProofExpiresAt'],
-        ));
-        $clean['proofExpiresAt'] = !empty($active_expiries) ? min($active_expiries) : 0;
         $clean['lastSuccessAt'] = absint($profile['lastSuccessAt'] ?? 0);
         $clean['lastFailureAt'] = absint($profile['lastFailureAt'] ?? 0);
         $clean['lastFailure'] = self::sanitize_varnish_string((string) ($profile['lastFailure'] ?? ''));
@@ -726,7 +716,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                     $profile['capabilityOutcomes'][$capability_field] = self::sanitize_varnish_capability_outcome(array(
                         'state' => 'configuration-changed',
                         'reasonCode' => 'configuration-changed',
-                        'message' => self::maybe_translate('The configured Varnish endpoint contract changed; run Test Varnish to create a new capability proof.'),
+                        'message' => self::maybe_translate('The configured Varnish endpoint contract changed; run Redetect Varnish Capabilities to create a new capability proof.'),
                         'probeAttempted' => false,
                         'applicable' => true,
                         'conclusive' => false,
@@ -1076,7 +1066,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                 $profile['exactTestedAt'] = $profile['exactBanTestedAt'];
 
                 if ($endpoint_exact_verified) {
-                    $proof_expires_at = $tested_at + self::get_varnish_exact_capability_proof_ttl();
+                    $proof_expires_at = 0;
                     $profile['exactBan'] = true;
                     $profile['exactRuntimeAvailable'] = true;
                     $profile['proofExpiresAt'] = $proof_expires_at;
@@ -1185,7 +1175,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                         $exact_probe_attempted = !in_array($exact_status, array('canary-create-failed', 'endpoint-route-unavailable', 'canary-not-cacheable', 'production-canary-unavailable'), true);
                         $exact_conclusive = $exact_verified || ($exact_probe_attempted && 'observation-incomplete' !== $exact_status);
                         $exact_result_tested_at = absint($exact_result['time'] ?? $endpoint_tested_at);
-                        $exact_proof_expires_at = $exact_verified ? $exact_result_tested_at + self::get_varnish_exact_capability_proof_ttl() : 0;
+                        $exact_proof_expires_at = 0;
                         $profile[$exact_capability_name] = $exact_verified;
                         $profile[$exact_capability_name . 'TestedAt'] = $exact_probe_attempted ? $exact_result_tested_at : 0;
                         $profile['capabilityOutcomes'][$exact_capability_name] = self::build_varnish_capability_outcome(
@@ -1214,7 +1204,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                         }
                     }
                     $profile['exactRuntimeAvailable'] = $verified_any;
-                    $profile['exactProofExpiresAt'] = $verified_any ? $endpoint_tested_at + self::get_varnish_exact_capability_proof_ttl() : 0;
+                    $profile['exactProofExpiresAt'] = 0;
                     $profile['proofExpiresAt'] = $profile['exactProofExpiresAt'];
                     if ($verified_any) {
                         $profile['lastSuccessAt'] = $endpoint_tested_at;
@@ -1229,7 +1219,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                         $profile['status'] = 'not-verified';
                     }
                 } elseif ($verified) {
-                    $proof_expires_at = $endpoint_tested_at + self::get_varnish_exact_capability_proof_ttl();
+                    $proof_expires_at = 0;
                     $verified_exact_capability = self::normalize_varnish_registry_exact_capability($endpoint_result['verifiedExactCapability'] ?? '');
                     if (!in_array($verified_exact_capability, array('exactPurge', 'exactBan'), true)) {
                         $verified_exact_capability = 'PURGE' === $method ? 'exactPurge' : 'exactBan';
@@ -1286,7 +1276,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
             $profile['exactBanTestedAt'] = in_array('exactBan', $tested_exact_capabilities, true) ? $tested_at : 0;
             $profile['exactTestedAt'] = max($profile['exactPurgeTestedAt'], $profile['exactBanTestedAt']);
             if ($exact_verified) {
-                $proof_expires_at = $tested_at + self::get_varnish_exact_capability_proof_ttl();
+                $proof_expires_at = 0;
                 $verified_exact_capability = self::normalize_varnish_registry_exact_capability($result['verifiedExactCapability'] ?? '');
                 if (!in_array($verified_exact_capability, array('exactPurge', 'exactBan'), true)) {
                     $verified_exact_capability = 'PURGE' === $method ? 'exactPurge' : 'exactBan';
@@ -1417,13 +1407,12 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                 'not-tested',
                 'observation-incomplete',
                 'configuration-changed',
-                'proof-expired',
             ), true)) {
                 $result['state'] = $persisted_state;
                 $result['testedAt'] = absint($persisted_outcome['testedAt'] ?? 0);
                 $result['tested'] = !empty($persisted_outcome['probeAttempted']);
-                $result['expired'] = 'proof-expired' === $persisted_state;
-                $result['proofExpiresAt'] = absint($persisted_outcome['proofExpiresAt'] ?? 0);
+                $result['expired'] = false;
+                $result['proofExpiresAt'] = 0;
                 return $result;
             }
         }
@@ -1453,8 +1442,8 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                 $result['state'] = (string) $persisted_outcome['state'];
                 $result['tested'] = !empty($persisted_outcome['probeAttempted']);
                 $result['testedAt'] = absint($persisted_outcome['testedAt']);
-                $result['expired'] = 'proof-expired' === (string) $persisted_outcome['state'];
-                $result['proofExpiresAt'] = absint($persisted_outcome['proofExpiresAt']);
+                $result['expired'] = false;
+                $result['proofExpiresAt'] = 0;
             } elseif ($result['tested']) {
                 $result['state'] = 'not-supported';
                 $result['reasonCode'] = 'behavior-not-verified';
@@ -1485,25 +1474,14 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
         }
 
         if ($result['proofRequired']) {
+            // A verified behavior probe has no wall-clock expiry. The persisted
+            // configuration/contract fingerprint remains the invalidation
+            // boundary. Legacy expiry fields are deliberately ignored.
             $proof_field = (string) ($definition['proofField'] ?? '');
-            if ('' === $proof_field || !array_key_exists($proof_field, $profile)) {
-                $result['state'] = 'runtime-reachable';
-                return $result;
+            if (!$result['tested'] && '' !== $proof_field && absint($profile[$proof_field] ?? 0) > 0) {
+                $result['tested'] = true;
             }
-            $expires_at = absint($profile[$proof_field]);
-            $result['proofExpiresAt'] = $expires_at;
-            if ($expires_at <= 0) {
-                $result['state'] = 'runtime-reachable';
-                return $result;
-            }
-            if ($expires_at <= time()) {
-                $result['state'] = 'proof-expired';
-                $result['expired'] = true;
-                $result['reasonCode'] = 'proof-expired';
-                $result['message'] = self::maybe_translate('The stored capability proof expired; run Test Varnish to verify the current external behavior again.');
-                $result['conclusive'] = false;
-                return $result;
-            }
+            $result['proofExpiresAt'] = 0;
         }
 
         $result['state'] = 'behavior-verified';
@@ -1573,7 +1551,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                     $status,
                     $message,
                     $tested ? $tested_at : 0,
-                    $verified ? $tested_at + WEEK_IN_SECONDS : 0
+                    0
                 ),
                 $settings
             );
@@ -1583,7 +1561,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
             $changes = array(
                 'batchBan' => $verified,
                 'batchRuntimeAvailable' => $verified,
-                'batchProofExpiresAt' => $verified ? $tested_at + WEEK_IN_SECONDS : 0,
+                'batchProofExpiresAt' => 0,
                 'batchTestedAt' => $tested ? $tested_at : 0,
                 'source' => 'batch-ban-canary',
                 'status' => sanitize_key((string) ($endpoint_capability['status'] ?? ($capability['status'] ?? 'inconclusive'))),
@@ -1618,7 +1596,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
      * configured control socket or HTTP purge listener.
      *
      * @param array $settings    Normalized Varnish settings.
-     * @param array $test_result Optional in-memory Test Varnish result.
+     * @param array $test_result Optional in-memory Redetect Varnish Capabilities result.
      * @return array<string,mixed>
      */
     private static function get_varnish_public_path_capability_status(array $settings = array(), array $test_result = array())
@@ -1654,13 +1632,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
         $variant_supported = $variant_tested
             && !empty($variant['applicable'])
             && !empty($variant['supported']);
-        $variant_expires_at = $variant_supported
-            ? absint($variant['proofExpiresAt'] ?? 0)
-            : 0;
-        if ($variant_supported && $variant_expires_at > 0 && $variant_expires_at <= time()) {
-            $variant_supported = false;
-            $variant_status = 'proof-expired';
-        }
+        $variant_expires_at = 0;
 
         $esi_configuration_current = empty($esi['configurationChanged']);
         $public_esi = $esi_configuration_current && !empty($esi['supported']) && !empty($esi['verified']);
@@ -1676,12 +1648,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
             : 'configuration-changed';
         $esi_tested = $esi_tested_at > 0
             && !in_array($esi_status, array('not-tested', 'probe-skipped', 'configuration-incomplete', 'configuration-changed'), true);
-        $esi_expires_at = $public_esi && $esi_tested_at > 0 ? $esi_tested_at + WEEK_IN_SECONDS : 0;
-        if ($esi_expires_at > 0 && $esi_expires_at <= time()) {
-            $public_esi = false;
-            $private_esi = false;
-            $esi_status = 'proof-expired';
-        }
+        $esi_expires_at = 0;
 
         return array(
             'scope' => 'public-path',
@@ -1900,8 +1867,6 @@ trait Ultra_Cache_WP_Varnish_Capability_Registry_Trait
                 $aggregate_state = 'partial';
             } elseif ($configuration_changed_count > 0) {
                 $aggregate_state = 'configuration-changed';
-            } elseif ($capability_expired_count > 0) {
-                $aggregate_state = 'proof-expired';
             } elseif ($observation_incomplete_count > 0) {
                 $aggregate_state = 'observation-incomplete';
             } elseif ($capability_tested_count === $endpoint_count) {

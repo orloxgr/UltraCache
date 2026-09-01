@@ -11,6 +11,13 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 {
 	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses private custom media conversion queue tables with validated table identifiers.
 
+	/** Per-request memo for affected-page schema verification capabilities. */
+	private $media_page_refs_schema_request_memo = array();
+
+	private function reset_media_page_refs_schema_request_memo() {
+		$this->media_page_refs_schema_request_memo = array();
+	}
+
 
 		private function get_on_demand_queue_max_per_request() {
 			$default = defined('ULTRACACHE_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST') ? (int) ULTRACACHE_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST : 20;
@@ -20,6 +27,21 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
+		private function get_on_demand_affected_page_max_writes_per_request() {
+			$default = defined('ULTRACACHE_MEDIA_PAGE_REFS_MAX_PER_REQUEST') ? (int) ULTRACACHE_MEDIA_PAGE_REFS_MAX_PER_REQUEST : 50;
+			$context = method_exists($this, 'get_media_generation_context') ? $this->get_media_generation_context() : 'frontend';
+			$limit = (int) apply_filters('ultracache_media_page_refs_max_per_request', $default, $context);
+			return max(0, min(500, $limit));
+		}
+
+
+		/**
+		 * Whether this request may spend another on-demand discovery attempt.
+		 *
+		 * The per-request limit is a work budget, not a successful-insert budget.
+		 * Callers must consume one attempt before entering attachment/local-asset
+		 * resolution, queue-state lookup, lock acquisition or queue mutation.
+		 */
 		private function can_queue_missing_media_from_lookup() {
 			if (!$this->is_background_media_queue_enabled() || !$this->is_generate_on_demand_enabled()) {
 				return false;
@@ -44,6 +66,24 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 
 			$max = $this->get_on_demand_queue_max_per_request();
 			return $max > 0 && $this->on_demand_queue_discovery_count < $max;
+		}
+
+
+		/**
+		 * Reserve one unit from the per-request on-demand discovery work budget.
+		 *
+		 * A reservation is consumed whether the candidate is subsequently found to
+		 * be known, unsupported, duplicated, locked, raced or newly queued. This
+		 * prevents crawler pages with many non-actionable candidates from bypassing
+		 * the configured request cap.
+		 */
+		private function consume_on_demand_queue_discovery_attempt() {
+			if (!$this->can_queue_missing_media_from_lookup()) {
+				return false;
+			}
+
+			$this->on_demand_queue_discovery_count++;
+			return true;
 		}
 
 
@@ -72,18 +112,28 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
-		private function media_page_refs_table_exists() {
+		private function media_page_refs_table_exists($force_schema_verify = false) {
 			global $wpdb;
+			if (!$force_schema_verify && self::MEDIA_PAGE_REFS_DB_VERSION === (string) get_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, '')) {
+				return true;
+			}
+			if (array_key_exists('table_exists', $this->media_page_refs_schema_request_memo)) {
+				return (bool) $this->media_page_refs_schema_request_memo['table_exists'];
+			}
 			$table = $this->get_media_page_refs_table_name();
 			$found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-			return (string) $found === (string) $table;
+			$this->media_page_refs_schema_request_memo['table_exists'] = ((string) $found === (string) $table);
+			return (bool) $this->media_page_refs_schema_request_memo['table_exists'];
 		}
 
 
 		private function media_page_refs_index_rows($index_name) {
 			global $wpdb;
 			$table = $this->get_media_page_refs_table_name();
-			$rows = $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+			if (!array_key_exists('index_rows', $this->media_page_refs_schema_request_memo)) {
+				$this->media_page_refs_schema_request_memo['index_rows'] = (array) $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+			}
+			$rows = (array) $this->media_page_refs_schema_request_memo['index_rows'];
 			$index_name = (string) $index_name;
 			$matches = array_values(array_filter((array) $rows, static function ($row) use ($index_name) {
 				return $index_name === (string) ($row['Key_name'] ?? '');
@@ -109,14 +159,17 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 
 
 		private function media_page_refs_source_contract_exists() {
-			if (!$this->media_page_refs_table_exists()) {
+			if (!$this->media_page_refs_table_exists(true)) {
 				return false;
 			}
 			global $wpdb;
 			$table = $this->get_media_page_refs_table_name();
-			$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
-			$required = array('source_kind', 'source_identity', 'requested_format');
-			if (!empty(array_diff($required, array_map('strval', (array) $columns)))) {
+			if (!array_key_exists('source_columns', $this->media_page_refs_schema_request_memo)) {
+				$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
+				$required = array('source_kind', 'source_identity', 'requested_format');
+				$this->media_page_refs_schema_request_memo['source_columns'] = empty(array_diff($required, array_map('strval', (array) $columns)));
+			}
+			if (!$this->media_page_refs_schema_request_memo['source_columns']) {
 				return false;
 			}
 			return $this->media_page_refs_index_matches(
@@ -187,10 +240,12 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				if (!empty($this->media_page_refs_index_rows('page_attachment_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX page_attachment_format', $table));
+					$this->reset_media_page_refs_schema_request_memo();
 				}
 				if (empty($this->media_page_refs_index_rows('page_attachment_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the verified UltraCache-owned index after the versioned legacy-definition repair above.
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD KEY page_attachment_format (page_url_hash, attachment_id, format)', $table));
+					$this->reset_media_page_refs_schema_request_memo();
 				}
 			}
 
@@ -198,6 +253,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				if (!empty($this->media_page_refs_index_rows('page_source_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX page_source_format', $table));
+					$this->reset_media_page_refs_schema_request_memo();
 				}
 				if (!$this->deduplicate_media_page_source_references()) {
 					return false;
@@ -205,6 +261,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				if (empty($this->media_page_refs_index_rows('page_source_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the deduplicated UltraCache-owned unique index after the versioned legacy-definition repair above.
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD UNIQUE KEY page_source_format (page_url_hash, source_kind, source_identity, format, requested_format)', $table));
+					$this->reset_media_page_refs_schema_request_memo();
 				}
 			}
 
@@ -212,18 +269,27 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		}
 
 
-		public function ensure_media_page_refs_table() {
+		public function ensure_media_page_refs_table($force_schema_verify = false) {
 			global $wpdb;
 
 			$table = $this->get_media_page_refs_table_name();
 			$version = (string) get_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, '');
-			if (self::MEDIA_PAGE_REFS_DB_VERSION === $version && $this->media_page_refs_source_contract_exists()) {
+			$force_schema_verify = (bool) $force_schema_verify;
+
+			// Normal runtime trusts the stored UltraCache schema version and avoids
+			// per-reference SHOW TABLES/COLUMNS/INDEX verification.
+			if (!$force_schema_verify && self::MEDIA_PAGE_REFS_DB_VERSION === $version) {
+				return true;
+			}
+
+			if ($force_schema_verify && self::MEDIA_PAGE_REFS_DB_VERSION === $version && $this->media_page_refs_source_contract_exists()) {
 				return true;
 			}
 
 			if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
 				return false;
 			}
+			$this->reset_media_page_refs_schema_request_memo();
 			$charset_collate = $wpdb->get_charset_collate();
 			$sql = "CREATE TABLE {$table} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -252,7 +318,8 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			) {$charset_collate};";
 
 			dbDelta($sql);
-			if ($this->media_page_refs_table_exists() && $this->ensure_media_page_refs_source_indexes()) {
+			$this->reset_media_page_refs_schema_request_memo();
+			if ($this->media_page_refs_table_exists(true) && $this->ensure_media_page_refs_source_indexes()) {
 				update_option(self::MEDIA_PAGE_REFS_DB_VERSION_OPTION, self::MEDIA_PAGE_REFS_DB_VERSION, false);
 				return true;
 			}
@@ -319,7 +386,7 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				? esc_url_raw((string) $this->media_rewrite_page_url_context)
 				: '';
 			if ('' !== $explicit_page_url) {
-				return $explicit_page_url;
+				return $this->normalize_on_demand_affected_page_url($explicit_page_url);
 			}
 
 			if (is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
@@ -337,10 +404,53 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				$path = (string) $parts['path'] . (isset($parts['query']) && '' !== (string) $parts['query'] ? '?' . (string) $parts['query'] : '');
 			}
 
-			$url = home_url($path);
-			$url = remove_query_arg(array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust'), $url);
-			$url = esc_url_raw($url);
+			$url = $this->normalize_on_demand_affected_page_url(home_url($path));
 			if ('' === $url) {
+				return '';
+			}
+
+			return $url;
+		}
+
+
+		/**
+		 * Collapse a page URL to the same logical query dimensions UltraCache can
+		 * use for public HTML cache identity.
+		 *
+		 * Arbitrary crawler/facet/tracking parameters must not create a distinct
+		 * media_page_refs graph node unless the parameter is explicitly part of
+		 * the page-cache query policy. Valid WPML parameter-language variants are
+		 * preserved by the shared query-policy helper.
+		 *
+		 * @param string $url Absolute public page URL.
+		 * @return string
+		 */
+		private function normalize_on_demand_affected_page_url($url) {
+			$url = esc_url_raw((string) $url);
+			if ('' === $url) {
+				return '';
+			}
+
+			$settings = array();
+			if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_settings')) {
+				$settings = Ultra_Cache_WP::get_settings();
+			}
+			if (!is_array($settings) || empty($settings)) {
+				$settings = get_option(defined('ULTRACACHE_SETTINGS_KEY') ? ULTRACACHE_SETTINGS_KEY : 'ultracache_settings', array());
+			}
+			$settings = is_array($settings) ? $settings : array();
+
+			if (function_exists('ultracache_normalize_cache_significant_page_url')) {
+				$url = ultracache_normalize_cache_significant_page_url($url, $settings);
+			} else {
+				$url = remove_query_arg(array('ultracache_action', '_wpnonce', 'ultracache_odq_test', 'ultracache_cache_bust'), $url);
+				$url = esc_url_raw($url);
+			}
+
+			if ('' === $url) {
+				return '';
+			}
+			if (function_exists('ultracache_is_strict_frontend_loopback_url') && !ultracache_is_strict_frontend_loopback_url($url)) {
 				return '';
 			}
 
@@ -413,7 +523,12 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			if (isset($this->on_demand_affected_page_seen[$seen_key])) {
 				return true;
 			}
+			$max_writes = $this->get_on_demand_affected_page_max_writes_per_request();
+			if ($max_writes <= 0 || $this->on_demand_affected_page_write_count >= $max_writes) {
+				return false;
+			}
 			$this->on_demand_affected_page_seen[$seen_key] = true;
+			$this->on_demand_affected_page_write_count++;
 			if (!$this->ensure_media_page_refs_table()) {
 				return false;
 			}
@@ -587,14 +702,10 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 		private function maybe_queue_missing_optimized_media_from_public_url($public_url, $missing_format, $discovery_reason = 'missing', array $source_signature = array()) {
 			$missing_format = strtolower((string) $missing_format);
 			$discovery_reason = strtolower((string) $discovery_reason);
-			if (!in_array($discovery_reason, array('missing', 'stale', 'indeterminate'), true)) {
-				$discovery_reason = 'missing';
-			}
-			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format)) {
+			if (!in_array($discovery_reason, array('missing', 'stale'), true)) {
 				return false;
 			}
-
-			if (!$this->can_queue_missing_media_from_lookup()) {
+			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format)) {
 				return false;
 			}
 
@@ -623,7 +734,16 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			}
 
 			$queue_format = 'best';
-			$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+			$existing_status = method_exists($this, 'get_existing_on_demand_media_queue_status')
+				? $this->get_existing_on_demand_media_queue_status('attachment', '', $queue_format, '', $attachment_id)
+				: '';
+			if ('' !== $existing_status) {
+				if (in_array($existing_status, array('pending', 'processing'), true)) {
+					$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+				}
+				return false;
+			}
+
 			if ($already_discovered) {
 				return false;
 			}
@@ -641,21 +761,31 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 					'missingFormat' => $missing_format,
 				)
 			)) {
-				$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
 				return false;
 			}
 
 			$message = 'Queued by on-demand ' . $discovery_reason . ' media discovery (' . $missing_format . '). Current request stayed lookup-only.';
-			$queued = $this->upsert_media_queue_item($attachment_id, $queue_format, 'pending', $message, 0, true);
+			$queued = $this->upsert_media_queue_item($attachment_id, $queue_format, 'pending', $message, 0, false, true);
 			if (!$queued) {
 				if (function_exists('ultracache_release_lock')) {
 					ultracache_release_lock($dedupe_lock_name, $dedupe_lock_token);
 				}
+				$race_status = method_exists($this, 'get_existing_on_demand_media_queue_status')
+					? $this->get_existing_on_demand_media_queue_status('attachment', '', $queue_format, '', $attachment_id)
+					: '';
+				if (in_array($race_status, array('pending', 'processing'), true)) {
+					$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
+				}
 				return false;
 			}
 
+			if (!$this->last_media_queue_upsert_created_work()) {
+				return false;
+			}
 			$this->record_on_demand_affected_page($attachment_id, $queue_format, $missing_format);
-			$this->on_demand_queue_discovery_count++;
+			if (method_exists($this, 'remember_on_demand_media_queue_status')) {
+				$this->remember_on_demand_media_queue_status('attachment', '', $queue_format, '', $attachment_id, 'pending');
+			}
 			$this->invalidate_media_work_summary_cache();
 			$this->queue_background_generation_dispatch('on_demand');
 
@@ -665,9 +795,24 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 
 		private function maybe_queue_missing_local_asset_media($public_url, array $source, $missing_format, $discovery_reason = 'missing', array $source_signature = array()) {
 			$missing_format = strtolower((string) $missing_format);
-			$discovery_reason = in_array((string) $discovery_reason, array('missing', 'stale', 'indeterminate'), true) ? (string) $discovery_reason : 'missing';
-			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format) || !$this->can_queue_missing_media_from_lookup()) {
+			$discovery_reason = strtolower((string) $discovery_reason);
+			if (!in_array($discovery_reason, array('missing', 'stale'), true)) {
 				return false;
+			}
+			if (!in_array($missing_format, array('avif', 'webp'), true) || !$this->media_output_mode_allows($missing_format)) {
+				return false;
+			}
+			$source_identity = strtolower(trim((string) ($source['source_identity'] ?? '')));
+			if (preg_match('/^[a-f0-9]{64}$/', $source_identity)) {
+				$existing_status = method_exists($this, 'get_existing_on_demand_media_queue_status')
+					? $this->get_existing_on_demand_media_queue_status('local_asset', $source_identity, 'best', $missing_format, 0)
+					: '';
+				if ('' !== $existing_status) {
+					if (in_array($existing_status, array('pending', 'processing'), true)) {
+						$this->record_on_demand_affected_source_page('local_asset', $source_identity, 'best', $missing_format, 0, $missing_format);
+					}
+					return false;
+				}
 			}
 			$normalized = $this->normalize_local_asset_queue_source($source, $missing_format);
 			if (empty($normalized)) {
@@ -675,7 +820,6 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 			}
 			$discovery_key = 'local_asset|' . $normalized['source_identity'] . '|' . $missing_format;
 			$already_discovered = isset($this->on_demand_queue_discovery_seen[$discovery_key]);
-			$this->record_on_demand_affected_source_page('local_asset', $normalized['source_identity'], 'best', $missing_format, 0, $missing_format);
 			if ($already_discovered) {
 				return false;
 			}
@@ -694,19 +838,145 @@ trait Ultra_Cache_Media_Affected_Pages_Trait
 				return false;
 			}
 			$message = 'Queued by on-demand ' . $discovery_reason . ' local-asset discovery (' . $missing_format . '). Current request stayed lookup-only.';
-			$queued = $this->upsert_local_asset_media_queue_item($source, $missing_format, 'pending', $message, 0, true);
+			$queued = $this->upsert_local_asset_media_queue_item($source, $missing_format, 'pending', $message, 0, false, true);
 			if (!$queued) {
 				if (function_exists('ultracache_release_lock')) {
 					ultracache_release_lock($lock_name, $lock_token);
 				}
+				$race_status = method_exists($this, 'get_existing_on_demand_media_queue_status')
+					? $this->get_existing_on_demand_media_queue_status('local_asset', $normalized['source_identity'], 'best', $missing_format, 0)
+					: '';
+				if (in_array($race_status, array('pending', 'processing'), true)) {
+					$this->record_on_demand_affected_source_page('local_asset', $normalized['source_identity'], 'best', $missing_format, 0, $missing_format);
+				}
 				return false;
 			}
-			$this->on_demand_queue_discovery_count++;
+			if (!$this->last_media_queue_upsert_created_work()) {
+				return false;
+			}
+			$this->record_on_demand_affected_source_page('local_asset', $normalized['source_identity'], 'best', $missing_format, 0, $missing_format);
+			if (method_exists($this, 'remember_on_demand_media_queue_status')) {
+				$this->remember_on_demand_media_queue_status('local_asset', $normalized['source_identity'], 'best', $missing_format, 0, 'pending');
+			}
 			$this->invalidate_media_work_summary_cache();
 			$this->queue_background_generation_dispatch('on_demand_local_asset');
 			return true;
 		}
 
+
+
+		/**
+		 * Process one foreground conversion unit for media discovered on a public page.
+		 *
+		 * This is intentionally page-scoped: the homepage checkpoint is reached when
+		 * no pending affected-page references remain for home_url('/'). Both Media
+		 * Library attachments and local theme/plugin assets use the existing queue
+		 * processors and conversion pipeline.
+		 *
+		 * @param string $page_url Public page URL.
+		 * @param string $manual_token Owner token for the dashboard media session.
+		 * @return array<string,mixed>
+		 */
+		public function process_homepage_affected_media_batch($page_url, $manual_token) {
+			$page_url = esc_url_raw((string) $page_url);
+			$manual_token = sanitize_text_field((string) $manual_token);
+			if ('' === $page_url || '' === $manual_token || !$this->owns_manual_media_conversion_session($manual_token)) {
+				return array(
+					'success' => false,
+					'reason' => 'manual_session_lost',
+					'message' => __('The dashboard media-conversion session expired or changed owner.', 'ultracache'),
+				);
+			}
+			if (!$this->ensure_media_page_refs_table() || !$this->ensure_media_queue_table()) {
+				return array(
+					'success' => false,
+					'reason' => 'media_tables_unavailable',
+					'message' => __('The media queue tables are not available.', 'ultracache'),
+				);
+			}
+
+			$this->renew_manual_media_conversion_session($manual_token);
+			global $wpdb;
+			$refs_table = $this->get_media_page_refs_table_name();
+			$queue_table = $this->get_media_queue_table_name();
+			$page_hash = md5($page_url);
+			$pending_before = (int) $wpdb->get_var($wpdb->prepare(
+				"SELECT COUNT(*) FROM %i WHERE page_url_hash = %s AND status <> 'complete' AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				$refs_table,
+				$page_hash
+			));
+			if ($pending_before <= 0) {
+				return array('success' => true, 'complete' => true, 'pending' => 0, 'processed' => 0, 'message' => __('Homepage media checkpoint reached.', 'ultracache'));
+			}
+
+			$ref = $wpdb->get_row($wpdb->prepare(
+				"SELECT attachment_id, source_kind, source_identity, format, requested_format FROM %i WHERE page_url_hash = %s AND status <> 'complete' AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00') ORDER BY id ASC LIMIT 1",
+				$refs_table,
+				$page_hash
+			), ARRAY_A);
+			if (!is_array($ref)) {
+				return array('success' => true, 'complete' => true, 'pending' => 0, 'processed' => 0, 'message' => __('Homepage media checkpoint reached.', 'ultracache'));
+			}
+
+			$source_kind = sanitize_key((string) ($ref['source_kind'] ?? ''));
+			$source_identity = strtolower((string) ($ref['source_identity'] ?? ''));
+			$format = $this->normalize_media_queue_format($ref['format'] ?? 'best');
+			$requested_format = strtolower((string) ($ref['requested_format'] ?? ''));
+			$queue_row = $wpdb->get_row($wpdb->prepare(
+				"SELECT * FROM %i WHERE source_kind = %s AND source_identity = %s AND format = %s AND requested_format = %s LIMIT 1",
+				$queue_table,
+				$source_kind,
+				$source_identity,
+				$format,
+				$requested_format
+			), ARRAY_A);
+
+			if (is_array($queue_row) && in_array((string) ($queue_row['status'] ?? ''), array('done', 'skipped'), true)) {
+				$synthetic = array('success' => true, 'alreadyOptimized' => true, 'queueStatus' => (string) $queue_row['status']);
+				if ('local_asset' === $source_kind) {
+					$this->mark_on_demand_affected_source_processed('local_asset', $source_identity, $format, $synthetic, $requested_format);
+				} else {
+					$this->mark_on_demand_affected_media_processed((int) ($ref['attachment_id'] ?? 0), $format, $synthetic);
+				}
+			} elseif (is_array($queue_row)) {
+				$lock_token = $this->acquire_media_queue_process_lock('homepage_manual');
+				if ('' === $lock_token) {
+					return array('success' => false, 'reason' => 'locked', 'message' => __('Another media conversion unit is still finishing.', 'ultracache'));
+				}
+				try {
+					$result = 'local_asset' === $source_kind
+						? $this->process_queued_local_asset($queue_row, $lock_token)
+						: $this->process_queued_attachment((int) ($ref['attachment_id'] ?? 0), $format, true, $lock_token, $manual_token);
+				} finally {
+					$this->release_media_queue_process_lock($lock_token);
+				}
+				if (empty($result['success']) && !in_array((string) ($result['queueStatus'] ?? ''), array('pending', 'done', 'skipped'), true)) {
+					return array_merge(array('success' => false, 'reason' => 'conversion_failed'), $result);
+				}
+			} else {
+				return array(
+					'success' => false,
+					'reason' => 'homepage_queue_item_missing',
+					'message' => __('Homepage media discovery found an item without a matching conversion queue row. Refresh homepage discovery and retry.', 'ultracache'),
+				);
+			}
+
+			$pending_after = (int) $wpdb->get_var($wpdb->prepare(
+				"SELECT COUNT(*) FROM %i WHERE page_url_hash = %s AND status <> 'complete' AND (purged_at IS NULL OR purged_at = '0000-00-00 00:00:00')",
+				$refs_table,
+				$page_hash
+			));
+			return array(
+				'success' => true,
+				'complete' => $pending_after <= 0,
+				'pending' => max(0, $pending_after),
+				'total' => max($pending_before, $pending_after),
+				'processed' => max(0, $pending_before - $pending_after),
+				'sourceKind' => $source_kind,
+				'attachmentId' => (int) ($ref['attachment_id'] ?? 0),
+				'message' => $pending_after <= 0 ? __('Homepage media checkpoint reached.', 'ultracache') : __('Homepage image conversion is continuing.', 'ultracache'),
+			);
+		}
 
 		private function find_attachment_id_for_source_file($source_file) {
 			$source_file = is_string($source_file) ? wp_normalize_path($source_file) : '';

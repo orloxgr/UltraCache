@@ -326,11 +326,11 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             return false;
         }
 
-        $table = self::get_cron_warm_queue_table_name();
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only schema existence check for the status path; deliberately avoids persistent/object-cache writes.
-        $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-        $ready = (string) $found === (string) $table;
-        return $ready;
+        // The stored schema version is authoritative for normal runtime/status reads.
+        // Structural verification is lifecycle-owned and must not add SHOW TABLES
+        // to repeated frontend/status hot paths.
+        $ready = true;
+        return true;
     }
 
     /**
@@ -741,6 +741,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             ? self::get_cron_warm_queue_row_required_stages(array(
                 'job_type' => 'page_warm',
                 'source_context' => '',
+                'url' => (string) $url,
                 'required_stages' => (string) ($current['required_stages'] ?? ''),
             ))
             : array();
@@ -761,18 +762,52 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
     }
 
     /**
+     * Return whether one public URL is eligible for the multilingual CSS warm stage.
+     *
+     * Non-multilingual sites preserve the existing global CSS warm behavior. On
+     * multilingual sites the URL must resolve to an active provider language and
+     * that language must be eligible for the css_bundle warm operation.
+     *
+     * @param string $url Public URL represented by the queue row.
+     * @return bool
+     */
+    private static function cron_warm_url_allows_css_bundle($url)
+    {
+        return !function_exists('ultracache_multilingual_public_url_allows_warm_operation')
+            || ultracache_multilingual_public_url_allows_warm_operation($url, 'css_bundle');
+    }
+
+    /**
      * Resolve the canonical stages represented by one legacy/new enqueue call.
      *
      * @param string $job_type       Requested legacy job type.
      * @param string $source_context Requested source context.
      * @return array
      */
-    private static function get_cron_warm_queue_required_stages($job_type, $source_context = '')
+    private static function get_cron_warm_queue_required_stages($job_type, $source_context = '', $url = '')
     {
         $job_type = sanitize_key((string) $job_type);
         $source_context = sanitize_key((string) $source_context);
         $stages = array('html');
-        if ('css_bundle' === $job_type || 'css-bundle' === $source_context) {
+
+        // The persistent queue row is the canonical stage contract. If the
+        // user enabled Also Warm up CSS and CSS bundling is active, ordinary
+        // page_warm work must declare CSS up front instead of relying on the
+        // runner's legacy auto-CSS behavior and later reporting work that was
+        // never represented in required_stages/completed_stages.
+        if ('page_warm' === $job_type) {
+            $settings = self::get_settings();
+            if (
+                !empty($settings['warm_css_bundles_enabled'])
+                && !empty($settings['homepage_css_bundle'])
+                && self::cron_warm_url_allows_css_bundle($url)
+            ) {
+                $stages[] = 'css_bundle';
+            }
+        }
+        if (('css_bundle' === $job_type || 'css-bundle' === $source_context)
+            && self::cron_warm_url_allows_css_bundle($url)
+        ) {
             $stages[] = 'css_bundle';
         }
         if ('lcp_refresh' === $job_type || 'lcp-refresh' === $source_context) {
@@ -783,9 +818,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             || in_array($source_context, array('varnish-invalidate', 'refresh-ahead'), true)
         ) {
             $stages[] = 'varnish';
-        }
-        if ('litespeed-refresh-ahead' === $source_context) {
-            $stages[] = 'litespeed';
         }
         return explode(',', self::normalize_cron_warm_queue_csv(
             $stages,
@@ -829,7 +861,8 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         $stored = (string) ($row['required_stages'] ?? '');
         $inferred = self::get_cron_warm_queue_required_stages(
             (string) ($row['job_type'] ?? 'page_warm'),
-            (string) ($row['source_context'] ?? '')
+            (string) ($row['source_context'] ?? ''),
+            (string) ($row['url'] ?? '')
         );
         $stages = self::normalize_cron_warm_queue_csv(
             trim($stored . ',' . implode(',', $inferred), ','),
@@ -857,10 +890,17 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
      *
      * @return bool
      */
-    private static function cron_warm_queue_schema_is_current()
+    private static function cron_warm_queue_schema_is_current($force_schema_verify = false)
     {
-        return self::get_cron_warm_queue_db_version() === (string) get_option(self::get_cron_warm_queue_db_version_option_key(), '')
-            && self::cron_warm_queue_table_exists()
+        if (self::get_cron_warm_queue_db_version() !== (string) get_option(self::get_cron_warm_queue_db_version_option_key(), '')) {
+            return false;
+        }
+
+        if (!$force_schema_verify) {
+            return true;
+        }
+
+        return self::cron_warm_queue_table_exists()
             && self::cron_warm_queue_claim_schema_ready();
     }
 
@@ -940,7 +980,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
      * @param bool $force_recreate Drop even an already-current table.
      * @return bool
      */
-    private static function recreate_empty_cron_warm_queue_schema($force_recreate = false)
+    private static function recreate_empty_cron_warm_queue_schema($force_recreate = false, $force_schema_verify = false)
     {
         global $wpdb;
 
@@ -948,7 +988,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             return false;
         }
 
-        if (!$force_recreate && self::cron_warm_queue_schema_is_current()) {
+        if (!$force_recreate && self::cron_warm_queue_schema_is_current($force_schema_verify)) {
             return true;
         }
 
@@ -966,7 +1006,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             for ($attempt = 0; $attempt < 30; $attempt++) {
                 usleep(100000);
                 self::invalidate_cron_warm_queue_schema_cache();
-                if (self::cron_warm_queue_schema_is_current()) {
+                if (self::cron_warm_queue_schema_is_current($force_schema_verify)) {
                     return true;
                 }
             }
@@ -974,7 +1014,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         }
 
         try {
-            if (!$force_recreate && self::cron_warm_queue_schema_is_current()) {
+            if (!$force_recreate && self::cron_warm_queue_schema_is_current($force_schema_verify)) {
                 return true;
             }
 
@@ -1025,7 +1065,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
      *
      * @return bool
      */
-    public static function ensure_cron_warm_queue_table()
+    public static function ensure_cron_warm_queue_table($force_schema_verify = false)
     {
         if (
             !self::$public_warm_runtime_reset_active
@@ -1035,7 +1075,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             return false;
         }
 
-        return self::recreate_empty_cron_warm_queue_schema(false);
+        return self::recreate_empty_cron_warm_queue_schema(false, (bool) $force_schema_verify);
     }
 
     /**
@@ -1098,11 +1138,12 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads ordinary UltraCache work immediately before manual-priority cleanup so persistent URL hints can be reconciled.
             $deleted_urls = $wpdb->get_col(
                 $wpdb->prepare(
-                    "SELECT url FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s) AND NOT (job_type = %s AND source_context <> %s)",
+                    "SELECT url FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s, %s) AND NOT (job_type = %s AND source_context <> %s)",
                     $table,
                     'processing',
                     'lcp_refresh',
                     'varnish_invalidate',
+                    'litespeed_invalidate',
                     'page_warm',
                     ''
                 )
@@ -1110,11 +1151,12 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Manual warm priority clears ordinary UltraCache work while retaining deferred LCP and persistent Varnish jobs.
             $deleted = $wpdb->query(
                 $wpdb->prepare(
-                    "DELETE FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s) AND NOT (job_type = %s AND source_context <> %s)",
+                    "DELETE FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s, %s) AND NOT (job_type = %s AND source_context <> %s)",
                     $table,
                     'processing',
                     'lcp_refresh',
                     'varnish_invalidate',
+                    'litespeed_invalidate',
                     'page_warm',
                     ''
                 )
@@ -1132,10 +1174,11 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads ordinary UltraCache rows immediately before cleanup so persistent URL hints can be reconciled.
         $deleted_urls = $wpdb->get_col(
             $wpdb->prepare(
-                "SELECT url FROM %i WHERE status <> %s AND job_type <> %s AND NOT (job_type = %s AND source_context <> %s)",
+                "SELECT url FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s) AND NOT (job_type = %s AND source_context <> %s)",
                 $table,
                 'processing',
                 'varnish_invalidate',
+                'litespeed_invalidate',
                 'page_warm',
                 ''
             )
@@ -1143,10 +1186,11 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Deletes only ordinary UltraCache warm queue rows.
         $deleted = $wpdb->query(
             $wpdb->prepare(
-                "DELETE FROM %i WHERE status <> %s AND job_type <> %s AND NOT (job_type = %s AND source_context <> %s)",
+                "DELETE FROM %i WHERE status <> %s AND job_type NOT IN (%s, %s) AND NOT (job_type = %s AND source_context <> %s)",
                 $table,
                 'processing',
                 'varnish_invalidate',
+                'litespeed_invalidate',
                 'page_warm',
                 ''
             )
@@ -1195,16 +1239,10 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 $source_context = 'varnish-invalidate';
             }
         }
-        $required_stages = self::normalize_cron_warm_queue_csv(
-            array_merge(
-                self::get_cron_warm_queue_required_stages($requested_job_type, $source_context),
-                array_values(array_unique(array_intersect(
-                    array('html', 'css_bundle', 'lcp_refresh', 'varnish', 'litespeed'),
-                    array_map('sanitize_key', $additional_required_stages)
-                )))
-            ),
-            array('html', 'css_bundle', 'lcp_refresh', 'varnish', 'litespeed')
-        );
+        $additional_required_stages = array_values(array_unique(array_intersect(
+            array('html', 'css_bundle', 'lcp_refresh', 'varnish', 'litespeed'),
+            array_map('sanitize_key', $additional_required_stages)
+        )));
         $source_contexts = self::normalize_cron_warm_queue_csv(
             $is_full_site_request ? self::get_cron_warm_full_site_context_marker() : $source_context
         );
@@ -1232,6 +1270,18 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 continue;
             }
             $seen_urls[$url] = true;
+
+            $row_additional_stages = $additional_required_stages;
+            if (!self::cron_warm_url_allows_css_bundle($url)) {
+                $row_additional_stages = array_values(array_diff($row_additional_stages, array('css_bundle')));
+            }
+            $required_stages = self::normalize_cron_warm_queue_csv(
+                array_merge(
+                    self::get_cron_warm_queue_required_stages($requested_job_type, $source_context, $url),
+                    $row_additional_stages
+                ),
+                array('html', 'css_bundle', 'lcp_refresh', 'varnish', 'litespeed')
+            );
 
             $hash = sha1($url);
             if ($is_full_site_request && isset($full_site_member_hashes[$hash])) {
@@ -1575,8 +1625,11 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
      */
     private static function get_cron_warm_queue_lease_seconds()
     {
-        $seconds = (int) apply_filters('ultracache_cron_warm_queue_lease_seconds', 300);
-        return max(60, min(1800, $seconds));
+        $seconds = max(60, (int) apply_filters('ultracache_cron_warm_queue_lease_seconds', 300));
+        $max_execution = function_exists('ultracache_get_php_max_execution_time_seconds')
+            ? ultracache_get_php_max_execution_time_seconds()
+            : max(0, (int) ini_get('max_execution_time'));
+        return $max_execution > 0 ? max($seconds, $max_execution) : $seconds;
     }
 
     /**
@@ -2567,13 +2620,14 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Reads one currently claimed UltraCache queue row for status output.
         $row = $wpdb->get_row(
             $wpdb->prepare(
-                'SELECT url, job_type, source_context, required_stages, completed_stages FROM %i WHERE status = %s AND job_type IN (%s, %s, %s, %s) ORDER BY claimed_at ASC, id ASC LIMIT %d',
+                'SELECT url, job_type, source_context, required_stages, completed_stages FROM %i WHERE status = %s AND job_type IN (%s, %s, %s, %s, %s) ORDER BY claimed_at ASC, id ASC LIMIT %d',
                 $table,
                 'processing',
                 'page_warm',
                 'css_bundle',
                 'lcp_refresh',
                 'varnish_invalidate',
+                'litespeed_invalidate',
                 1
             ),
             ARRAY_A
@@ -2590,6 +2644,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             'css_bundle' => 'css_bundle',
             'lcp_refresh' => 'lcp_refresh',
             'varnish_invalidate' => 'varnish',
+            'litespeed_invalidate' => 'litespeed',
         );
         $current_stage = (string) ($legacy_stage_map[$job_type] ?? '');
         if ('' === $current_stage) {
@@ -2783,6 +2838,9 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
 
         try {
             self::refresh_cron_warm_recovery_throttle();
+            if (method_exists(static::class, 'ensure_cache_asset_refs_gc_event_scheduled')) {
+                self::ensure_cache_asset_refs_gc_event_scheduled();
+            }
 
             $recovered_rows = self::recover_expired_cron_warm_queue_leases();
             $recovered_lock = self::clear_expired_cron_warm_execution_lock();
@@ -2801,17 +2859,20 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     : array();
                 $has_varnish_work = max(0, (int) ($varnish_queue['pendingInvalidations'] ?? 0)) > 0
                     || max(0, (int) ($varnish_queue['processingInvalidations'] ?? 0)) > 0;
+                $litespeed_queue = method_exists(static::class, 'get_litespeed_invalidation_queue_stats')
+                    ? self::get_litespeed_invalidation_queue_stats()
+                    : array();
+                $has_litespeed_invalidation_work = max(0, (int) ($litespeed_queue['pending'] ?? 0)) > 0
+                    || max(0, (int) ($litespeed_queue['processing'] ?? 0)) > 0;
                 $keep_varnish_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
                     && self::should_keep_varnish_refresh_ahead_cron();
-                $keep_litespeed_refresh_ahead = method_exists(static::class, 'should_keep_litespeed_refresh_ahead_cron')
-                    && self::should_keep_litespeed_refresh_ahead_cron();
                 $settings = self::get_settings();
                 $generic_worker_enabled = self::get_shared_automation_pages_per_minute($settings) > 0;
                 $needs_worker = !empty($state['active'])
                     || ($generic_worker_enabled && ($queued_pending > 0 || $queued_processing > 0))
                     || $has_varnish_work
-                    || $keep_varnish_refresh_ahead
-                    || $keep_litespeed_refresh_ahead;
+                    || $has_litespeed_invalidation_work
+                    || $keep_varnish_refresh_ahead;
 
                 if ($needs_worker && self::get_next_cron_warm_scheduled_at() < 1) {
                     self::ensure_cron_warm_events_scheduled(1, true);
@@ -3194,9 +3255,22 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         }
     }
 
-    public static function reset_cron_warmup_queue_after_cache_flush($reason = 'cache_flush')
+    public static function reset_cron_warmup_queue_after_cache_flush($reason = 'cache_flush', $preserve_foreground_token = '')
     {
-        self::reset_manual_warmup_session($reason);
+        $preserve_foreground_token = sanitize_text_field((string) $preserve_foreground_token);
+        $foreground_preserved = false;
+        if ('' !== $preserve_foreground_token) {
+            $renewed = self::renew_foreground_warmup_session(
+                $preserve_foreground_token,
+                'ui',
+                'cache-flush-reset'
+            );
+            $foreground_preserved = !empty($renewed['success']);
+        }
+
+        if (!$foreground_preserved) {
+            self::reset_manual_warmup_session($reason);
+        }
         self::clear_cron_warm_decision('cache_flush_reset');
         $generation = self::bump_warmup_generation($reason);
         self::unschedule_cron_warm_events();
@@ -3224,6 +3298,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
 
         $status = self::get_cron_warm_status();
         $status['queueResetSuccess'] = (bool) $queue_reset;
+        $status['foregroundPreserved'] = (bool) $foreground_preserved;
         return $status;
     }
 
@@ -3265,6 +3340,33 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         return self::is_warm_plan_active(self::get_warm_plan_state());
     }
 
+    /** Map one full-site background plan reason to its per-language warm policy operation. */
+    private static function get_cron_warm_multilingual_operation($reason)
+    {
+        $reason = sanitize_key((string) $reason);
+        if ('scheduled_cleanup' === $reason) {
+            return 'after_cleanup';
+        }
+        if (in_array($reason, array('manual_purge', 'plugin_update'), true)) {
+            return 'after_flush';
+        }
+
+        return 'scheduled';
+    }
+
+    /** Return whether a multilingual plan has at least one eligible language target. */
+    private static function cron_warm_multilingual_operation_has_targets($operation)
+    {
+        if (!function_exists('ultracache_multilingual_is_active') || !ultracache_multilingual_is_active()) {
+            return true;
+        }
+        if (!function_exists('ultracache_multilingual_get_warm_languages')) {
+            return true;
+        }
+
+        return !empty(ultracache_multilingual_get_warm_languages($operation));
+    }
+
     public static function start_cron_warmup_queue($reason = 'manual', $run_immediately = false)
     {
         if (self::is_manual_warmup_blocking_cron()) {
@@ -3280,6 +3382,16 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         $engine = self::get_engine_instance();
         if (!$engine || !method_exists($engine, 'get_crawl_urls_cursor_batch') || !method_exists($engine, 'warm_page_pipeline')) {
             return array('success' => false, 'message' => self::maybe_translate('Cron warm up is not available.'));
+        }
+
+        $multilingual_operation = self::get_cron_warm_multilingual_operation($reason);
+        if (!self::cron_warm_multilingual_operation_has_targets($multilingual_operation)) {
+            return array(
+                'success' => true,
+                'queued' => false,
+                'message' => self::maybe_translate('No multilingual language is enabled for this automatic warm operation.'),
+                'state' => self::get_cron_warm_status(),
+            );
         }
 
         $existing_state = self::get_cron_warm_state();
@@ -3525,6 +3637,227 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         }
     }
 
+    /**
+     * Encode per-language full-site discovery cursors into one opaque plan cursor.
+     *
+     * @param array<string,mixed> $state Composite multilingual discovery state.
+     * @return string
+     */
+    private static function encode_cron_warm_multilingual_cursor(array $state)
+    {
+        $encoded = wp_json_encode($state);
+        if (!$encoded) {
+            return '';
+        }
+
+        return 'ucml2:' . base64_encode($encoded);
+    }
+
+    /**
+     * Decode one composite multilingual discovery cursor.
+     *
+     * Legacy/single-language cursors intentionally restart discovery from the
+     * canonical queue boundary. Queue membership deduplication prevents duplicate
+     * execution while allowing an in-progress plan to adopt fair language slices.
+     *
+     * @param string            $cursor    Opaque plan cursor.
+     * @param array<int,string> $languages Current eligible languages.
+     * @return array<string,mixed>
+     */
+    private static function decode_cron_warm_multilingual_cursor($cursor, array $languages)
+    {
+        $languages = array_values(array_unique(array_filter(array_map('strval', $languages))));
+        $default = array(
+            'version'   => 2,
+            'languages' => $languages,
+            'cursors'   => array(),
+            'done'      => array(),
+            'totals'    => array(),
+            'processed' => array(),
+            'nextIndex' => 0,
+        );
+        foreach ($languages as $language_code) {
+            $default['cursors'][$language_code] = '';
+            $default['done'][$language_code] = false;
+            $default['totals'][$language_code] = 0;
+            $default['processed'][$language_code] = 0;
+        }
+
+        $cursor = trim((string) $cursor);
+        if (0 !== strpos($cursor, 'ucml2:')) {
+            return $default;
+        }
+
+        $decoded = base64_decode(substr($cursor, 6), true);
+        $decoded = false !== $decoded ? json_decode($decoded, true) : null;
+        if (!is_array($decoded) || 2 !== (int) ($decoded['version'] ?? 0)) {
+            return $default;
+        }
+
+        $stored_languages = array_values(array_unique(array_filter(array_map('strval', (array) ($decoded['languages'] ?? array())))));
+        if (empty($stored_languages)) {
+            return $default;
+        }
+
+        // Keep the language set committed by the first discovery batch. If a
+        // language becomes ineligible mid-plan, its requested-language crawler
+        // will fail closed and that lane will be marked complete.
+        $state = array(
+            'version'   => 2,
+            'languages' => $stored_languages,
+            'cursors'   => array(),
+            'done'      => array(),
+            'totals'    => array(),
+            'processed' => array(),
+            'nextIndex' => max(0, (int) ($decoded['nextIndex'] ?? 0)),
+        );
+        foreach ($stored_languages as $language_code) {
+            $state['cursors'][$language_code] = trim((string) (($decoded['cursors'] ?? array())[$language_code] ?? ''));
+            $state['done'][$language_code] = !empty(($decoded['done'] ?? array())[$language_code]);
+            $state['totals'][$language_code] = max(0, (int) (($decoded['totals'] ?? array())[$language_code] ?? 0));
+            $state['processed'][$language_code] = max(0, (int) (($decoded['processed'] ?? array())[$language_code] ?? 0));
+        }
+        if (!empty($stored_languages)) {
+            $state['nextIndex'] %= count($stored_languages);
+        }
+
+        return $state;
+    }
+
+    /**
+     * Discover one fair background batch across all eligible multilingual lanes.
+     *
+     * Each language owns its own native crawler cursor and per-language 5k cap.
+     * The global Scheduled/Cron selection limit is applied later by the warm plan,
+     * so a small limit can no longer be consumed entirely by the default language.
+     *
+     * @param object $engine    Warm engine.
+     * @param string $cursor    Opaque plan cursor.
+     * @param int    $limit     Maximum URLs requested for this batch.
+     * @param string $operation Multilingual warm-policy operation.
+     * @return array<string,mixed>
+     */
+    private static function get_cron_warm_multilingual_discovery_batch($engine, $cursor, $limit, $operation)
+    {
+        $limit = max(1, min(500, (int) $limit));
+        $operation = sanitize_key((string) $operation);
+        $languages = function_exists('ultracache_multilingual_get_warm_languages')
+            ? array_values(ultracache_multilingual_get_warm_languages($operation))
+            : array();
+
+        if (empty($languages)) {
+            return $engine->get_crawl_urls_cursor_batch((string) $cursor, $limit, 'full', $operation);
+        }
+
+        if (1 === count($languages)) {
+            return $engine->get_crawl_urls_cursor_batch(
+                (string) $cursor,
+                $limit,
+                'full',
+                $operation,
+                (string) $languages[0]
+            );
+        }
+
+        $state = self::decode_cron_warm_multilingual_cursor($cursor, $languages);
+        $languages = array_values((array) $state['languages']);
+        $language_count = count($languages);
+        if ($language_count < 1) {
+            return array(
+                'items' => array(),
+                'total' => 0,
+                'offset' => 0,
+                'limit' => $limit,
+                'cursor' => (string) $cursor,
+                'nextCursor' => '',
+                'nextOffset' => 0,
+                'processed' => 0,
+                'hasMore' => false,
+            );
+        }
+
+        $start_index = max(0, (int) $state['nextIndex']) % $language_count;
+        $ordered = array();
+        for ($i = 0; $i < $language_count; $i++) {
+            $ordered[] = $languages[($start_index + $i) % $language_count];
+        }
+
+        $items = array();
+        $seen = array();
+        $eligible_this_round = array_values(array_filter(
+            $ordered,
+            static function ($language_code) use ($state) {
+                return empty($state['done'][$language_code]);
+            }
+        ));
+
+        foreach ($eligible_this_round as $position => $language_code) {
+            $remaining = $limit - count($items);
+            if ($remaining < 1) {
+                break;
+            }
+
+            $slots_left = max(1, count($eligible_this_round) - $position);
+            $quota = max(1, (int) ceil($remaining / $slots_left));
+            $language_batch = $engine->get_crawl_urls_cursor_batch(
+                (string) ($state['cursors'][$language_code] ?? ''),
+                min(500, $quota),
+                'full',
+                $operation,
+                $language_code
+            );
+
+            foreach ((array) ($language_batch['items'] ?? array()) as $url) {
+                $url = trim((string) $url);
+                if ('' === $url || isset($seen[$url])) {
+                    continue;
+                }
+                $seen[$url] = true;
+                $items[] = $url;
+                if (count($items) >= $limit) {
+                    break;
+                }
+            }
+
+            $state['cursors'][$language_code] = !empty($language_batch['nextCursor'])
+                ? (string) $language_batch['nextCursor']
+                : '';
+            $state['done'][$language_code] = empty($language_batch['hasMore']);
+            $state['totals'][$language_code] = max(
+                (int) ($state['totals'][$language_code] ?? 0),
+                max(0, (int) ($language_batch['total'] ?? 0))
+            );
+            $state['processed'][$language_code] = max(
+                (int) ($state['processed'][$language_code] ?? 0),
+                max(0, (int) ($language_batch['processed'] ?? 0))
+            );
+        }
+
+        $state['nextIndex'] = ($start_index + 1) % $language_count;
+        $has_more = false;
+        foreach ($languages as $language_code) {
+            if (empty($state['done'][$language_code])) {
+                $has_more = true;
+                break;
+            }
+        }
+
+        $total = array_sum(array_map('intval', (array) $state['totals']));
+        $processed = array_sum(array_map('intval', (array) $state['processed']));
+
+        return array(
+            'items'      => array_values($items),
+            'total'      => max($total, $processed),
+            'offset'     => max(0, $processed - count($items)),
+            'limit'      => $limit,
+            'cursor'     => (string) $cursor,
+            'nextCursor' => $has_more ? self::encode_cron_warm_multilingual_cursor($state) : '',
+            'nextOffset' => $processed,
+            'processed'  => $processed,
+            'hasMore'    => $has_more,
+        );
+    }
+
     private static function prepare_next_cron_warm_full_site_batch(array &$state, $engine, $pages_per_minute, $total_limit, $now, array $args = array(), $configured_pages_per_minute = null)
     {
         $plan_record = self::get_warm_plan_record();
@@ -3568,7 +3901,13 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             ? min($pages_per_minute, $remaining_budget)
             : $pages_per_minute;
         $batch_limit = max(1, $batch_limit);
-        $batch = $engine->get_crawl_urls_cursor_batch((string) ($plan['cursor'] ?? ''), $batch_limit);
+        $multilingual_operation = self::get_cron_warm_multilingual_operation((string) ($plan['reason'] ?? ''));
+        $batch = self::get_cron_warm_multilingual_discovery_batch(
+            $engine,
+            (string) ($plan['cursor'] ?? ''),
+            $batch_limit,
+            $multilingual_operation
+        );
         $items = isset($batch['items']) && is_array($batch['items']) ? array_values($batch['items']) : array();
         $accepted_urls = array();
         $enqueue_summary = array();
@@ -3631,12 +3970,14 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         $manual_warm_active,
         $site_warm_active,
         $background_execution_enabled,
-        $pending_varnish_invalidations
+        $pending_varnish_invalidations,
+        $pending_litespeed_invalidations = false
     ) {
         $manual_warm_active = (bool) $manual_warm_active;
         $site_warm_active = (bool) $site_warm_active;
         $background_execution_enabled = (bool) $background_execution_enabled;
         $pending_varnish_invalidations = (bool) $pending_varnish_invalidations;
+        $pending_litespeed_invalidations = (bool) $pending_litespeed_invalidations;
 
         return array(
             'runAuxiliaryCacheWork' => !$manual_warm_active
@@ -3644,6 +3985,8 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 && $background_execution_enabled,
             'runVarnishInvalidations' => !$manual_warm_active
                 && $pending_varnish_invalidations,
+            'runLiteSpeedInvalidations' => !$manual_warm_active
+                && $pending_litespeed_invalidations,
         );
     }
 
@@ -3698,29 +4041,43 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
         $background_execution_enabled = $background_pages_per_minute > 0;
         $pending_varnish_invalidations = method_exists(static::class, 'has_pending_varnish_invalidation_rows')
             && self::has_pending_varnish_invalidation_rows();
+        $pending_litespeed_invalidations = method_exists(static::class, 'has_pending_litespeed_invalidation_rows')
+            && self::has_pending_litespeed_invalidation_rows();
         $execution_policy = self::get_cron_warm_tick_execution_policy(
             $manual_warm_active,
             $site_warm_active,
             $background_execution_enabled,
-            $pending_varnish_invalidations
+            $pending_varnish_invalidations,
+            $pending_litespeed_invalidations
         );
         $run_auxiliary_cache_work = !empty($execution_policy['runAuxiliaryCacheWork']);
         $run_varnish_invalidation_queue = !empty($execution_policy['runVarnishInvalidations']);
+        $run_litespeed_invalidation_queue = !empty($execution_policy['runLiteSpeedInvalidations']);
         $varnish_queue_limit = 100;
+        $litespeed_queue_limit = 100;
         $auxiliary_skip_reason = $manual_warm_active
             ? 'manual-warm-priority'
             : ($site_warm_active
                 ? 'site-warm-priority'
                 : ($background_execution_enabled ? 'unavailable' : 'background-rate-paused'));
 
-        // Run LiteSpeed discovery first. Its scanner deliberately yields when the
-        // shared targeted page queue is already active, while the Varnish scanner
-        // can safely add its own bounded rows to that same queue afterwards.
-        // This ordering prevents an always-due Varnish scan from starving the
-        // independent LiteSpeed refresh-ahead registry.
-        $litespeed_refresh_ahead_run = $run_auxiliary_cache_work && method_exists(static::class, 'maybe_run_litespeed_refresh_ahead')
-            ? self::maybe_run_litespeed_refresh_ahead()
-            : array('ran' => false, 'reason' => $auxiliary_skip_reason);
+        // Durable targeted invalidation has correctness priority over discovery
+        // and page warming. It is independent from the configured background
+        // pages-per-minute rate and can therefore drain while warming is paused.
+        $litespeed_queue_run = $run_litespeed_invalidation_queue && method_exists(static::class, 'process_ready_litespeed_invalidation_rows')
+            ? self::process_ready_litespeed_invalidation_rows($litespeed_queue_limit)
+            : array(
+                'processed' => 0,
+                'reason' => $manual_warm_active
+                    ? 'manual-warm-priority'
+                    : 'no-pending-invalidation',
+            );
+        $state = self::get_cron_warm_state();
+        if (!empty($state['active'])) {
+            $run_auxiliary_cache_work = false;
+            $auxiliary_skip_reason = 'site-warm-priority';
+        }
+
         $varnish_refresh_ahead_run = $run_auxiliary_cache_work && method_exists(static::class, 'maybe_run_varnish_refresh_ahead')
             ? self::maybe_run_varnish_refresh_ahead()
             : array('ran' => false, 'reason' => $auxiliary_skip_reason);
@@ -3744,9 +4101,9 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 'success' => true,
                 'message' => self::maybe_translate('Background automation skipped this tick because a foreground warm-up has priority.'),
                 'warmedThisRun' => 0,
+                'liteSpeedQueue' => $litespeed_queue_run,
                 'varnishQueue' => $varnish_queue_run,
                 'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
                 'state' => self::get_cron_warm_status(),
             );
         }
@@ -3758,6 +4115,38 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
             self::resume_deferred_targeted_page_warm_queue();
             $state = self::get_cron_warm_state();
         }
+        if (
+            method_exists(static::class, 'has_pending_litespeed_invalidation_rows')
+            && self::has_pending_litespeed_invalidation_rows()
+        ) {
+            $litespeed_queue = isset($litespeed_queue_run['queue']) && is_array($litespeed_queue_run['queue'])
+                ? $litespeed_queue_run['queue']
+                : (method_exists(static::class, 'get_litespeed_invalidation_queue_stats')
+                    ? self::get_litespeed_invalidation_queue_stats()
+                    : array());
+            $litespeed_delay = 1;
+            if (!empty($litespeed_queue['nextAttemptAt']) && (int) $litespeed_queue['nextAttemptAt'] > time()) {
+                $litespeed_delay = max(1, min(300, (int) $litespeed_queue['nextAttemptAt'] - time()));
+            }
+            self::ensure_cron_warm_events_scheduled($litespeed_delay, true);
+            $queue_reason = sanitize_key((string) ($litespeed_queue_run['reason'] ?? ''));
+            $message = in_array($queue_reason, array('foreground-warm-priority', 'manual-warm-priority'), true)
+                ? self::maybe_translate('Queued LiteSpeed invalidation is yielding to an active foreground warm-up.')
+                : self::maybe_translate('Persistent LiteSpeed invalidation is waiting for its next operation or retry window.');
+            if (!empty($state['active'])) {
+                $message .= ' ' . self::maybe_translate('Page warming will continue after LiteSpeed invalidation finishes.');
+            }
+            return array(
+                'success' => true,
+                'message' => $message,
+                'warmedThisRun' => 0,
+                'liteSpeedQueue' => $litespeed_queue_run,
+                'varnishQueue' => $varnish_queue_run,
+                'varnishRefreshAhead' => $varnish_refresh_ahead_run,
+                'state' => self::get_cron_warm_status(),
+            );
+        }
+
         if (
             method_exists(static::class, 'has_pending_varnish_invalidation_rows')
             && self::has_pending_varnish_invalidation_rows()
@@ -3796,7 +4185,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 'warmedThisRun' => 0,
                 'varnishQueue' => $varnish_queue_run,
                 'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
                 'state' => self::get_cron_warm_status(),
             );
         }
@@ -3824,8 +4212,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             }
 
@@ -3836,7 +4223,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 'warmedThisRun' => 0,
                 'varnishQueue' => $varnish_queue_run,
                 'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
                 'state' => self::get_cron_warm_status(),
             );
         }
@@ -3862,8 +4248,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         'warmedThisRun' => 0,
                         'varnishQueue' => $varnish_queue_run,
                         'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                        'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                        'state' => self::get_cron_warm_status(),
+                                'state' => self::get_cron_warm_status(),
                     );
                 }
 
@@ -3877,8 +4262,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         'warmedThisRun' => 0,
                         'varnishQueue' => $varnish_queue_run,
                         'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                        'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                        'state' => self::get_cron_warm_status(),
+                                'state' => self::get_cron_warm_status(),
                     );
                 }
             }
@@ -3893,8 +4277,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         'warmedThisRun' => 0,
                         'varnishQueue' => $varnish_queue_run,
                         'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                        'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                        'state' => self::get_cron_warm_status(),
+                                'state' => self::get_cron_warm_status(),
                     );
                 }
                 self::clear_cron_warm_queue_table();
@@ -3906,8 +4289,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             }
         }
@@ -4035,8 +4417,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             }
 
@@ -4086,8 +4467,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             }
             if (empty($pending_rows) && $pending_total > 0) {
@@ -4107,8 +4487,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             }
             if (empty($pending_rows) && in_array($state_reason, array('css_bundle_async', 'lcp_refresh_async', 'targeted_purge_async', 'queue_recovery'), true)) {
@@ -4201,8 +4580,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warmedThisRun' => 0,
                     'varnishQueue' => $varnish_queue_run,
                     'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                    'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                    'state' => self::get_cron_warm_status(),
+                        'state' => self::get_cron_warm_status(),
                 );
             } else {
                 $state['currentBatch'] = array();
@@ -4215,7 +4593,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 self::save_cron_warm_state($state);
             }
 
-            $operation_budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('cron_warm', null, 45) : array();
+            $operation_budget = function_exists('ultracache_get_safe_operation_budget') ? ultracache_get_safe_operation_budget('cron_warm') : array();
             $warmed = 0;
             $errors = 0;
             $last_error = (string) $state['lastError'];
@@ -4302,11 +4680,12 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     }
                 }
                 $is_varnish_refresh_ahead = in_array('refresh-ahead', $row_source_contexts, true);
-                $is_litespeed_refresh_ahead = in_array('litespeed-refresh-ahead', $row_source_contexts, true);
                 if ($is_affected_rebuild) {
                     $warm_context = 'affected-save';
+                } elseif (in_array('litespeed-queued-invalidation', $row_source_contexts, true)) {
+                    $warm_context = 'queued-invalidation';
                 } elseif ($is_targeted_warm) {
-                    $warm_context = ($is_varnish_refresh_ahead || $is_litespeed_refresh_ahead) ? 'refresh-ahead' : 'targeted-purge';
+                    $warm_context = $is_varnish_refresh_ahead ? 'refresh-ahead' : 'targeted-purge';
                 } elseif ($has_lcp_stage) {
                     $warm_context = 'lcp-refresh';
                 } elseif ($has_css_stage) {
@@ -4317,7 +4696,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         : 'cron';
                 }
                 $include_varnish = !in_array('varnish', $completed_stage_list, true)
-                    && !$is_litespeed_refresh_ahead
                     && (
                         $has_varnish_stage
                         || ($is_full_site_row
@@ -4327,7 +4705,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     );
                 if (in_array('litespeed', $completed_stage_list, true)) {
                     $include_litespeed = false;
-                } elseif ($is_litespeed_refresh_ahead || $has_litespeed_stage) {
+                } elseif ($has_litespeed_stage) {
                     $include_litespeed = true;
                 } else {
                     $include_litespeed = $is_full_site_row
@@ -4345,7 +4723,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                     'warm_context' => $warm_context,
                     'required_stages' => $required_stages,
                     'completed_stages' => $completed_stage_list,
-                    'time_budget' => 20,
                     '_queue_lease_heartbeat' => static function ($stage = '') use ($row, $url, $lock_token, $lock_ttl, $cron_generation, &$queue_lease_renewed_at, $queue_lease_renew_interval) {
                         if (!self::renew_cron_warm_lock($lock_token, $lock_ttl, $cron_generation, $stage, $url)) {
                             return false;
@@ -4389,12 +4766,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         $row,
                         $warm_args['_queue_lease_heartbeat']
                     );
-                } elseif ($is_litespeed_refresh_ahead && method_exists(static::class, 'prepare_litespeed_refresh_ahead_page_warm')) {
-                    $refresh_ahead_preparation = self::prepare_litespeed_refresh_ahead_page_warm(
-                        $url,
-                        $row,
-                        $warm_args['_queue_lease_heartbeat']
-                    );
                 }
 
                 if (is_array($refresh_ahead_preparation) && empty($refresh_ahead_preparation['proceed'])) {
@@ -4407,7 +4778,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         'ownershipLost' => !empty($refresh_ahead_preparation['ownershipLost']),
                         'failureClass' => !empty($refresh_ahead_preparation['ownershipLost'])
                             ? 'ownership-lost'
-                            : (!empty($refresh_ahead_preparation['skipped']) ? 'refresh-ahead-no-longer-eligible' : ($is_litespeed_refresh_ahead ? 'litespeed-refresh-ahead-stale-purge' : 'refresh-ahead-soft-purge')),
+                            : (!empty($refresh_ahead_preparation['skipped']) ? 'refresh-ahead-no-longer-eligible' : 'refresh-ahead-soft-purge'),
                         'message' => $preparation_message,
                         'pipeline' => array(
                             'status' => !empty($refresh_ahead_preparation['skipped']) ? 'skipped' : 'failed',
@@ -4733,8 +5104,7 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                         'errorsThisRun' => $errors,
                         'varnishQueue' => $varnish_queue_run,
                         'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                        'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
-                        'state' => self::get_cron_warm_status(),
+                                'state' => self::get_cron_warm_status(),
                     );
                 }
             }
@@ -4803,7 +5173,6 @@ trait Ultra_Cache_WP_Cron_Warm_Orchestrator_Trait
                 'errorsThisRun' => $errors,
                 'varnishQueue' => $varnish_queue_run,
                 'varnishRefreshAhead' => $varnish_refresh_ahead_run,
-                'liteSpeedRefreshAhead' => $litespeed_refresh_ahead_run,
                 'state' => self::get_cron_warm_status(),
             );
         } finally {

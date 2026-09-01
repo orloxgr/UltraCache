@@ -74,8 +74,17 @@ trait Ultra_Cache_Engine_Dropin_Lifecycle_Trait
                 }
 
                 if (is_string($existing) && '' !== $existing && false === strpos($existing, $marker)) {
-                    $checkpoint('skipped', array('reason' => 'foreign_dropin'));
-                    return;
+                    $conflict_status = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_cache_conflict_preflight_status')
+                        ? Ultra_Cache_WP::get_cache_conflict_preflight_status(true, false)
+                        : array('blocked' => true);
+                    if (!empty($conflict_status['blocked'])) {
+                        $checkpoint('skipped', array('reason' => 'active_foreign_page_cache'));
+                        return;
+                    }
+                    if (!ultracache_delete_dropin('advanced-cache.php')) {
+                        $checkpoint('skipped', array('reason' => 'foreign_dropin_remove_failed'));
+                        return;
+                    }
                 }
             }
 

@@ -37,7 +37,388 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         return array(
             'fallback' => $this->get_runtime_js_scan_current_setting_lines('deferJsExcludeList'),
             'force'    => $this->get_runtime_js_scan_current_setting_lines('deferJsForceList'),
+            'delay'    => $this->get_runtime_js_scan_current_setting_lines('delaySafeThirdPartyJsPatterns'),
         );
+    }
+
+    private function runtime_js_scan_policy_ownership_option_key()
+    {
+        return 'ultracache_runtime_js_scan_owned_safeguards_v1';
+    }
+
+    private function runtime_js_scan_normalize_policy_ownership($value)
+    {
+        $value = is_array($value) ? $value : array();
+        $out = array('exclusion' => array(), 'force' => array(), 'delay' => array());
+        foreach (array_keys($out) as $lane) {
+            foreach ((array) ($value[$lane] ?? array()) as $line) {
+                $line = strtolower(trim((string) $line));
+                if ('' !== $line) {
+                    $out[$lane][$line] = true;
+                }
+            }
+            $out[$lane] = array_keys($out[$lane]);
+        }
+        return $out;
+    }
+
+    private function runtime_js_scan_get_policy_ownership()
+    {
+        return $this->runtime_js_scan_normalize_policy_ownership(get_option($this->runtime_js_scan_policy_ownership_option_key(), array()));
+    }
+
+    private function runtime_js_scan_policy_line_is_scanner_owned($lane, $line)
+    {
+        $lane = sanitize_key((string) $lane);
+        $line = strtolower(trim((string) $line));
+        if ('' === $line || !in_array($lane, array('exclusion', 'force', 'delay'), true)) {
+            return false;
+        }
+        $ownership = $this->runtime_js_scan_get_policy_ownership();
+        return in_array($line, (array) ($ownership[$lane] ?? array()), true);
+    }
+
+    private function runtime_js_scan_prune_policy_ownership_to_visible_lists(array $ownership)
+    {
+        $visible = array(
+            'exclusion' => $this->get_runtime_js_scan_current_setting_lines('deferJsExcludeList'),
+            'force' => $this->get_runtime_js_scan_current_setting_lines('deferJsForceList'),
+            'delay' => $this->get_runtime_js_scan_current_setting_lines('delaySafeThirdPartyJsPatterns'),
+        );
+        foreach (array('exclusion', 'force', 'delay') as $lane) {
+            $allowed = array_fill_keys(array_map('strtolower', (array) ($visible[$lane] ?? array())), true);
+            $ownership[$lane] = array_values(array_filter((array) ($ownership[$lane] ?? array()), static function ($line) use ($allowed) {
+                return isset($allowed[strtolower(trim((string) $line))]);
+            }));
+        }
+        return $this->runtime_js_scan_normalize_policy_ownership($ownership);
+    }
+
+    private function runtime_js_scan_update_policy_ownership_after_settings_save($decision_json, array $patch)
+    {
+        $lane_keys = array(
+            'exclusion' => 'deferJsExcludeList',
+            'force' => 'deferJsForceList',
+            'delay' => 'delaySafeThirdPartyJsPatterns',
+        );
+        $touched = array();
+        foreach ($lane_keys as $lane => $setting_key) {
+            if (array_key_exists($setting_key, $patch)) {
+                $touched[$lane] = true;
+            }
+        }
+        if (empty($touched)) {
+            return;
+        }
+
+        $ownership = $this->runtime_js_scan_get_policy_ownership();
+        $decision = json_decode((string) $decision_json, true);
+        $is_runtime_write = is_array($decision) && 'runtime-scan-auto' === (string) ($decision['source'] ?? '');
+        if (!$is_runtime_write) {
+            foreach (array_keys($touched) as $lane) {
+                $ownership[$lane] = array();
+            }
+            update_option($this->runtime_js_scan_policy_ownership_option_key(), $this->runtime_js_scan_prune_policy_ownership_to_visible_lists($ownership), false);
+            return;
+        }
+
+        $target = sanitize_key((string) ($decision['target'] ?? ''));
+        $lines = array();
+        foreach ((array) ($decision['lines'] ?? array()) as $line) {
+            $line = strtolower(trim((string) $line));
+            if ('' !== $line) {
+                $lines[$line] = true;
+            }
+        }
+        if (!in_array($target, array('exclusion', 'force', 'delay'), true) || empty($lines)) {
+            foreach (array_keys($touched) as $lane) {
+                $ownership[$lane] = array();
+            }
+            update_option($this->runtime_js_scan_policy_ownership_option_key(), $this->runtime_js_scan_prune_policy_ownership_to_visible_lists($ownership), false);
+            return;
+        }
+
+        foreach (array('exclusion', 'force', 'delay') as $lane) {
+            $current = array_fill_keys((array) ($ownership[$lane] ?? array()), true);
+            foreach (array_keys($lines) as $line) {
+                unset($current[$line]);
+                if ($lane === $target) {
+                    $current[$line] = true;
+                }
+            }
+            $ownership[$lane] = array_keys($current);
+        }
+        update_option($this->runtime_js_scan_policy_ownership_option_key(), $this->runtime_js_scan_prune_policy_ownership_to_visible_lists($ownership), false);
+    }
+
+    public function runtime_js_scan_strategy_state(WP_REST_Request $request)
+    {
+        $strategy = sanitize_key((string) $request->get_param('javascriptStrategy'));
+        if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'sanitize_javascript_strategy')) {
+            $strategy = Ultra_Cache_WP::sanitize_javascript_strategy($strategy);
+        } elseif (!in_array($strategy, array('off', 'defer', 'delay'), true)) {
+            $strategy = 'off';
+        }
+
+        $option_name = 'ultracache_runtime_js_scan_last_javascript_strategy';
+        $dirty_option_name = 'ultracache_runtime_js_scan_javascript_strategy_dirty';
+        $previous = sanitize_key((string) get_option($option_name, ''));
+        $previous_valid = in_array($previous, array('off', 'defer', 'delay'), true);
+        $dirty = '1' === (string) get_option($dirty_option_name, '');
+        $active_strategy_switch = $previous_valid && (
+            ('defer' === $previous && 'delay' === $strategy)
+            || ('delay' === $previous && 'defer' === $strategy)
+        );
+        $changed = $dirty && $active_strategy_switch;
+        $commit = rest_sanitize_boolean($request->get_param('commit'));
+
+        if ($commit) {
+            update_option($option_name, $strategy, false);
+            delete_option($dirty_option_name);
+        }
+
+        return new WP_REST_Response(array(
+            'success'     => true,
+            'current'     => $strategy,
+            'previous'    => $previous_valid ? $previous : '',
+            'initialized' => $previous_valid,
+            'dirty'       => $dirty,
+            'changed'     => $changed,
+            'committed'   => $commit,
+        ), 200);
+    }
+
+    /**
+     * Resolve one bounded representative frontend target set for a Runtime Scan session.
+     *
+     * @param WP_REST_Request $request REST request.
+     * @return WP_REST_Response
+     */
+    public function runtime_js_scan_targets(WP_REST_Request $request)
+    {
+        unset($request);
+
+        $targets = array();
+        $seen = array();
+        $add_target = static function ($role, $label, $url, $object_id = 0) use (&$targets, &$seen) {
+            $url = esc_url_raw((string) $url);
+            if ('' === $url) {
+                return;
+            }
+
+            $key = strtolower(untrailingslashit($url));
+            if (isset($seen[$key])) {
+                return;
+            }
+
+            $seen[$key] = true;
+            $targets[] = array(
+                'role'     => sanitize_key((string) $role),
+                'label'    => sanitize_text_field((string) $label),
+                'url'      => $url,
+                'objectId' => max(0, (int) $object_id),
+            );
+        };
+
+        $front_page_id = (int) get_option('page_on_front');
+        $add_target('home', __('Front page', 'ultracache'), home_url('/'), $front_page_id);
+
+        $excluded_page_ids = array_filter(array($front_page_id));
+        $woocommerce_active = class_exists('WooCommerce') && function_exists('wc_get_page_id');
+        $shop_page_id = 0;
+
+        if ($woocommerce_active) {
+            foreach (array('shop', 'cart', 'checkout', 'myaccount', 'terms') as $woocommerce_page_key) {
+                $woocommerce_page_id = (int) wc_get_page_id($woocommerce_page_key);
+                if ($woocommerce_page_id > 0) {
+                    $excluded_page_ids[] = $woocommerce_page_id;
+                }
+                if ('shop' === $woocommerce_page_key) {
+                    $shop_page_id = $woocommerce_page_id;
+                }
+            }
+        }
+
+        $excluded_page_ids = array_values(array_filter(array_unique(array_map('absint', $excluded_page_ids))));
+        $random_page_ids = get_posts(array(
+            'post_type'        => 'page',
+            'post_status'      => 'publish',
+            'posts_per_page'   => max(1, count($excluded_page_ids) + 1),
+            'orderby'          => 'rand',
+            'fields'           => 'ids',
+            'suppress_filters' => false,
+            'no_found_rows'    => true,
+        ));
+        foreach ((array) $random_page_ids as $random_page_candidate_id) {
+            $random_page_id = absint($random_page_candidate_id);
+            if ($random_page_id <= 0 || in_array($random_page_id, $excluded_page_ids, true)) {
+                continue;
+            }
+            $add_target('page', __('Random published page', 'ultracache'), get_permalink($random_page_id), $random_page_id);
+            break;
+        }
+
+        if ($woocommerce_active) {
+            if ($shop_page_id > 0 && 'publish' === get_post_status($shop_page_id)) {
+                $add_target('shop', __('WooCommerce shop', 'ultracache'), get_permalink($shop_page_id), $shop_page_id);
+            }
+
+            if (function_exists('wc_get_products')) {
+                $product_page = wc_get_products(array(
+                    'status'   => 'publish',
+                    'limit'    => 1,
+                    'page'     => 1,
+                    'paginate' => true,
+                    'return'   => 'ids',
+                ));
+                $product_total = is_object($product_page) && isset($product_page->total)
+                    ? max(0, (int) $product_page->total)
+                    : 0;
+                if ($product_total > 0) {
+                    $random_product_page = wp_rand(1, $product_total);
+                    $random_product_result = 1 === $random_product_page
+                        ? $product_page
+                        : wc_get_products(array(
+                            'status'   => 'publish',
+                            'limit'    => 1,
+                            'page'     => $random_product_page,
+                            'paginate' => true,
+                            'return'   => 'ids',
+                        ));
+                    $product_ids = is_object($random_product_result) && isset($random_product_result->products)
+                        ? (array) $random_product_result->products
+                        : array();
+                    if (!empty($product_ids[0])) {
+                        $product_id = (int) $product_ids[0];
+                        $add_target('product', __('Random published product', 'ultracache'), get_permalink($product_id), $product_id);
+                    }
+                }
+            }
+        }
+
+        return new WP_REST_Response(array(
+            'success'     => true,
+            'targets'     => $targets,
+            'targetCount' => count($targets),
+            'woocommerce' => $woocommerce_active,
+        ), 200);
+    }
+
+    /**
+     * Resolve same-site redirects without loading the target in the browser scanner context.
+     *
+     * Runtime Scan measurements must start from the first browser lifecycle. Redirect
+     * resolution therefore happens server-side before the one-time scan token is minted.
+     * If the public HEAD probe cannot be completed, the already-normalized same-site URL
+     * is retained and the browser measurement will fail closed if the collector is lost.
+     *
+     * @param string $url Normalized same-site target URL.
+     * @return string
+     */
+    private function runtime_js_scan_resolve_final_target_url($url)
+    {
+        $current = function_exists('ultracache_runtime_js_scan_normalize_target_url')
+            ? ultracache_runtime_js_scan_normalize_target_url($url)
+            : '';
+        if ('' === $current) {
+            return '';
+        }
+
+        for ($hop = 0; $hop < 5; $hop++) {
+            $response = wp_safe_remote_head($current, array(
+                'timeout'             => 6,
+                'redirection'         => 0,
+                'reject_unsafe_urls'  => true,
+                'user-agent'          => 'UltraCache Runtime Scan URL Resolver/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown'),
+                'headers'             => array(
+                    'Cache-Control' => 'no-cache',
+                    'Pragma'        => 'no-cache',
+                ),
+            ));
+
+            if (is_wp_error($response)) {
+                return $current;
+            }
+
+            $code = (int) wp_remote_retrieve_response_code($response);
+            if (in_array($code, array(405, 501), true)) {
+                $response = wp_safe_remote_get($current, array(
+                    'timeout'             => 6,
+                    'redirection'         => 0,
+                    'reject_unsafe_urls'  => true,
+                    'limit_response_size' => 1,
+                    'user-agent'          => 'UltraCache Runtime Scan URL Resolver/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown'),
+                    'headers'             => array(
+                        'Cache-Control' => 'no-cache',
+                        'Pragma'        => 'no-cache',
+                    ),
+                ));
+                if (is_wp_error($response)) {
+                    return $current;
+                }
+                $code = (int) wp_remote_retrieve_response_code($response);
+            }
+
+            if ($code < 300 || $code >= 400) {
+                return $current;
+            }
+
+            $location = trim((string) wp_remote_retrieve_header($response, 'location'));
+            if ('' === $location) {
+                return $current;
+            }
+
+            if (class_exists('WP_Http') && method_exists('WP_Http', 'make_absolute_url')) {
+                $location = WP_Http::make_absolute_url($location, $current);
+            }
+
+            $next = ultracache_runtime_js_scan_normalize_target_url($location);
+            if ('' === $next || $next === $current) {
+                return $current;
+            }
+            $current = $next;
+        }
+
+        return $current;
+    }
+
+    public function create_runtime_js_scan_token(WP_REST_Request $request)
+    {
+        $scan_id = sanitize_key((string) $request->get_param('scanId'));
+        $target_url = esc_url_raw((string) $request->get_param('url'));
+        if ('' === $scan_id || strlen($scan_id) > 64) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Invalid runtime JS scan id.', 'ultracache')), 400);
+        }
+        if (!function_exists('ultracache_runtime_js_scan_normalize_target_url') || !function_exists('ultracache_runtime_js_scan_mint_token')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Runtime JS scan token service is unavailable.', 'ultracache')), 500);
+        }
+
+        $normalized_url = ultracache_runtime_js_scan_normalize_target_url($target_url);
+        if ('' === $normalized_url) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Runtime JS scan URL must be on this site.', 'ultracache')), 400);
+        }
+
+        $resolved_url = $this->runtime_js_scan_resolve_final_target_url($normalized_url);
+        if ('' === $resolved_url) {
+            $resolved_url = $normalized_url;
+        }
+
+        $token = ultracache_runtime_js_scan_mint_token($scan_id, $resolved_url);
+        if ('' === $token) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Could not create the Runtime JS scan token.', 'ultracache')), 500);
+        }
+
+        return new WP_REST_Response(array(
+            'success'   => true,
+            'scanId'    => $scan_id,
+            'scanToken' => $token,
+            'expiresIn' => 300,
+            'url'          => $resolved_url,
+            'requestedUrl' => $normalized_url,
+            'language'     => function_exists('ultracache_multilingual_get_public_url_language')
+                ? ultracache_multilingual_get_public_url_language($resolved_url)
+                : '',
+        ), 200);
     }
 
     private function runtime_js_scan_clean_console_candidate($candidate)
@@ -84,7 +465,9 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         return remove_query_arg(array(
             'ultracache_runtime_js_scan',
             'ultracache_runtime_js_scan_id',
+            'ultracache_runtime_js_scan_token',
             'ultracache_runtime_js_scan_nonce',
+            'ultracache_runtime_js_scan_mode',
             'ultracache_runtime_js_scan_context',
             'ultracache_rt',
             'ultracache_profile_bypass',
@@ -177,9 +560,13 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                 $path = (string) wp_parse_url($url, PHP_URL_PATH);
 
                 if ('' !== $host && !$this->runtime_js_scan_is_generic_token($host)) {
-                    $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-                    $site_host = strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST));
-                    if ($host !== $home_host && $host !== $site_host) {
+                    $is_local_host = function_exists('ultracache_is_trusted_public_host')
+                        ? ultracache_is_trusted_public_host($host)
+                        : in_array($host, array(
+                            strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST)),
+                            strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST)),
+                        ), true);
+                    if (!$is_local_host) {
                         $out[$host] = true;
                     }
                 }
@@ -208,6 +595,20 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         return array_keys($out);
     }
 
+    private function runtime_js_scan_wordpress_family_from_id($id)
+    {
+        $id = sanitize_text_field(substr((string) $id, 0, 160));
+        if ('' === $id) {
+            return '';
+        }
+
+        if (!preg_match('/^(.+)-js(?:-extra|-before|-after|-translations)?$/i', $id, $match)) {
+            return '';
+        }
+
+        return sanitize_key((string) ($match[1] ?? ''));
+    }
+
     private function runtime_js_scan_normalize_script_inventory(array $scripts)
     {
         $out = array();
@@ -216,6 +617,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                 continue;
             }
 
+            $order = isset($script['order']) ? max(0, (int) $script['order']) : count($out);
             $src = isset($script['src']) ? $this->runtime_js_scan_sanitize_source((string) $script['src']) : '';
             $id = isset($script['id']) ? sanitize_text_field(substr((string) $script['id'], 0, 160)) : '';
             $handle = isset($script['handle']) ? sanitize_text_field(substr((string) $script['handle'], 0, 160)) : '';
@@ -244,6 +646,12 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             }
 
             $out[] = array(
+                'order'    => $order,
+                'executionSequence' => isset($script['executionSequence']) ? max(0, (int) $script['executionSequence']) : 0,
+                'executionLane' => isset($script['executionLane']) ? sanitize_key((string) $script['executionLane']) : '',
+                'family' => isset($script['family']) ? sanitize_key((string) $script['family']) : '',
+                'familySequence' => isset($script['familySequence']) ? max(0, (int) $script['familySequence']) : 0,
+                'familyPhase' => isset($script['familyPhase']) ? sanitize_key((string) $script['familyPhase']) : '',
                 'id'       => $id,
                 'handle'   => $handle,
                 'src'      => $src,
@@ -261,7 +669,166 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             }
         }
 
+        // WordPress can print one registered handle as several script elements, such as
+        // handle-js, handle-js-before/after, and handle-js-translations. The registry
+        // metadata may land on only one fragment. Build families only from an explicit
+        // WordPress handle captured by data-ultracache-handle, then let matching sibling
+        // IDs inherit that canonical handle and its declared dependency list. Do not
+        // infer a new family from an ID alone.
+        $families = array();
+        $family_aliases = array();
+        foreach ($out as $script) {
+            $handle = sanitize_key((string) ($script['handle'] ?? ''));
+            if ('' === $handle) {
+                continue;
+            }
+            if (!isset($families[$handle])) {
+                $families[$handle] = array('deps' => array());
+            }
+            $family_aliases[$handle][$handle] = true;
+            $id_family = $this->runtime_js_scan_wordpress_family_from_id((string) ($script['id'] ?? ''));
+            if ('' !== $id_family) {
+                $family_aliases[$id_family][$handle] = true;
+            }
+            foreach ((array) ($script['deps'] ?? array()) as $dependency) {
+                $dependency = sanitize_key((string) $dependency);
+                if ('' !== $dependency) {
+                    $families[$handle]['deps'][$dependency] = true;
+                }
+            }
+        }
+
+        if (empty($families)) {
+            return $out;
+        }
+
+        foreach ($out as &$script) {
+            $handle = sanitize_key((string) ($script['handle'] ?? ''));
+            $family = $handle;
+            if ('' === $family) {
+                $candidate = $this->runtime_js_scan_wordpress_family_from_id((string) ($script['id'] ?? ''));
+                if ('' !== $candidate && !empty($family_aliases[$candidate]) && 1 === count($family_aliases[$candidate])) {
+                    $family = (string) array_key_first($family_aliases[$candidate]);
+                    $script['handle'] = $family;
+                }
+            }
+
+            if ('' === $family || !isset($families[$family])) {
+                continue;
+            }
+
+            $deps = array();
+            foreach ((array) ($script['deps'] ?? array()) as $dependency) {
+                $dependency = sanitize_key((string) $dependency);
+                if ('' !== $dependency) {
+                    $deps[$dependency] = true;
+                }
+            }
+            foreach (array_keys($families[$family]['deps']) as $dependency) {
+                $deps[$dependency] = true;
+            }
+            $script['deps'] = array_keys($deps);
+        }
+        unset($script);
+
         return $out;
+    }
+
+    private function runtime_js_scan_merge_script_inventories(array $fetched_scripts, array $runtime_scripts)
+    {
+        $fetched_scripts = $this->runtime_js_scan_normalize_script_inventory($fetched_scripts);
+        $runtime_scripts = $this->runtime_js_scan_normalize_script_inventory($runtime_scripts);
+        if (empty($runtime_scripts)) {
+            return $fetched_scripts;
+        }
+
+        $merged = array();
+        $positions = array();
+        $key_for = static function (array $script) {
+            $src = trim((string) ($script['src'] ?? ''));
+            if ('' !== $src) {
+                $host = strtolower((string) wp_parse_url($src, PHP_URL_HOST));
+                $path = strtolower((string) wp_parse_url($src, PHP_URL_PATH));
+                if ('' !== $path) {
+                    return 'src:' . $host . $path;
+                }
+                return 'src:' . strtolower(preg_replace('/[?#].*$/', '', $src));
+            }
+            // Inline WordPress companions frequently share one registered handle
+            // (handle-js-before / handle-js-after / translations / extra) while
+            // remaining distinct executable segments. Prefer their concrete DOM id
+            // before the family handle so merge enrichment cannot collapse several
+            // inline providers/consumers into one record. External scripts continue
+            // to key by normalized src above.
+            $id = strtolower(trim((string) ($script['id'] ?? '')));
+            if ('' !== $id) {
+                return 'id:' . $id;
+            }
+            $handle = sanitize_key((string) ($script['handle'] ?? ''));
+            return '' !== $handle ? 'handle:' . $handle : '';
+        };
+
+        // Runtime Scan is the authoritative loaded-script set and execution state.
+        // Keep those records first so the 240-entry cap cannot discard a script
+        // that actually existed in the failing browser document.
+        foreach ($runtime_scripts as $runtime_script) {
+            if (!is_array($runtime_script)) {
+                continue;
+            }
+            $key = $key_for($runtime_script);
+            if ('' !== $key && isset($positions[$key])) {
+                continue;
+            }
+            if ('' !== $key) {
+                $positions[$key] = count($merged);
+            }
+            $merged[] = $runtime_script;
+            if (count($merged) >= 240) {
+                break;
+            }
+        }
+
+        // Enrich matching runtime records with the server-side inventory because
+        // that fetch can carry WordPress dependency metadata and fuller inline
+        // source text. Do not overwrite browser-observed defer/async/delay state.
+        foreach ($fetched_scripts as $fetched_script) {
+            if (!is_array($fetched_script)) {
+                continue;
+            }
+            $key = $key_for($fetched_script);
+            if ('' === $key || !isset($positions[$key])) {
+                if (count($merged) >= 240) {
+                    continue;
+                }
+                if ('' !== $key) {
+                    $positions[$key] = count($merged);
+                }
+                $merged[] = $fetched_script;
+                continue;
+            }
+
+            $index = (int) $positions[$key];
+            $existing = isset($merged[$index]) && is_array($merged[$index]) ? $merged[$index] : array();
+            foreach (array('id', 'handle', 'src', 'type', 'strategy') as $field) {
+                if ('' === trim((string) ($existing[$field] ?? '')) && '' !== trim((string) ($fetched_script[$field] ?? ''))) {
+                    $existing[$field] = $fetched_script[$field];
+                }
+            }
+            $deps = array();
+            foreach (array_merge((array) ($existing['deps'] ?? array()), (array) ($fetched_script['deps'] ?? array())) as $dependency) {
+                $dependency = sanitize_key((string) $dependency);
+                if ('' !== $dependency) {
+                    $deps[$dependency] = true;
+                }
+            }
+            $existing['deps'] = array_keys($deps);
+            if ('' !== trim((string) ($fetched_script['text'] ?? ''))) {
+                $existing['text'] = (string) $fetched_script['text'];
+            }
+            $merged[$index] = $existing;
+        }
+
+        return $this->runtime_js_scan_normalize_script_inventory(array_slice($merged, 0, 240));
     }
 
     private function runtime_js_scan_inventory_summary(array $scripts)
@@ -468,6 +1035,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                     || false !== stripos($type, 'ultracache-delayed'));
 
                 $scripts[] = array(
+                    'order'    => count($scripts),
                     'id'       => sanitize_text_field(substr($id, 0, 160)),
                     'handle'   => sanitize_text_field(substr($handle, 0, 160)),
                     'src'      => '' !== $src ? $this->runtime_js_scan_url_to_absolute($src, $normalized) : '',
@@ -878,10 +1446,15 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                 return;
             }
             $base = $this->runtime_js_scan_basename_from_source($candidate);
-            if ('' === $base || !preg_match('/\.js$/i', $base) || $this->runtime_js_scan_is_generic_script_basename($base)) {
+            if ('' === $base || !preg_match('/\.js$/i', $base)) {
                 return;
             }
 
+            // A generic basename is ambiguous only when it is all we know. If
+            // the browser already supplied a plugin/theme-owned full source URL,
+            // keep that exact identity. If it supplied only a basename/partial
+            // source, accept it only when the current script inventory resolves
+            // it to one unique plugin/theme-owned script.
             $owner = $this->runtime_js_scan_owner_from_script_source($candidate);
             if (empty($owner) && !empty($scripts)) {
                 $matches = $this->runtime_js_scan_find_scripts_by_source_hint($candidate, $scripts);
@@ -889,6 +1462,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                     $matched_src = isset($matches[0]['src']) ? (string) $matches[0]['src'] : '';
                     if ('' !== $matched_src) {
                         $candidate = $matched_src;
+                        $base = $this->runtime_js_scan_basename_from_source($candidate);
                         $owner = $this->runtime_js_scan_owner_from_script_source($candidate);
                     }
                 }
@@ -1078,6 +1652,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
     {
         $text = (string) $text;
         $sources = array();
+        $exact_url_bases = array();
         if ('' === trim($text)) {
             return array();
         }
@@ -1085,14 +1660,21 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         if (preg_match_all('#https?://[^\s\)\]\}"\'<>]+\.js(?:\?[^\s\)\]\}"\'<>]*)?(?::\d+){0,2}#i', $text, $url_matches)) {
             foreach ((array) $url_matches[0] as $source) {
                 $source = $this->runtime_js_scan_sanitize_source((string) $source);
-                if ($this->runtime_js_scan_is_ultracache_runtime_helper_source($source)) {
+                if ('' === $source || $this->runtime_js_scan_is_ultracache_runtime_helper_source($source)) {
                     continue;
                 }
-                $path_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
-                if ('' !== $path_fragment) {
-                    $sources[strtolower($path_fragment)] = $path_fragment;
-                } elseif ('' !== $source && !$this->runtime_js_scan_is_generic_script_basename($this->runtime_js_scan_basename_from_source($source))) {
-                    $sources[strtolower($source)] = $source;
+
+                // A browser stack URL is exact causal evidence. Preserve the
+                // complete sanitized URL instead of reducing it to a fixed-depth
+                // path fragment; deep plugin paths can otherwise lose their owner
+                // identity (for example .../interactive-geo-maps/.../app.min.js).
+                $clean = strtolower($this->runtime_js_scan_clean_console_candidate($source));
+                if ('' !== $clean) {
+                    $sources[$clean] = $source;
+                }
+                $base = strtolower($this->runtime_js_scan_basename_from_source($source));
+                if ('' !== $base) {
+                    $exact_url_bases[$base] = true;
                 }
             }
         }
@@ -1114,6 +1696,9 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                     continue;
                 }
                 $base = $this->runtime_js_scan_basename_from_source($source);
+                if ('' !== $base && isset($exact_url_bases[strtolower($base)])) {
+                    continue;
+                }
                 $path_fragment = $this->runtime_js_scan_path_fragment_from_source($source, 4);
                 if ('' !== $path_fragment) {
                     $sources[strtolower($path_fragment)] = $path_fragment;
@@ -1257,13 +1842,21 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
 
             $starts_error = (bool) preg_match('/(?:Uncaught\s+)?(?:ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError|Error):|jQuery\.Deferred exception|\bis not defined\b|\bis not a function\b|Cannot read properties|window\[[^\]]+\]\s+is\s+not\s+a\s+function/i', $line);
             $is_stack_line = (bool) (preg_match('/^at\s+/i', $line) || preg_match('/\.(?:m?js)(?:\?[^\s\)]*)?(?::\d+(?::\d+)?)?/i', $line));
+            $starts_functional_failure = !$starts_error
+                && method_exists($this, 'runtime_js_scan_is_functional_failure_console_message')
+                && $this->runtime_js_scan_is_functional_failure_console_message($line);
 
-            if ($starts_error) {
+            if ($starts_error || $starts_functional_failure) {
                 if (!empty($current)) {
                     $blocks[] = $current;
                 }
                 $current = array($line);
                 $in_error = true;
+                continue;
+            }
+
+            if ($in_error && preg_match('/^(?:Error|Stack(?: trace)?)\:?$/i', $line)) {
+                $current[] = $line;
                 continue;
             }
 
@@ -1305,6 +1898,11 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             if ('' === $message) {
                 $message = substr($block_text, 0, 500);
             }
+            $is_functional_failure = method_exists($this, 'runtime_js_scan_is_functional_failure_console_message')
+                && $this->runtime_js_scan_is_functional_failure_console_message($message);
+            if ($is_functional_failure && method_exists($this, 'runtime_js_scan_clean_functional_console_message')) {
+                $message = $this->runtime_js_scan_clean_functional_console_message($message);
+            }
 
             $sources = $this->runtime_js_scan_console_sources_from_text($block_text);
             if (empty($sources)) {
@@ -1319,7 +1917,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
 
             foreach ($sources as $source) {
                 $errors[] = array(
-                    'kind' => 'console-paste',
+                    'kind' => $is_functional_failure ? 'console-paste-functional-failure' : 'console-paste',
                     'message' => sanitize_text_field(substr($message, 0, 500)),
                     'source'  => $this->runtime_js_scan_sanitize_source((string) $source),
                     'line'    => 0,
@@ -1365,6 +1963,9 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'errors'               => array_slice($errors, 0, 40),
             'resourceErrors'       => array(),
             'scannedUrl'           => '' !== $url ? $this->runtime_js_scan_sanitize_display_url($url) : home_url('/'),
+            'scannedLanguage'      => function_exists('ultracache_multilingual_get_public_url_language')
+                ? ultracache_multilingual_get_public_url_language('' !== $url ? $this->runtime_js_scan_sanitize_display_url($url) : home_url('/'))
+                : '',
             'scriptInventoryCount' => count($scripts),
             'scriptInventorySummary' => $this->runtime_js_scan_inventory_summary($scripts),
             'scanContext'          => 'console-paste',
@@ -1404,9 +2005,15 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             (array) ($payload['errors'] ?? array())
         );
 
+        $report_url = !empty($payload['url'])
+            ? (string) $payload['url']
+            : $this->runtime_js_scan_sanitize_display_url((string) ($existing['url'] ?? ''));
         $report = array(
             'scanId'      => (string) $payload['scanId'],
-            'url'         => !empty($payload['url']) ? $payload['url'] : $this->runtime_js_scan_sanitize_display_url((string) ($existing['url'] ?? '')),
+            'url'         => $report_url,
+            'language'    => function_exists('ultracache_multilingual_get_public_url_language')
+                ? ultracache_multilingual_get_public_url_language($report_url)
+                : '',
             'startedAt'   => isset($existing['startedAt']) ? (int) $existing['startedAt'] : time(),
             'updatedAt'   => time(),
             'completed'   => !empty($payload['completed']) || !empty($existing['completed']),
@@ -1417,7 +2024,6 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'userAgent'   => !empty($payload['userAgent']) ? $payload['userAgent'] : (string) ($existing['userAgent'] ?? ''),
             'elapsedMs'   => max((int) ($existing['elapsedMs'] ?? 0), (int) $payload['elapsedMs']),
         );
-        $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
         return $report;
     }
 
@@ -1431,7 +2037,19 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
 
         $lock_name = 'runtime-js-scan-merge:' . sha1($scan_id);
         $lock_token = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('runtime_js_scan_', true);
-        if (!function_exists('ultracache_acquire_lock') || !ultracache_acquire_lock($lock_name, $lock_token, 15, array('scanId' => $scan_id))) {
+        $lock_acquired = false;
+        if (function_exists('ultracache_acquire_lock')) {
+            for ($attempt = 0; $attempt < 5; $attempt++) {
+                if (ultracache_acquire_lock($lock_name, $lock_token, 15, array('scanId' => $scan_id))) {
+                    $lock_acquired = true;
+                    break;
+                }
+                if ($attempt < 4) {
+                    usleep(75000);
+                }
+            }
+        }
+        if (!$lock_acquired) {
             return new WP_REST_Response(array('success' => false, 'message' => __('Runtime JS scan report is being merged. Retry the request.', 'ultracache')), 409);
         }
 
@@ -1439,8 +2057,14 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             $existing_job = $this->runtime_js_diagnostic_queue_get_job_by_scan_id($scan_id);
             $existing_report = $this->runtime_js_scan_report_from_job($existing_job);
             $report = $this->merge_runtime_js_scan_report($existing_report, $payload);
-            $dashboard_scan = $this->summarize_runtime_js_scan_for_dashboard($report);
-            $queue_result = $this->runtime_js_diagnostic_queue_result_from_scan($dashboard_scan, $report);
+            // Runtime Scan only persists raw browser evidence. Suggestion extraction is
+            // intentionally handled later by the same Console Error Handler path used
+            // by manually pasted console errors.
+            $queue_result = array(
+                'available' => true,
+                'report' => $report,
+                'runtimeErrorCount' => isset($report['errorCount']) ? (int) $report['errorCount'] : 0,
+            );
             $queue_status = !empty($report['completed']) ? 'done' : 'running';
             $queue_progress = !empty($report['completed']) ? 100 : 60;
             $queue_job_id = sanitize_text_field((string) $payload['queueJobId']);
@@ -1526,6 +2150,7 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                 'source'  => $this->runtime_js_scan_sanitize_source($source),
                 'detail'  => isset($error['detail']) ? sanitize_text_field((string) $error['detail']) : '',
                 'atMs'    => isset($error['atMs']) ? (int) $error['atMs'] : 0,
+                'isJavaScript' => $this->runtime_js_scan_resource_is_javascript($source, (string) ($error['detail'] ?? '')),
                 'likelyClientBlocked' => $this->runtime_js_scan_resource_likely_client_blocked($source, (string) ($error['message'] ?? ''), (string) ($error['detail'] ?? '')),
             );
             if (count($resources) >= 40) {
@@ -1535,13 +2160,23 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
         return $resources;
     }
 
+    private function runtime_js_scan_resource_is_javascript($source, $detail = '')
+    {
+        $detail = strtolower(trim((string) $detail));
+        if (preg_match('/^(?:script|pendingscript)(?:#|\s|$)/i', $detail)) {
+            return true;
+        }
+        $path = (string) wp_parse_url((string) $source, PHP_URL_PATH);
+        return '' !== $path && (bool) preg_match('/\.m?js$/i', $path);
+    }
+
     private function runtime_js_scan_resource_likely_client_blocked($source, $message = '', $detail = '')
     {
         $text = strtolower((string) $source . ' ' . (string) $message . ' ' . (string) $detail);
         if (false !== strpos($text, 'err_blocked_by_client') || false !== strpos($text, 'blocked by client')) {
             return true;
         }
-        foreach (array('googletagmanager.com', 'google-analytics.com', 'gtag/js', 'gtm.js', 'doubleclick.net', 'googleadservices.com', 'connect.facebook.net', 'fbevents.js', 'analytics.tiktok.com', 'clarity.ms', 'hotjar.com', 'taboola', 'outbrain', 'pixel', 'tracking', '/ads/', '/adservice') as $needle) {
+        foreach (array('googletagmanager.com', 'google-analytics.com', 'woocommerce-google-analytics-integration', 'gtag/js', 'gtm.js', 'doubleclick.net', 'googleadservices.com', 'connect.facebook.net', 'fbevents.js', 'mailchimp-for-woocommerce', 'pixel-tracking', 'analytics.tiktok.com', 'clarity.ms', 'hotjar.com', 'taboola', 'outbrain', 'pixel', 'tracking', '/ads/', '/adservice') as $needle) {
             if (false !== strpos($text, $needle)) {
                 return true;
             }
@@ -1557,12 +2192,20 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             return is_array($error) && 'resource-error' !== strtolower((string) ($error['kind'] ?? ''));
         }));
         $scan = $this->build_runtime_js_scan_suggestions($runtime_errors, (array) ($report['scripts'] ?? array()));
+        $javascript_resource_errors = array_values(array_filter($resource_errors, static function ($item) { return !empty($item['isJavaScript']); }));
+        $blocked_javascript_resources = array_values(array_filter($javascript_resource_errors, static function ($item) { return !empty($item['likelyClientBlocked']); }));
         return array(
-            'available'            => true,
+            'available'            => empty($javascript_resource_errors),
             'source'               => 'browser-runtime',
             'runtimeErrorCount'    => count($runtime_errors),
             'resourceErrorCount'   => count($resource_errors),
-            'blockedResourceCount' => count(array_filter($resource_errors, static function ($item) { return !empty($item['likelyClientBlocked']); })),
+            'javascriptResourceErrorCount' => count($javascript_resource_errors),
+            'blockedResourceCount' => count($blocked_javascript_resources),
+            'scanContaminated'     => !empty($javascript_resource_errors),
+            'failureReason'        => !empty($blocked_javascript_resources) ? 'client-script-blocked' : (!empty($javascript_resource_errors) ? 'javascript-resource-load-failed' : ''),
+            'message'              => !empty($blocked_javascript_resources)
+                ? __('Runtime Scan could not complete because JavaScript resources appear to be blocked by your browser or an extension. Please disable any ad blocker or content-blocking extension for this site and try again.', 'ultracache')
+                : (!empty($javascript_resource_errors) ? __('Runtime Scan could not complete because one or more JavaScript resources failed to load. Fix the failed JavaScript resource, or disable any browser/content blocker affecting this site, and try again.', 'ultracache') : ''),
             'suggestionCount'      => isset($scan['suggestion_count']) ? (int) $scan['suggestion_count'] : 0,
             'missingCount'         => isset($scan['missing_count']) ? (int) $scan['missing_count'] : 0,
             'alreadyExcludedCount' => isset($scan['already_excluded_count']) ? (int) $scan['already_excluded_count'] : 0,
@@ -1573,6 +2216,9 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
             'resourceErrors'       => array_slice($resource_errors, 0, 40),
             'blockedResources'     => array_slice($resource_errors, 0, 40),
             'scannedUrl'           => isset($report['url']) ? (string) $report['url'] : '',
+            'scannedLanguage'      => isset($report['language'])
+                ? (string) $report['language']
+                : (function_exists('ultracache_multilingual_get_public_url_language') ? ultracache_multilingual_get_public_url_language((string) ($report['url'] ?? '')) : ''),
             'scanContext'          => isset($report['scanContext']) && 'logged-in' === $report['scanContext'] ? 'logged-in' : 'anonymous',
             'completed'            => !empty($report['completed']),
         );
@@ -1595,12 +2241,11 @@ trait Ultra_Cache_Runtime_JS_Scanner_Trait
                     'available' => false,
                     'completed' => false,
                     'errorCount' => 0,
-                    'jsDelaySafetyScan' => array('available' => false, 'suggestions' => array(), 'suggestionCount' => 0, 'missingCount' => 0),
+                    'errors' => array(),
+                    'scripts' => array(),
                 ),
             ), 200);
         }
-        $report['jsDelaySafetyScan'] = $this->summarize_runtime_js_scan_for_dashboard($report);
-
         return new WP_REST_Response(array('success' => true, 'runtimeJsScan' => $report), 200);
     }
 

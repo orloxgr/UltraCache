@@ -227,6 +227,7 @@
 				media_format: String(source.mediaFormat || 'best'),
 				session_action: 'stop',
 				token: ownerToken,
+				resume_background: source.resumeBackground !== false,
 			});
 			return true;
 		} catch (error) {
@@ -236,6 +237,60 @@
 				source.clearToken(ownerToken);
 			}
 		}
+	}
+
+
+	async function runHomepageMediaPhase(config) {
+		const source = config && typeof config === 'object' ? config : {};
+		const token = String(source.manualSessionToken || '');
+		if (!token) {
+			throw new Error('Homepage media conversion requires an active dashboard media session.');
+		}
+		const shouldSkip = typeof source.shouldSkip === 'function' ? source.shouldSkip : function () { return false; };
+		const onProgress = typeof source.onProgress === 'function' ? source.onProgress : function () {};
+		let loops = 0;
+		let initialPending = null;
+		let lastPending = null;
+		while (loops < 5000) {
+			if (shouldSkip()) {
+				return { success: true, skipped: true, complete: false, pending: Math.max(0, Number(lastPending || 0)) };
+			}
+			loops += 1;
+			let response;
+			try {
+				response = await apiRequest('media_homepage_process', { manual_token: token });
+			} catch (error) {
+				const data = error && error.data && typeof error.data === 'object' ? error.data : {};
+				if ((error && error.rest && Number(error.rest.status || 0) === 409) && String(data.reason || '') === 'locked') {
+					await sleep(400);
+					continue;
+				}
+				throw error;
+			}
+			if (!response || response.success === false) {
+				throw new Error(response && response.message ? response.message : 'Homepage media conversion failed.');
+			}
+			const pending = Math.max(0, Number(response.pending || 0));
+			const total = Math.max(pending, Number(response.total || 0));
+			if (initialPending === null) {
+				initialPending = Math.max(total, pending);
+			}
+			lastPending = pending;
+			const completed = Math.max(0, Number(initialPending || 0) - pending);
+			onProgress({
+				pending,
+				total: Math.max(Number(initialPending || 0), completed + pending),
+				completed,
+				complete: !!response.complete,
+				sourceKind: String(response.sourceKind || ''),
+				attachmentId: Math.max(0, Number(response.attachmentId || 0)),
+			});
+			if (response.complete) {
+				return { success: true, skipped: false, complete: true, pending: 0, total: Math.max(0, Number(initialPending || 0)) };
+			}
+			await sleep(mediaUnitDelayMs);
+		}
+		throw new Error('Homepage media conversion iteration limit reached.');
 	}
 
 	function createController(config) {
@@ -260,6 +315,7 @@
 		const setMediaBackgroundControlBusy = typeof source.setMediaBackgroundControlBusy === 'function' ? source.setMediaBackgroundControlBusy : function () {};
 		const markMediaProcessCancelRequested = typeof source.markMediaProcessCancelRequested === 'function' ? source.markMediaProcessCancelRequested : function () {};
 		const defaultBatchSize = Math.max(1, Number(source.defaultBatchSize || 100));
+		const prepareHomepageDiscovery = typeof source.prepareHomepageDiscovery === 'function' ? source.prepareHomepageDiscovery : async function () {};
 
 		async function rebuildMediaQueueIndexForRegeneration() {
 			let response = null;
@@ -344,6 +400,33 @@
 			};
 		}
 
+
+		async function runHomepagePriorityPhase(manualSessionToken) {
+			setProcess(function (prev) {
+				return Object.assign({}, prev, { label: 'Discovering Homepage Media', logs: (prev.logs || []).concat(['Refreshing homepage media discovery before conversion…']).slice(-50) });
+			});
+			await prepareHomepageDiscovery();
+			setProcess(function (prev) {
+				return Object.assign({}, prev, { label: 'Optimizing Homepage Media', logs: (prev.logs || []).concat(['Converting homepage images first…']).slice(-50) });
+			});
+			await runHomepageMediaPhase({
+				manualSessionToken,
+				shouldSkip: function () { return false; },
+				onProgress: function (homepage) {
+					setProcess(function (prev) {
+						return Object.assign({}, prev, {
+							label: 'Optimizing Homepage Media',
+							current: Math.max(0, Number(homepage.completed || 0)),
+							total: Math.max(0, Number(homepage.total || 0)),
+						});
+					});
+				},
+			});
+			setProcess(function (prev) {
+				return Object.assign({}, prev, { logs: (prev.logs || []).concat(['Homepage media checkpoint reached; continuing with the remaining Media Library.']).slice(-50) });
+			});
+		}
+
 		let mediaOptimizationStartInFlight = false;
 
 		async function startMediaOptimization(forceRestart, forceRegenerateExisting) {
@@ -353,10 +436,43 @@
 			const savedMediaJob = getSavedJob();
 			const savedMediaJobIsRegeneration = !!(savedMediaJob && savedMediaJob.type === 'media' && savedMediaJob.forceRegenerateExisting);
 			if (!forceRestart && controls.canResume && (savedMediaJobIsRegeneration || !forceRegenerateExisting)) {
+				if (savedMediaJobIsRegeneration) {
+					try {
+						await runJob(savedMediaJob, false);
+					} catch (error) {
+						pushToast({ type: 'error', text: error && error.message ? error.message : 'Media optimization could not resume.' });
+					}
+					return;
+				}
+				if (mediaOptimizationStartInFlight || isBusy()) {
+					return;
+				}
+				mediaOptimizationStartInFlight = true;
+				setBusy(true);
+				setCancelRequested(false);
+				setProcess({
+					type: 'media', active: true, showWhenInactive: true, cancellable: false, cancelRequested: false,
+					label: 'Preparing Media Conversion', current: 0, total: 0,
+					logs: ['Resuming media conversion: acquiring dashboard media session…'], startTime: Date.now(),
+				});
+				let resumeSessionToken = '';
+				let handedToRunner = false;
 				try {
-					await runJob(savedMediaJob, false);
+					resumeSessionToken = await beginSession(savedMediaJob && savedMediaJob.manualSessionToken ? savedMediaJob.manualSessionToken : '');
+					await runHomepagePriorityPhase(resumeSessionToken);
+					handedToRunner = true;
+					await runJob(savedMediaJob, false, resumeSessionToken);
+					resumeSessionToken = '';
 				} catch (error) {
 					pushToast({ type: 'error', text: error && error.message ? error.message : 'Media optimization could not resume.' });
+				} finally {
+					if (resumeSessionToken) {
+						await endSession(resumeSessionToken);
+					}
+					if (!handedToRunner) {
+						setBusy(false);
+					}
+					mediaOptimizationStartInFlight = false;
 				}
 				return;
 			}
@@ -386,6 +502,9 @@
 			try {
 				const savedJob = getSavedJob();
 				preflightSessionToken = await beginSession(savedJob && savedJob.manualSessionToken ? savedJob.manualSessionToken : '');
+				if (!forceRegenerateExisting) {
+					await runHomepagePriorityPhase(preflightSessionToken);
+				}
 				setProcess(function (prev) {
 					return Object.assign({}, prev, {
 						logs: (prev.logs || []).concat([forceRegenerateExisting ? 'Dashboard media session acquired; preparing regeneration queue…' : 'Dashboard media session acquired; checking media queue…']).slice(-50),
@@ -767,7 +886,7 @@
 		}
 
 		async function retryFailedMediaQueue() {
-			await runMediaQueueRestAction('media_queue_retry_failed', 'Retrying Failed Media Items', 'Interrupted and failed media items moved back to pending.');
+			await runMediaQueueRestAction('media_queue_retry_failed', 'Retrying Failed Media', 'Failed media moved back to pending.');
 		}
 
 		async function clearCompletedMediaQueue() {
@@ -796,6 +915,7 @@
 		fetchJobBatch,
 		beginManualSession,
 		endManualSession,
+		runHomepageMediaPhase,
 		createController,
 	});
 })(window);

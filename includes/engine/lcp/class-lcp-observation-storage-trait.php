@@ -340,6 +340,10 @@ trait Ultra_Cache_Engine_LCP_Observation_Storage_Trait
         }
 
         $version = (string) get_option(self::get_lcp_observations_db_version_option_key(), '');
+        if (!$force_check && self::get_lcp_observations_db_version() === $version) {
+            $ensured = true;
+            return true;
+        }
         if (self::get_lcp_observations_db_version() === $version && self::lcp_observations_table_exists()) {
             $ensured = true;
             return true;

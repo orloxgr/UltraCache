@@ -1,11 +1,11 @@
-=== UltraCache ===
+=== UltraCache - Cache and Speed Optimization ===
 Contributors: orloxgr
 Tags: cache, redis, varnish, webp, avif
 Donate link: https://iniotakis.com/ultracache/
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 2.59.13.15
+Stable tag: 3.13.12
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,7 +31,7 @@ It provides WordPress page caching, Redis/APCu/SQLite object caching, AVIF/WebP 
 * Lazy image loading, CLS image dimensions.
 * Smart JavaScript Error Fixer with browser runtime scans and pasted console-error analysis.
 * Scheduled and manual warm-up for the homepage, menu URLs, selected URLs, and full-site queues.
-* Varnish pre warm, purge helpers, deterministic HTML-only BAN or entire-host PURGE scope selection.
+* Varnish and Litespeed pre warm, purge helpers, deterministic HTML-only BAN or entire-host PURGE scope selection.
 * Dashboard diagnostics for page cache, object cache, media, CSS, storage, OPcache/APCu, Varnish, and STORE profiles.
 
 = Object cache =
@@ -110,39 +110,22 @@ UltraCache stores cache files, generated assets, settings, queue records, and di
 
 == Installation ==
 1. Install the ZIP from the WordPress Plugins screen, or place the `ultracache` folder in the active WordPress plugins directory.
-2. Activate UltraCache and open its dashboard from the WordPress admin menu or the admin bar.
-3. Select the Aggressive profile and save the settings.
-4. Under Cache Engine, run the HTML Compression check so UltraCache can use the server result.
-5. In Warm Cache, select the main frontend menu and the required depth. First-level menu URLs suit most websites.
-6. Under Full-site warm-up sources, select Homepage / blog index, Selected menu URLs, Pages, Posts, and Categories as required.
-7. In Media Library Replacement, enable Convert new uploads and set Maximum upload image side. A value of 1920 suits most websites.
-8. Select the primary image format and fallback format. AVIF with WebP fallback is a strong general-purpose configuration.
-9. Select the image compression level. Compact suits most website images.
-10. When using AVIF, run Image conversion test and then Check test.
-11. In Fonts Optimization, enable Local Google Fonts Optimization, Bundle Generated Font-Mix CSS, and Delay icon fonts.
-12. For WooCommerce, enable Suppress empty-cart execution. For MailerLite, enable Lazy MailerLite nonce refresh.
-13. Confirm the detected Object Cache backend. When Varnish is present, enter its connection and purge details.
-14. In Warm Cache, enable Warm uncached URLs after first visit.
-15. Save the settings and run Flush All Cache.
+2. Activate UltraCache and open its dashboard from the WordPress admin menu or the admin bar. The Setup Wizard never opens automatically; launch it explicitly from Overview. If an interrupted Wizard checkpoint exists, Overview shows Resume Wizard plus Restart Wizard; Resume continues from the checkpoint, while Restart discards it and begins again from Analyze.
+3. Run the Setup Wizard. It analyzes the environment, applies the recommended configuration, lets you select the Object Cache backend and warm-up scope through the existing subsystems, validates HTML compression and image conversion, and applies detected WooCommerce/MailerLite/WPBakery compatibility integrations.
+4. UltraCache prepares the website through the existing engines. The selected warm-up scope can be Homepage, Homepage + Menu, or Full Site; homepage AVIF/WebP conversion runs live through the shared batch-conversion mechanism.
+5. Setup runs hidden same-origin Browser Runtime Error checks on the public homepage and up to three selected navigation URLs. If no runtime errors are captured, no additional JavaScript safeguard is added. When real runtime errors are detected, UltraCache applies only exact recommended Error Fixer actions with a resolved Defer Instead or Do Not Defer or Delay target, then purges/rewarm and verifies again. Analyze HTML JS Dependencies remains a fallback when Error Fixer has no deterministic automatic action. Automatic repair is bounded to ten runtime scans and stops early when zero runtime errors remain.
+6. If multiple assigned menus have no clear primary/main/header signal, UltraCache preserves the existing Warm Cache menu selection rather than guessing. Configure Varnish separately when present.
+7. Existing installations can use Overview → Start Wizard at any time to repeat the same analyzed configuration, preparation, and error-first JavaScript runtime check without changing JavaScript safeguard lists when the runtime is already clean.
 
-For the initial preparation of the website:
-
-* Run Warm Up Menu HTML Cache + Separate CSS Bundles to prepare the main pages immediately.
-* Run Start / Resume Conversion under AVIF / WebP Batch Conversion to prepare existing Media Library images.
-* Run Full-site warm-up when the complete selected URL set should be cached.
+The Wizard orchestrates the normal UltraCache subsystems rather than maintaining duplicate setup workers or settings, so the existing dashboard status and controls remain authoritative after setup.
 
 = Must-do post-install check =
 
-1. Open the public website in a private window: `Ctrl+Shift+N` in Chrome or Edge, or `Ctrl+Shift+P` in Firefox.
-2. Press `F12`, open the Console, and reload the page.
-3. If no JavaScript errors appear, the check is complete. If errors appear, copy the red error lines and stack traces.
-4. Open UltraCache and expand JS Defer / Delay Safeguards & Diagnostics.
-5. Paste the errors into Console Error Handler and click Extract Console Error Suggestions.
-6. Append the proposed fixes to Defer Instead or Do Not Defer or Delay, then click Save Both Lists.
-7. Run Flush All Cache and warm the front page again. Front-page warm-up is enough while testing.
-8. Repeat the check until the Console loads without JavaScript errors.
+The automated setup cannot prove visible browser behavior. Open the public website and verify the menu/mobile navigation, sliders or popups, forms and search, and cart/checkout/account interactions when applicable.
 
-The fixed `Help for the installed version` button in the lower-right corner of the UltraCache dashboard opens the detailed setup, post-install guide, and complete FAQ for the installed release.
+If an interaction remains broken, use the visible Browser Runtime Errors / Runtime Scan or Console Error Handler in JS Defer / Delay Safeguards & Diagnostics for the exact affected page. Residual runtime errors that do not map to a deterministic automatic safeguard remain for manual review instead of triggering speculative exclusions.
+
+The fixed `Help for the installed version` button in the lower-right corner of the UltraCache dashboard opens the detailed setup, post-install guide, complete FAQ, and a Manual Setup checklist with the current Overview / Cache / Javascript / Fonts & CSS / Media / Server / Automation / Advanced locations for every major setup step.
 
 == Screenshots ==
 1. UltraCache dashboard overview.

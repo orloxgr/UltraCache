@@ -1,392 +1,865 @@
-= 2.59.13.15 =
-* Make Strong lifecycle suggestions emitter-timing-aware: classify strong event emissions as immediate, DOM-ready, window-load, deferred callback, unknown, or mixed; suppress callback/unknown/mixed races, keep Delay-to-Defer recommendations for DOM-ready/window-load emitters, and escalate truly immediate blocking emissions to Do Not Defer or Delay.
-* Persist emitter timing evidence in the per-file JavaScript analysis cache with a parser-version bump, and fix blank emitter labels to fall back to script id/source when the WordPress handle is empty.
-
-= 2.59.13.14 =
-* Remove the obsolete 80-file content-analysis ceiling from the resumable Analyze HTML JS Dependencies workflow so every prepared local JavaScript candidate is processed before dependency evidence is correlated.
-* Keep each iteration bounded to at most 10 JavaScript files and the existing ~1.8 second runtime budget, preserving resumable execution without truncating larger page inventories.
-* Keep Strong Suggestion heuristics, stable evidence identity, exact safeguard actions, persistent analysis cache, resume/integrity checks, progress popup, and Help guidance otherwise unchanged.
-
-= 2.59.13.13 =
-* Fix resumable Analyze HTML JS Dependencies evidence correlation to bind lifecycle findings to a stable per-script identity instead of persisted numeric inventory indexes, preventing stripped inline-script bodies from compacting the inventory and assigning listener/emitter evidence to the wrong script. Older in-flight evidence jobs are rejected and must be rescanned.
-* Make exact Strong Suggestion actions write exactly the displayed suggested handle/path to Defer Instead or Do Not Defer or Delay; plugin/theme path expansion is now reserved for Defer Chain and Exclude Chain actions.
-* Keep Strong Suggestion heuristics, batching, persistent analysis cache, progress popup, and the 2.59.13.12 Help guidance otherwise unchanged.
-
-= 2.59.13.12 =
-* Add a post-install Help subsection beneath the JavaScript console-check steps for cases where the Console is clear but page functionality still fails, directing administrators to Analyze HTML JS Dependencies and warning against blindly applying every suggested safeguard.
-* Keep the JavaScript analyzer, Strong Suggestions heuristics, batching, cache, resume, progress popup, and safeguard behavior unchanged.
-
-= 2.59.13.11 =
-* Fix Analyze HTML JS Dependencies settings-integrity fingerprinting to read the canonical UltraCache runtime settings array instead of the REST settings response object, eliminating the array_key_exists() type error introduced in 2.59.13.09; also allow the saved scan URL to be restored during dashboard-refresh resume without reassigning a const.
-* Surface the resumable HTML JS dependency scan through the shared Warm/Media progress popup, with phase, page-script, local-file, processed-file, persistent-cache-hit, and freshly parsed-file progress while retaining the existing inline diagnostic status.
-* Keep the 2.59.13.10 Strong Suggestions heuristics, batching, persistent per-file evidence cache, resume behavior, and settings-change invalidation semantics unchanged.
-
-= 2.59.13.10 =
-* Harden Analyze HTML JS Dependencies Strong Suggestions so only deterministic execution-order contradictions are promoted: delayed listeners/providers must be provably later than blocking/deferred counterparts, while uncertain async races remain outside the focused Strong stream.
-* Suppress lifecycle self-correlation for duplicate inventory representations of the same script, and merge multiple independent lifecycle/dependency signals for one target into a single ranked Strong Suggestion with an evidence count instead of duplicate findings.
-* Prioritize unsafeguarded multi-signal findings, keep lifecycle evidence ahead of declared-dependency-only evidence, and cap the focused Strong result set at eight actionable scripts without changing the broader Runtime/Console diagnostic heuristics.
-
-= 2.59.13.09 =
-* Add phase-aware Analyze HTML JS Dependencies progress reporting with page-inventory, local-file, processed-file, persistent-cache-hit, and freshly parsed-file counters while preserving the bounded 2.59.13.08 evidence pipeline.
-* Persist a browser-session resume hint for the active HTML dependency job and automatically continue the same server-authoritative job after an administrator dashboard refresh; the existing same-URL server deduplication remains the fallback when browser session state is unavailable.
-* Bind every scan to a fingerprint of the JavaScript execution-order settings used to build its page profile and inventory, revalidate that fingerprint during batches and before publishing Strong Suggestions, and stop with an explicit fresh-scan requirement if the configuration changes mid-run.
-
-= 2.59.13.08 =
-* Consolidate the resumable Analyze HTML JS Dependencies path around one compact per-script evidence registry instead of persisting separate listener/emitter maps, so every readable local JavaScript file contributes one normalized evidence record from either the persistent cache or the bounded scanner.
-* Build final lifecycle correlation and Strong Suggestions from that shared registry without reopening or reparsing JavaScript files, while retaining the existing declared WordPress dependency-edge analysis from the same page inventory.
-* Keep 2.59.13.07 in-flight scan compatibility by translating the previous persisted listener/emitter maps at correlation time, and expose single-pass evidence counters in the completed diagnostic result without changing suggestion heuristics.
-
-= 2.59.13.07 =
-* Add persistent per-file lifecycle-analysis caching for Analyze HTML JS Dependencies using UltraCache revisioned state storage, keyed by normalized local file path and validated by file mtime, filesize, and parser version.
-* Reuse only compact extracted listener/emitter evidence for unchanged local JavaScript files; never persist JavaScript bodies, and automatically reanalyze and replace a cache row when the source fingerprint changes.
-* Track cache hits, misses, and writes in the resumable scan result, and clear the JS analysis cache at the canonical Flush All clean-slate boundary while retaining the 2.59.13.06 batching and 2.59.13.05 Strong Suggestions behavior.
-
-= 2.59.13.06 =
-* Make Analyze HTML JS Dependencies use a dedicated resumable action job so page preparation, bounded local-JavaScript analysis batches, and final evidence correlation no longer run as one monolithic Strong Suggestions request.
-* Process at most 10 readable local JavaScript files per lifecycle-analysis iteration with a short runtime budget, persist the cursor plus compact listener/emitter evidence between requests, resume the same URL job after an interrupted dashboard session, and skip the legacy monolithic JS safety file pass during this dedicated scan.
-* Keep the 2.59.13.05 Strong Suggestions heuristics and output contract unchanged, avoid the global heavy-action lock for the resumable analyzer, and keep inline script bodies out of persisted scan state.
-
-= 2.59.13.05 =
-* Add a focused Strong Suggestions stream to Analyze HTML JS Dependencies so high-confidence silent Delay/Defer execution-order conflicts are surfaced separately from broad compatibility heuristics.
-* Extend local JavaScript lifecycle analysis to resolve generic event-dispatch wrapper methods that forward literal lifecycle names into dispatchEvent(new CustomEvent/Event(...)), allowing missed one-time initialization events to be detected without hardcoded plugin exceptions.
-* Prefer the exact WordPress script handle for Strong Suggestions when available, deduplicate by script, prioritize lifecycle conflicts, and cap the focused result set so actionable findings are not buried under low-value matches.
-
-= 2.59.13.04 =
-* Update the WordPress.org Donate link to the UltraCache page at https://iniotakis.com/ultracache/.
-* Update installation step 14 to enable Warm uncached URLs after first visit under Warm Cache.
-
-= 2.59.13.03 =
-* Extend Console Error Handler diagnostics with the actual WordPress script dependency graph from the selected page and compare each declared edge against the final Delay/Defer/blocking strategy applied by UltraCache.
-* Inspect readable same-site JavaScript files for lifecycle listener/emitter relationships so one-time initialization order risks can be proposed even when the browser produces no console error.
-* Keep an exact script visible when the same runtime error persists after it is already listed in Do Not Defer or Delay; distinguish a safeguard that is still optimized in final HTML from a fully blocking script whose dependency chain still needs investigation.
-* Add dedicated dependency-risk and persistent-failure diagnostic buckets without adding hidden compatibility exceptions or changing either safeguard list automatically.
-
-= 2.59.13.02 =
-* Add per-page Elementor generated-CSS dependency reconciliation to the shared final cache-storage path. UltraCache dynamically discovers Elementor `post-{id}.css` references in each rendered page, regenerates only missing referenced files through Elementor's own `Post_CSS::create($post_id)->update()` contract, verifies the physical file, and refreshes the dependency version before page-cache storage.
-* Apply the same dependency contract to normal frontend STORE requests and shared warm writes. Unresolved Elementor CSS dependencies prevent UltraCache from storing that broken HTML variant instead of publishing a cache entry that references missing generated CSS.
-* Keep Elementor cache ownership with Elementor: no global Elementor CSS regeneration is introduced. Optional Elementor Flush All still uses Elementor's native clear; CSS is rebuilt per page as each URL is visited or warmed.
-* Correct Elementor help/FAQ text so Element Cache expiration is described as element-output lifetime, not generated-CSS lifetime.
-* Make the two atomic schema-install `add_option()` calls use the explicit prefixed `ultracache_locks_schema_install_lock` option name so WordPress.org static review can verify the namespace without changing lock semantics.
-
-= 2.59.13.01 =
-* Fix the first-visit background warm runtime setting lookup so the enabled dashboard switch is read through the canonical snake_case runtime settings contract after a successful frontend STORE.
-* Preserve the existing post-response enqueue boundary, shared targeted warm pipeline, Background warm pages per minute rate, and configured Varnish/LiteSpeed warm stages; no options or queue semantics are changed.
-
-= 2.59.12.99 =
-* Detect active Elementor as a supported native cache layer and add an opt-in Also flush Elementor Cache switch under External Cache Flush.
-* Clear Elementor through its native files manager before UltraCache removes page cache, suppress the resulting self-originated Elementor callback, and let existing warm-after-flush work start only after both cache layers are invalidated.
-* Add FAQ guidance recommending a 1 Year Elementor Element Cache expiration for mostly static sites without changing Elementor settings automatically.
-
-= 2.59.12.98 =
-* Defer Elementor generated-file invalidation reconciliation until shutdown so multiple clears in one request coalesce after the final clear, then run one canonical UltraCache Flush All and the existing configured warm behavior.
-* Add narrowly scoped PHPCS SchemaChange ignores, with explicit versioned custom-table index-repair justification, to the eight intentional legacy index migration statements.
-
-= 2.59.12.97 =
-* Flush the canonical UltraCache page-cache layers when active Elementor clears its generated public files, preventing cached HTML from retaining references to removed Elementor CSS files.
-* Reuse the existing Flush All warm behavior after Elementor invalidation; no Elementor-specific warm queue or crawler is added.
-* Remove the Elementor Element Cache FAQ recommendation because disabling that separate cache does not prevent Elementor generated-file invalidation.
-
-= 2.59.12.96 =
-* Replace dynamic media queue and Media Library Replacement blocker `IN (...)` SQL construction with bounded 20-row batches whose complete placeholder sets are declared directly in each prepared query.
-* Pass every affected prepared statement directly to the matching `$wpdb` read/write method, eliminating ambiguous intermediate query variables and replacement-count reports without suppressing database checks.
-* Preserve the existing bulk operation semantics, table-identifier validation, blocker decisions, queue resets, cleanup, and readiness diagnostics.
-
-= 2.59.12.95 =
-* Align the runtime `ULTRACACHE_VERSION` constant with the installed plugin version so administrator JavaScript and CSS assets use the current cache-busting query value.
-* Ensure the corrected automatic warm-up popup guidance is loaded immediately after upgrading instead of reusing the cached 2.59.12.93 `ui.js` asset.
-
-= 2.59.12.94 =
-* Correct the setup help popup so automatic warm-up guidance points to Warm full site after Flush All Cache and/or Warm uncached URLs after first visit instead of the unrelated scheduled-cleanup option.
-
-= 2.59.12.93 =
-* Add an optional Warm uncached URLs after first visit switch that queues the first cold frontend URL into the shared background warm pipeline, coalesces with on-visit CSS bundle work, uses the configured Background warm pages per minute rate, and completes the same enabled external-cache stages as full-site warming.
-* Restore a locked LCP mapping as an immutable terminal boundary: missing request-credentials metadata no longer reopens frontend observation for that viewport.
-* Remove the credentials-only update path that could modify a locked LCP row and trigger a targeted purge or LCP refresh without an explicit Forget mapping or Relearn action.
-* Keep runtime image request credentials observation inside the normal Learning cycle only; existing locked mappings with an unknown mode remain unchanged until the administrator explicitly starts a new learning cycle.
-
-= 2.59.12.91 =
-* Extend the existing frontend LCP discovery cycle, only when Fix sliders / hero sections and LCP Image Priority are active, to observe the actual runtime image request credentials mode used for the LCP image URL.
-* Suppress speculative slider/hero image preloads while the credentials mode is unknown; after browser observation, persist `none`, `anonymous`, or `use-credentials` and refresh only the affected page through the existing targeted LCP refresh queue.
-* Emit browser-observed image preloads with the exact persisted `crossorigin` contract, skip preloading when the runtime mode is unavailable or conflicting, and keep non-slider pages on their existing preload behavior.
-* Reopen legacy locked LCP mappings only for their missing credentials field, without relearning the LCP resource or triggering a full-site flush/warm cycle.
-
-= 2.59.12.90 =
-* Add FAQ guidance to disable Elementor Element Cache when UltraCache Page Cache is active, while keeping Elementor CSS Print Method on External File and running one Clear Files & Data, Flush All, and Warm Cache cycle after the change.
-* Add FAQ guidance for strict color fidelity: disable Ignore color profile preservation; images whose embedded profile cannot be verified or preserved may remain in their original JPG/PNG format instead of being converted to AVIF/WebP.
-* Enable Ignore color profile preservation by default in the Aggressive performance profile to maximize AVIF/WebP conversion coverage; Safe, Balanced, and All Off retain strict profile preservation.
-
-= 2.59.12.89 =
-* Remove the canonical Media Library Replacement singleton workflow option during dashboard Delete All cleanup and normal WordPress uninstall.
-* Repeat deletion of the singleton workflow option in the uninstall final cleanup pass so a loaded shutdown callback cannot leave completed replacement state behind after the custom tables are dropped.
-* Prevent a clean reinstall from displaying stale Preparation Complete, Replacement Applied, Verify, or Delete state from a workflow that belonged to the removed installation.
-
-= 2.59.12.86 =
-* Record resumable Theme CSS checksum validation with the canonical `validated` status instead of the incompatible `seen` value.
-* Keep post-apply Theme CSS inventory persistence on the same canonical validation status so the inventory has one status contract.
-* Remove the false "Theme CSS files disappeared" failure caused by the validator writing a status that the final file-set parity query did not recognize.
-
-= 2.59.12.85 =
-* Count deferred blocker sibling rows as part of the same canonical registry inventory, keeping registry/readiness parity stable after an affected attachment moves from matched to blocked_dependency.
-* Persist registry completion as a durable singleton workflow milestone with the validated registry and readiness variant counts.
-* Prevent a later Prepare request from repeating the initial registry consistency phase after blocker deferral; resume directly from file-copy planning without jobs, generations, or alternate state sources.
-
-= 2.59.12.84 =
-* Preserve the completed singleton readiness inventory when Prepare initializes the replacement registry instead of replacing the canonical readiness section with an empty default array.
-* Make the final Prepare consistency check compare registry variants against the same persisted readiness snapshot that authorized Prepare, fixing false registry/readiness results such as 6654/0 after a complete scan.
-* Keep readiness and Prepare in one canonical workflow option without reintroducing jobs, generations, fallback state sources, or browser-side workflow selection.
-
-= 2.59.12.83 =
-* Make deletion of Prepare-created replacement destinations best-effort during Restart so an unlink failure cannot block the authoritative reset of the one Media Library Replacement workflow.
-* Continue clearing all six replacement tables, blocker decisions, plans, cursors, confirmations, and canonical workflow state after best-effort destination cleanup; the next Prepare re-evaluates any remaining file through the normal filesystem plan.
-* Preserve the hard Restart boundary after destructive Do work has started and keep overwrite-backup restoration fail-closed.
-
-= 2.59.12.82 =
-* Make Restart Replacement Plan an authoritative reset of the one Media Library Replacement workflow without publication-contract versions, destination-ownership proofs, job provenance, or legacy-plan compatibility gates.
-* Restore overwrite backups and remove destinations recorded as created during the current Prepare directly from the singleton registry, then clear all replacement tables, blocker decisions, plans, cursors, confirmations, and persisted workflow state.
-* Preserve the existing block after destructive Do work has started, where rollback evidence is still required before any reset.
-
-= 2.59.12.81 =
-* Replace the Media Library Replacement execution-instance model with one canonical persisted workflow state shared by Prepare, blocker decisions, Do, Verify, Delete Originals, recovery, and status polling.
-* Remove functional job IDs and generations from replacement REST requests, responses, SQL selection, React state, pagination, previews, CLI operations, and destructive authorization; retain legacy schema columns only as blank compatibility fields until a later schema-only cleanup.
-* Make Restart clear all current replacement rows, blocker decisions, database/file/metadata/Theme CSS plans, nested cursors, confirmations, and workflow state, while preserving rollback evidence by refusing an unsafe reset after destructive Do work has begun.
-* Make the blocker badge and atomic modal consume the same singleton backend truth, and isolate database, cleanup, and Theme CSS previews from authoritative workflow status.
-* Persist readiness, database indexing, intermediate expansion, Theme CSS scanning, streaming, validation, and resumable cursors inside the canonical state; bind just-in-time destructive confirmation to the current plan fingerprint so cross-session continuation does not depend on browser or token lifetime.
-* Preserve the bounded database reference extractor and inline data-URI exclusion introduced in 2.59.12.77 without changing its implementation bytes.
-
-= 2.59.12.80 =
-* Replace the separate Decide Blockers payload and open flags with one atomic modal state so the verified blocker response and the visible modal are committed in the same React state transition.
-* Let the blocker endpoint select the server-active replacement job on initial open, lock pagination to the returned job, validate the response contract, and refuse to render an open modal without a real payload.
-* Stop database, Theme CSS, and cleanup preview responses from overwriting the authoritative Media Library Replacement workflow status, and make periodic status refresh resolve the active job on the server.
-* Preserve loaded blocker decisions across pagination while replacing them cleanly on the first modal load, without changing blocker rows, decisions, Prepare, Do, or database contracts.
-
-= 2.59.12.79 =
-* Remove short-lived database and Theme CSS confirmation tokens from Prepare planning validation, the final pre-Do guard, and prepared-plan validity so a completed plan remains actionable hours or days later.
-* Suppress destructive token issuance from internal Prepare and recovery previews while retaining fresh confirmation tokens for explicitly invoked standalone preview/apply endpoints.
-* Issue and consume a fresh database or Theme CSS start token inside the first authenticated Do chunk for that phase, then persist durable job/generation authorization for every later resumable chunk.
-* Allow paused Do recovery to resume after the token TTL or from a later authorized administrator session without weakening registry, destination-file, metadata, database, Theme CSS, generation, or fingerprint guards.
-
-= 2.59.12.78 =
-* Make the authoritative active workflow status job ID take precedence over stale mapping, database, blocker, or cleanup preview job IDs when dashboard actions resolve the current Media Library Replacement job.
-* Clear blocker payloads, decisions, and every replacement preview/modal state after Restart Replacement Plan so a previous job cannot remain attached to a newly prepared job in React state.
-* Replace blocker decisions on the initial modal load and merge them only during pagination, preventing React batching from restoring decisions retained by an earlier job.
-* Reject blocker responses whose returned job ID differs from the requested active job instead of presenting an empty Decide Blockers modal against the wrong replacement plan.
-
-= 2.59.12.77 =
-* Replace whole-value global PCRE image-reference extraction with one deterministic bounded byte scan, preventing large inline data-image payloads from trapping Media Library Replacement Prepare in CPU-bound backtracking after nginx has returned 504.
-* Ignore inline data URIs because they are embedded payloads rather than replaceable Media Library files, while retaining exact raw database fragments for Apply and Verify.
-* Reuse the existing reference normalization, uploads-path resolution, prepared database index, matching, Apply, and verification contracts without changing SQL pagination, escaping, blocker decisions, or adding development-version migration code.
-* Preserve existing reference coverage for HTML, CSS url(), absolute and protocol-relative URLs, JSON-escaped slashes, query strings, fragments, and srcset-style values without creating a second full unescaped copy of each database value.
-
-= 2.59.12.76 =
-* Replace unbounded leading-wildcard Media Library Replacement database candidate searches with adaptive, bounded primary-key windows; image predicates execute only inside the resolved row range, while unsupported table shapes retain bounded raw-row OFFSET traversal.
-* Make reference-index replay idempotent with INSERT IGNORE, advance progress by physical rows scanned rather than matching references found, keep database-match work out of the denominator until indexing completes, and expose the current table, column, cursor, scanned rows, and query duration.
-* Continue the complete non-destructive Prepare discovery and planning flow when blocker rows exist. Defer every sibling row of an affected attachment to prevent partial file or metadata plans, then open Decide Blockers only after database and Theme CSS planning completes.
-* Finalize group and per-file blocker decisions without starting Apply: whole-attachment exclusions proceed directly to the final pre-Do guard, while verified-overwrite decisions reactivate only affected attachments and rebuild their file, database, and Theme CSS plans.
-
-= 2.59.12.73 =
-* Stop the Prepare dashboard runner immediately when the server enters decisions_required, close the active progress panel, release the Prepare lease, and expose Decide Blockers without repeatedly calling the same Prepare phase.
-* Remove redundant per-chunk replacement status GET requests from Prepare and treat the final status refresh as non-fatal, preventing transient nginx/PHP-FPM 502 responses from turning persisted Prepare progress into a dashboard failure.
-* Add per-file blocker decisions beneath each group policy. Group decisions provide the scalable default, while paginated individual rows can override that policy before one atomic save.
-* Keep Save Decisions limited to decision persistence and Prepare completion. Apply remains disabled until Prepare finishes and always requires a separate explicit click.
-
-= 2.59.12.72 =
-* Add a Prepare → Decide Blockers → Apply Media Library Replacement workflow: Prepare freezes actionable conversion and destination blockers instead of treating them as technical Prepare failures, and Apply remains locked until every blocker group is resolved.
-* Persist blocker code, detail, generation, group decision, administrator, and decision time on the prepared physical registry; support keeping affected attachments as originals and overwriting different existing destinations through the existing verified backup contract.
-* Add a grouped blocker decision modal using the existing replacement-preview layout, summary cards, server-side pagination, group-level actions, and per-unit details so large libraries require one decision per blocker class instead of one decision per image.
-* Remove the global Existing destination files policy from the main Media Library Replacement settings; identical verified destinations remain automatic, while actual collisions are discovered by Prepare and presented only when they exist.
-* Exclude keep-original attachments from file copy, metadata planning, database and Theme CSS matching, verification, and original deletion while retaining them in the frozen decision audit trail.
-
-= 2.59.12.71 =
-* Make replacement readiness prefer an authoritative persisted semantic skip for an exact physical source/format over stale pending duplicates from compatible parent requests.
-* Carry physical-unit skip reason and detail through readiness blocker signatures, responses, progress messages, and dashboard diagnostics so deterministic unsupported variants report their real conversion blocker.
-* Prevent replacement readiness from requeueing an exact unit already resolved as a terminal semantic skip while continuing to block Prepare until the required target file can actually be generated.
-
-= 2.59.12.70 =
-* Persist deterministic physical-unit semantic skips with their exact reason, detail, source fingerprint, and conversion-context signature so missing targets do not reopen unchanged skipped work.
-* Reattempt a persisted semantic skip only after the source descriptor/fingerprint changes, the conversion context changes, or an explicit regeneration resets the unit.
-* Reconcile terminal attachment parents that still contain nonterminal child units and derive completion from the authoritative child aggregate instead of leaving skipped/done parents with pending units.
-* Stop WP-CLI media processing after repeated identical persisted queue signatures, preventing parent/unit attempt counters from masking a no-progress state-machine loop.
-
-= 2.59.12.69 =
-* Restored the intermediate attachment metadata verification helper used by replacement Verify and cleanup inspection after the attachment-level metadata apply refactor.
-
-= 2.59.12.68 =
-* Apply Media Library Replacement attachment metadata through one authoritative old-to-final plan per attachment instead of separate main-image and intermediate-size writes to the same serialized metadata value.
-* Add an additive per-attachment metadata-plan registry that preserves active version 13 jobs, materializes plans during Prepare, and lazily materializes plans when resuming jobs created by earlier builds.
-* Fix false Do consistency failures where UltraCache interpreted its own already-applied thumbnail metadata changes as external attachment changes.
-* Support deterministic recovery from persisted partial states created by older runs while continuing to reject unknown filename, MIME, metadata, or custom-field changes made after Prepare.
-* Count metadata Do progress by attachments with a stable total while retaining per-file registry rows for file verification, reference replacement, diagnostics, and rollback evidence.
-
-= 2.59.12.67 =
-* Keep the failed Prepare Replacement button disabled while replacing its technical-only tooltip with the actionable recovery path: open Advanced / Manual Recovery, run “Restart Replacement Plan”, and then run “Prepare Replacement” again.
-* Display the same Prepare failure recovery guidance persistently below the disabled button so the next action remains visible without mouse hover or on touch devices, while leaving all Manual Recovery logic and enablement unchanged.
-
-= 2.59.12.66 =
-* Make Media Library Replacement Prepare consistency authoritative to persisted registry rows and readiness unique variants instead of transient scan-level skipped counters, preventing attachments without intermediate metadata or ignored non-physical metadata slots from falsely failing Prepare.
-* Treat absent intermediate sizes and invalid non-physical metadata slots as no-work inventory entries rather than replacement blockers; continue to persist and block on real missing/unreadable source files, invalid generated outputs, registry skipped rows, insertion failures, and registry/readiness mismatches.
-* Report registry skipped/failed rows and scan insertion failures explicitly in Prepare consistency errors so a server-backed failure identifies the authoritative blocker class.
-* Keep the readiness progress popup open after terminal conversion blockers and append the requested recovery action: run “Scan Media Library & Repair Status” and rerun “Start / Resume Conversion”.
-
-= 2.59.12.65 =
-* Reconcile attachment parent state immediately after cooperative interruption, administrator pause, Retry Failed, fatal-shutdown recovery, and stale-worker recovery so dashboard, WP-CLI, readiness, and background workers resume from the same persisted physical-unit aggregate.
-* Make exact child-unit shutdown recovery authoritative for the parent recovery status and stale-recovery generation, preventing parent and main/thumbnail retry budgets from diverging after a terminated worker.
-* Clear obsolete encoder-attempt evidence whenever a unit is returned by a worker-level pause, interruption, or stale recovery, preserving the exact worker failure reason instead of displaying encoder diagnostics from an earlier conversion attempt.
-* Resume background dispatch after a dashboard manual session ends when attachment work, local assets, physical units, queue build, or lazy unit inventory still require progress; do not depend only on attachment-level pending rows.
-* Harden cross-surface recovery contracts for UI-to-WP-CLI and WP-CLI-to-UI handoff, output-written-before-claim-loss reconciliation, terminal retry limits, legacy false-done repair, metadata superseding, and independent AVIF/WebP unit state without changing the parent or child schemas.
-
-= 2.59.12.64 =
-* Stop Prepare Replacement readiness deterministically when a complete pass still has queueable variants but produces no enqueue, physical-unit attempt, generated output, unit-state transition, or blocker-set change; complete with blockers instead of starting an unbounded verification pass.
-* Persist a deterministic blocker signature across readiness chunks and passes, including attachment, physical file, status, attempts, failure code/stage/detail, so repeated unresolved state is observable and resumable without arbitrary pass limits.
-* Read readiness state from exact physical AVIF/WebP child units across compatible exact, best, and both parent policies, preserving per-file failure details and preventing attachment-level success from hiding a failed main image or thumbnail.
-* Report the first exact blocked attachment, main/intermediate source path, persisted failure code, and failure detail in the readiness response and dashboard while keeping Media Library replacement locked until every required output is valid and current.
-
-= 2.59.12.63 =
-* Add authoritative physical-unit status counters joined to attachment parent policies, including materialized-parent coverage, pending/processing/done/failed/skipped units, retry-pending units, required totals, outstanding work, and completion that remains false while lazy inventory coverage is incomplete.
-* Separate legacy parent-row touches from completed attachments and physical-unit attempts in batch results; report attachment/local-asset terminal outcomes, resolved/generated units, retryable unit failures, and terminal unit failures without changing attachment-level queue semantics.
-* Make WP-CLI process, rebuild, process-batch, and scoped-ID output use the exact aggregate counters, remove ambiguous attachment wording, and refuse completion while either parent rows or physical units remain failed.
-* Count readiness generated units only from successfully generated AVIF/WebP outputs rather than attempted units, while retaining legacy response aliases for compatibility with existing REST/background consumers.
-* Keep dashboard batches, maintenance dispatch, cron fallback, and WP-CLI active while lazy physical-unit inventory is incomplete even when no attachment parent is currently pending; expose exact coverage and wait-state diagnostics instead of reporting premature completion.
-* Avoid duplicate reconciliation inside one process batch, exclude terminal skipped parents that require no physical inventory from coverage debt, and report migration failures as explicit incomplete work rather than silently advancing counters.
-
-= 2.59.12.62 =
-* Route dashboard, REST, WP-CLI, Media Library Replacement readiness, and background attachment processing through one authoritative physical-unit worker; remove the CLI whole-attachment shortcut and process one persisted main/thumbnail output unit per claim.
-* Persist exact per-file success, semantic skip, retryable failure, terminal failure, encoder-attempt evidence, source fingerprint, attempt count, and stale-worker recovery state before any later unit can run.
-* Derive each attachment parent status only from active child-unit rows, forbid done when any required main image or thumbnail remains pending/failed, and trigger affected-page processing only after the complete parent reaches a successful terminal state.
-* Extend pause, retry, explicit regeneration, cooperative interruption, fatal-shutdown recovery, and stale-claim recovery to child units while retaining the attachment-level parent queue, local-asset execution, UI attachment counters, and existing schema versions.
-
-= 2.59.12.61 =
-* Lazily materialize physical conversion units for existing attachment queue rows during rebuild, execution, Media Library Replacement readiness, and bounded administrator/CLI maintenance while leaving local-asset rows atomic and unchanged.
-* Reconcile every active unit against its exact source and target files: validate format headers and freshness, mark current outputs done, keep missing/stale/invalid outputs pending, classify unsupported mappings as skipped, and supersede obsolete metadata units.
-* Recompute attachment parent state from reconciled child units so a legacy done/skipped row cannot remain complete while a required main image or thumbnail is missing; preserve terminal failed parents until explicit retry unless all required outputs are already valid.
-* Keep child rows synchronized after the legacy attachment worker persists a result, remove child rows with parent rebuild/clear operations, and clean bounded orphan units plus persistent migration state without changing UI attachment counters or activating child-unit claims yet.
-
-= 2.59.12.60 =
-* Add a dedicated persistent physical media conversion unit table keyed to the existing attachment-level parent queue without changing current UI, REST, WP-CLI, background-worker, retry, local-asset, or replacement execution semantics.
-* Build deterministic main and intermediate source inventories that expand best/both policies into concrete AVIF/WebP units, persist exact source and target paths plus fingerprints, and remain idempotent across repeated synchronization.
-* Supersede obsolete physical units when attachment metadata changes, reactivate changed source fingerprints as pending work, and retain the parent queue as the stable aggregate/request contract for the later per-unit worker migration.
-* Register the new operational table with UltraCache table validation, activation schema checks, plugin-data cleanup, uninstall cleanup, and Media Library Replacement operational-state exclusion.
-
-= 2.59.12.59 =
-* Release cooperative local-asset early-return claims immediately back to pending without consuming failure budgets, and recover fatal/terminated PHP shutdown claims automatically; quarantine only repeated real worker terminations after the persistent recovery budget is exhausted.
-* Make Retry Failed recover abandoned processing rows as well as terminal failed rows under the exclusive media-process lease, expose recoverable interrupted work to the dashboard, and dispatch the queue immediately after administrator recovery.
-* Order pending media work by the lowest attempt count before row identity so a retried AVIF or WebP unit cannot starve another pending format for the same source.
-* Add the Images & Media Library FAQ guidance for theme/plugin images that remain JPEG or PNG, while preserving original local files and the existing rewrite, encoder, replacement, and schema contracts.
-
-= 2.59.12.58 =
-* Fix local theme, plugin, mu-plugin, and WordPress-includes media jobs remaining in processing before encoder execution when the guarded source-fingerprint UPDATE matched the active claim but changed no stored values.
-* Treat MySQL/MariaDB zero changed rows as a valid no-op only after an exact id, status, attempts, and started-at claim verification; retain stale-claim rejection when that authoritative claim no longer exists.
-* Preserve the existing local-source resolver, generated identity, shared media queue, AVIF/WebP encoders, affected-page fence, Media Library Replacement, and schema versions without adding a migration.
-
-= 2.59.12.57 =
-* Repair the media queue schema 4-to-5 upgrade by adding source-request uniqueness only after legacy attachment rows receive their canonical source identity and requested-format values.
-* Replace MariaDB-incompatible SHOW INDEX WHERE ... LIMIT probes with full index metadata inspection, and rebuild the legacy unique attachment indexes as the required non-unique lookup indexes without duplicate-key attempts.
-* Make media queue and affected-page reference upgrades idempotent across fresh, legacy, and partially applied schemas, deduplicating only identical canonical work identities before creating the final unique indexes.
-* Advance the media queue schema to 6 and affected-page reference schema to 3 while preserving queued attachment/local-asset work, statuses, retries, source fingerprints, and page-purge requirements.
-
-= 2.59.12.56 =
-* Complete the integrated local-image rewrite and WordPress-aware wp_options replacement regression candidate across canonical WordPress-derived source resolution, collision-free local-asset variants, the shared media queue, HTML/CSS/LCP surfaces, option identity, cache synchronization, concurrency, recovery, and rollback.
-* Match native WordPress option action sequencing around the byte-exact writer: publish the generic update_option action immediately before the atomic SQL mutation, then publish the option-specific update action and updated_option only after the database and runtime cache state are verified.
-* Preserve the established Media Library uploads generated identity byte-for-byte, keep Media Library Replacement scoped away from theme/plugin originals, retain schema 13 without migration, and keep local-asset work isolated from attachment rebuild and repair operations.
-* Add one integrated release gate covering executable identity/freshness/option-writer behavior, source-contract parity, complete PHP syntax, release metadata, package root, archive integrity, and exclusion of development tests from the installable ZIP.
-
-= 2.59.12.55 =
-* Keep every persisted WordPress option reference on the dedicated option-aware writer even when the active multisite blog context changes after Prepare Replacement; never fall through to the generic database-row writer.
-* Bind Apply, verification repair, recovery, and rollback to the exact current $wpdb->options table and fail closed with a specific context-change result before any database mutation.
-* Expand executable regression coverage for autoloaded and non-autoloaded raw, serialized, and JSON-like options, alloptions/notoptions synchronization, persistent cache invalidation, filter mutation, reused IDs, multisite context drift, concurrent compare-and-swap conflicts, and rollback parity.
-* Preserve Media Library Replacement schema 13 and the 2.59.12.54 option-name identity contract without adding a migration or changing non-option database replacement behavior.
-
-= 2.59.12.54 =
-* Route Media Library Replacement writes to the current WordPress options table through a dedicated option-aware compare-and-swap adapter instead of the generic database-row writer.
-* Persist the exact option name with each indexed and planned option reference, block legacy or reused option IDs without matching identity, and preserve byte-exact concurrent-writer protection.
-* Synchronize per-option, alloptions, notoptions, and persistent object-cache state after apply, verification repair, recovery, and rollback; verify the exact cached value before completion.
-* Run WordPress option sanitization and pre-update filters before the atomic write, reject transformed plans, and publish the standard option update actions only after the database and runtime cache state are verified.
-* Upgrade Media Library Replacement schema 12 to 13 additively without discarding existing registry rows; option plans created before the identity contract require a fresh Prepare step.
-
-= 2.59.12.53 =
-* Route full-document and filtered-fragment image admission through the canonical WordPress-derived local-source roots, restoring theme, plugin, mu-plugin, and WordPress-includes rewrite parity without changing Media Library Replacement scope.
-* Share one side-effect-free exact-source AVIF/WebP lookup across HTML attributes, srcset, inline and external CSS, Slider Revolution image attributes, LCP candidate preference, and LCP preload equivalence while preserving existing uploads and local-asset identities.
-* Extend supported semantic image surfaces with lazy srcsets, Slider image data attributes, and video posters, keep foreign/non-image/metadata/download contexts unchanged, and retain lookup-only frontend behavior with the existing local-asset queue.
-
-= 2.59.12.52 =
-* Extend the existing persistent media queue with canonical local-asset work rows for theme, plugin, mu-plugin, and WordPress-includes image sources without creating a second queue or attachment record.
-* Re-resolve each local public source through the existing WordPress-derived path contract before encoding, bind work to canonical source identity plus exact requested format and source fingerprint, and keep frontend requests lookup-only.
-* Reuse the established AVIF/WebP encoder, admission, color-profile, orientation, animation, atomic output, retry, stale-worker, affected-page purge, and background dispatch contracts while preserving Media Library attachment queue behavior.
-
-= 2.59.12.51 =
-* Add a separate WordPress-derived local-asset AVIF/WebP storage namespace and collision-resistant source identity for theme, plugin, mu-plugin, and WordPress-includes images.
-* Preserve the established uploads-relative generated paths byte-for-byte while deriving non-upload identity from canonical source scope, owner, relative path, and full source filename.
-* Let runtime public-URL lookup serve fresh existing local-asset derivatives with the same exact-source mtime/size freshness contract, while leaving non-attachment queue generation for the next roadmap version.
-
-= 2.59.12.50 =
-* Add one canonical local public image source descriptor using the existing WordPress-derived uploads, plugin, mu-plugin, theme, and WordPress-includes path resolvers.
-* Route frontend AVIF/WebP public-URL admission through the shared descriptor while preserving the established uploads-relative generated identity, freshness lookup, and attachment-backed on-demand queue behavior.
-* Memoize exact local source descriptors, preserve query-insensitive source identity, support custom registered theme directories, and reject foreign URLs, unsupported extensions, traversal, and UltraCache-generated cache/image outputs.
-
-= 2.59.12.49 =
-* Exclude every UltraCache-owned table and UltraCache-owned option row from Media Library replacement database discovery, planning, preview, apply, verification, and rollback.
-* Add an apply-time internal-state guard so a plan created by an earlier version cannot write UltraCache operational records; existing internal plan rows are classified as excluded instead of failed.
-* Add Continue Replacement recovery for failed metadata, database, Theme CSS, and post-replacement Flush All phases while preserving every completed change.
-* Add Restart Database Replacement for database-phase failures, rebuilding only unresolved database references from the current database while preserving switched attachment metadata and successful content replacements.
-* Run Flush All after Media Library replacement completes and report the attachment, site-content, internal-exclusion, and clean-slate cache-reset result in the completion message.
-
-= 2.59.12.48 =
-* Show homepage HTML warm completion with the canonical warmed URL and the actual HTML, Varnish-variant, and LiteSpeed pipeline stages instead of a static success sentence.
-* Show homepage HTML + CSS bundle warm completion through the same stage formatter used by menu and full-site warm-up, including CSS and the verified Varnish variant count.
-* Reuse the same result-driven homepage summary when a shared/homepage CSS bundle is prepared before a broader manual warm job; no warm runtime behavior is changed.
-
-= 2.59.12.47 =
-* Make Flush All a clean warm/Varnish queue generation boundary by deleting every prior pending, retrying, processing, completed, skipped, and terminal row instead of preserving invalidation and refill work.
-* Clear foreground and cron ownership, bump the warm generation, unschedule old ticks, and wait for the authoritative cron worker lease to finish before deleting the old queue.
-* Hold a purge mutation barrier that blocks new page-cache and generated-CSS write locks and drains existing write/build locks before the cache directory is removed.
-* Start external cache clearing and the optional warm-after-flush plan only after the purge mutation barrier is released, so any resulting queue rows belong exclusively to the new generation.
-* Fail Flush All when the clean-slate queue reset cannot be committed instead of reporting success with stale queue work still present.
-
-= 2.59.12.46 =
-* Allow the authenticated HTML-variant diagnostic warm pipeline to ignore only the `DONOTCACHEPAGE` flag inherited from the current UltraCache admin/REST request while preserving all public URL eligibility, exclusion, WooCommerce, and cacheability checks.
-* Revise the HTML-variant capability contract so the self-blocked 2.59.12.45 observation is invalidated and cannot remain authoritative before a fresh Test Varnish run.
-* Present an incomplete upstream warm/refill observation as `Observation incomplete` with its concrete stored reason instead of collapsing it into `Not supported · 0 of N`.
-
-= 2.59.12.45 =
-* Retry only transient DNS, transport, timeout, throttling, and server failures during public Varnish HTML-variant refill while stopping immediately on successful or terminal HTTP responses.
-* Remove the stale `cache-write-failed` classification from successful HTML warm results and propagate the actual failed Varnish bucket, HTTP/error code, retryability, and bounded attempt history through the warm pipeline and queue result.
-* Keep HTML-variant capability observation inconclusive when the canonical warm/refill path cannot reach the per-bucket proof stage instead of converting an upstream refill failure into a false variant-unsupported result.
-* Pass the explicit warmed page URL, source, and Accept bucket into the final media rewrite so cron, CLI, stale, and warm workers can queue missing AVIF/WebP files and associate them with the correct page.
-* Scope missing-media discovery limits per warmed page and continue affected-page registration when a missing optimized lookup is memoized or already queued elsewhere in the same worker.
-* Rewrite local upload background images emitted by page builders inside inline CSS `<style>` blocks through the same validated AVIF/WebP lookup and on-demand generation path used by image markup and style attributes.
-
-= 2.59.12.44 =
-* Separate Varnish capability observation from control transport: create and verify canaries through the canonical public WordPress route while sending PURGE or BAN only to the configured control endpoint.
-* Restore HTTP exact-invalidation discovery for control-only listeners such as the Hetzner endpoint without requiring those listeners to serve ordinary frontend GET requests.
-* Preserve independent Exact PURGE and Exact BAN behavior probes and derive broader capability tests from the method verified during the current run.
-* Preserve terminal topology outcomes such as entire-host `not-applicable` instead of reclassifying them through generic supported/unsupported aggregation.
-* Persist endpoint, basic-test, HTML-variant, ESI, and aggregate capability diagnostics in existing revisioned UltraCache state records, with one-time migration from superseded diagnostic options.
-* Invalidate the incorrect 2.59.12.43 capability proofs through revised capability fingerprints so they cannot authorize runtime behavior before a fresh Test Varnish run.
-* Keep capability-probe operations isolated from production recent-operation reporting and require a specific reason for every non-executed or inconclusive capability result.
-
-= 2.59.12.43 =
-* Independently behavior-test HTTP Exact PURGE and Exact BAN on every configured endpoint instead of limiting probes from the configured method or adapter classification.
-* Derive the common production hard-invalidation method from current endpoint proofs and use the same verified method for targeted, HTML-only, and entire-host runtime operations.
-* Probe Batch BAN, HTML-only flush, entire-host flush, soft purge, stale refresh, and origin revalidation independently without executing known-URL or TTL production fallbacks.
-* Persist explicit per-endpoint capability states, reason codes, messages, applicability, conclusiveness, timestamps, and proof expiry in the existing UltraCache state table.
-* Distinguish supported, not supported, not applicable, observation incomplete, configuration changed, proof expired, and not tested outcomes; every untested UI result includes its specific persisted reason.
-* Migrate the legacy endpoint capability option into the existing UltraCache state record and remove the legacy option after successful persistence; no transient state is added.
-
-= 2.59.12.42 =
-* Make Automatic Varnish site flushing choose from the observed static-object route and verified production capabilities instead of preferring HTML-only flush unconditionally.
-* Select verified entire-host flush when public static objects pass through Varnish, and select verified HTML-only flush when public static objects bypass Varnish.
-* Report a verified HTML-only operation as degraded when static ownership is inconclusive or static objects pass through Varnish without verified entire-host invalidation.
-* Display the actual site runtime strategy in the Varnish summary: HTML-only flush, entire-host flush, known site pages, or automatic expiry.
-* Preserve the existing capability persistence, production transports, VCL contracts, and explicit manual scope behavior.
-
-= 2.59.12.41 =
-* Use one bounded post-invalidation observation contract for exact invalidation, batch BAN, HTML-only flush, entire-host flush, and static preservation proofs.
-* Retry transient public DNS/HTTP observation failures while still requiring two successful responses that match the expected canary generation or exact written artifact.
-* Fail immediately on any successful stale or mismatched observation so retries cannot manufacture a capability the production runtime does not support.
-* Report exhausted transport-only observations as `observation-incomplete` instead of incorrectly classifying the server capability as unsupported.
-* Preserve the existing production planner, control operations, capability tables, and persistent diagnostic contracts without adding transient state.
-
-= 2.59.12.40 =
-* Preserve the complete Varnish basic-test contract instead of truncating associative payloads by key count, recursion budget, insertion order, or string length.
-* Persist the full ESI capability proof and endpoint/test evidence through the existing sanitization contract.
-* Add an independent contract-bound HTML variant capability record and use it as the authoritative public-path registry source.
-* Restore the HTML variant capability into the basic diagnostic response from its dedicated record and remove the redundant capability-list slice.
+= 3.13.12 =
+* Runtime Scanner page preparation now derives its `runtime_scan` warm context from the existing shared foreground session instead of introducing a separate Wizard/Scanner flow or REST-only policy flag.
+* HTML/page-cache warm remains required for Runtime Scan. Varnish and LiteSpeed refill failures are best-effort in this context only: they are retained as warning stages and no longer turn `/crawl-page` into HTTP 500 after the page itself warmed successfully.
+* Runtime Scanner progress now surfaces the exact auxiliary refill stage, `failureClass`, and message while continuing into browser measurement.
+* Normal manual Warm / Flush+Warm behavior is unchanged; selected Varnish/LiteSpeed refill failures remain blocking outside the Runtime Scan context.
+
+= 3.13.11 =
+* Made the Setup Wizard a thin orchestrator over the shared Runtime Site Scan result. The Wizard no longer throws a separate generic JavaScript verification failure or reinterprets failed/unresolved target semantics.
+* Runtime Scanner target failures, unresolved measurements, and scanner-level infrastructure errors now surface as exact non-blocking Wizard warnings and setup advances to Verify.
+* Removed JavaScript as a persisted Wizard failure-resume step. Legacy persisted JavaScript failures advance to Verify instead of looping back through the JavaScript step; genuinely interrupted JavaScript runs can still resume the same shared scanner action.
+* Centralized Runtime Site Scan completion/warning summaries in the scanner action so Browser Scanner and Setup Wizard consume the same status and exact per-target reasons.
+
+= 3.13.10 =
+* Fixed Real Cookie Banner consent-family handoff: when a WordPress inline companion is held by an application/consent contract, the external consumer now inherits the same consent-required/by/id ownership and is restored as consent-original-src-_ instead of becoming native.
+* Preserved generic family topology without vendor hardcodes, hidden exclusions, visible-list migrations, scanner-policy changes, or consent-controller bypasses.
+
+= 3.13.09 =
+* Restored WordPress script-family topology when a consent manager replaces an inline companion DOM id but preserves the original id as consent provenance. The original `-js-before` / `-js-extra` / `-js-translations` / `-js-after` identity is now used only for family grouping and phase ordering.
+* A CMP-owned non-executable companion now prevents UltraCache from independently releasing the external consumer from the same family; the consumer is restored to native/CMP-visible markup so one controller owns the family lifecycle.
+* The fix is structural and generic: no Mailchimp/vendor hardcode, hidden JavaScript exclusion, visible-list migration, Runtime Scanner policy change, or broad consent metadata exemption was added.
+
+= 3.13.08 =
+* Fixed warm finalization when Warm is launched from an authenticated admin/REST request: raw-v1 anonymous frontend source HTML now receives the full public frontend finalization pipeline instead of inheriting the caller's logged-in optimization bypass.
+* The anonymous-public-cache transform override is scoped only around per-bucket finalization and always restores the previous request context.
+* Preserved the 3.13.07 single raw render / exactly-once per-bucket final transform contract; no Runtime Scanner policy, visible JS list, consent compatibility or DELAY/DEFER policy changes.
+
+= 3.13.06 =
+* Runtime Scan consent-state cleanup now fails gracefully. Real Cookie Banner and Complianz isolated cookie/localStorage/sessionStorage resets remain best-effort diagnostics, but an unverified reset no longer aborts or discards an otherwise valid browser measurement.
+* Scanner-state reset diagnostics now preserve the exact failure reason (`reset-url-invalid`, `reset-frame-timeout`, `reset-frame-error-event`, `reset-frame-inaccessible`, or `reset-verification-failed`) instead of collapsing every failure into one generic contaminated-baseline message.
+* Real browser-measurement failures such as a missing verified collector or incomplete report now return structured per-target unresolved results to the Runtime Site Scan instead of throwing and collapsing the whole Error Corrector. Other automatic site-scan targets continue normally; single-page scans finish with the exact target failure visible in the result row.
+* Kept the 3.12.37 server-side final-URL resolution and single fresh measurement-frame lifecycle. No collector rebinding/reuse was reintroduced, and no JavaScript policy, defaults, visible safeguard lists, RCB/Complianz frontend compatibility, or runtime execution behavior changed.
+
+= 3.13.05 =
+* Fixed the runtime-created script completion contract without adding vendor exclusions. DELAY/DEFER scripts created through DOM APIs are now revived as the same original HTMLScriptElement instead of being replaced by a new element at release time.
+* Preserved creator-owned `onload` / `onerror` properties, `addEventListener` callbacks, Promise-based resource loaders, and retained script references. UltraCache observes runtime external completion with additive listeners and never overwrites handlers owned by the script creator.
+* Runtime-created inline scripts now execute by restoring and reinserting the same original node at its original DOM position. Static HTML delayed placeholders keep the existing replacement path and execution semantics.
+* No Slider Revolution, SR7, tptools, or other vendor hardcode/default was added. Real Cookie Banner, Complianz, saved JavaScript lists, canonical visible list contents, and JavaScript settings defaults are unchanged.
+
+= 3.13.04 =
+* Preserved scanner-first policy while restoring exact DELAY dependency topology. Delayed registered scripts now carry their real WordPress dependency handles into the browser transport, and the loader performs a stable dependency order without promoting providers or consumers to DEFER/NATIVE.
+* WordPress inline companion groups now carry explicit family/sequence/phase metadata so before/data/translations/external/after occurrences remain in their selected lane while preserving their original family execution order.
+* Interaction release is dependency-aware: a consumer is not released while one of its delayed providers remains outside the interaction-eligible set. On full release, a first-party consumer that depends on a delayed third-party provider waits in the late lane instead of pulling that provider earlier.
+* Added observed delayed execution sequence metadata for Runtime Scan. Provider selection prefers this real execution evidence when both provider and consumer expose it, then falls back to DOM order for browser-owned scripts. Scanner repairs still write only to the existing visible JavaScript policy lists.
+* Hardened Unified Inline Registry release so a registry-backed delayed inline occurrence is never consumed as an empty script if its manifest entry is unavailable; it remains inert instead of executing an empty script.
+* No hidden vendor exclusion/default was added. Real Cookie Banner and Complianz compatibility behavior, saved JavaScript lists, and canonical visible list contents are unchanged.
+
+= 3.13.03 =
+* Restored scanner-first JavaScript routing: generic LCP fingerprint matches and WordPress inline-companion family detection no longer promote scripts from DELAY to DEFER. Visible Do Not Defer or Delay / Defer Instead of Delay rules, explicit compatibility switches, and the normal DELAY classifiers remain authoritative.
+* Removed the LCP Image Priority post-pass that could veto an already-selected generic DELAY lane. LCP resource prioritization and LCP Boundary Delay remain available, but a framework/class-name fingerprint can no longer pull application JavaScript forward without explicit policy evidence.
+* WordPress before/data/translations/external/after companions now keep the lane selected by normal policy instead of forcing the whole family to DEFER merely because inline companions exist. Existing dependency/registry ordering remains responsible for preserving execution order inside that lane.
+* Reduced Runtime Script Classification Firewall hot-path cost: generic DOM insertion hooks now inspect direct SCRIPT nodes only instead of running querySelectorAll('script') across every inserted subtree. Direct script insertion, connected src mutation, and document.write/writeln interception remain classified before execution.
+* Setup Wizard no longer silently enables Elementor Compatibility or Protect WPBakery animations from plugin detection. Those visible application-compatibility switches remain available for explicit use after real scanner evidence; Real Cookie Banner and Complianz controller compatibility keep their silent Wizard detection because they protect consent infrastructure.
+* WooCommerce variable-product JavaScript compatibility is now OFF in canonical fresh-install defaults. No migration or saved-setting rewrite is performed; existing sites keep their current value. No visible JavaScript policy list is migrated or repopulated.
+
+= 3.13.02 =
+* Refined canonical functional third-party JS defaults by removing the broad `complianz` / `cmplz` fingerprints now owned by explicit Complianz Compatibility; existing saved lists are never migrated or rewritten.
+* Added an explicit Complianz Compatibility switch, OFF by default, under Advanced → Advanced settings. When enabled, only Complianz cookie-banner, TCF, router, and postscribe infrastructure keeps its native lifecycle; visible Do Not Defer or Delay and Defer Instead of Delay lists remain higher authority.
+* Complianz service scripts materialized after consent still pass through the existing Runtime Script Classification Firewall and normal NATIVE / DEFER / DELAY policy. No broad cmplz/complianz attribute exemption is used, preventing released Google, Facebook, analytics, embed, or other service scripts from inheriting the controller exemption.
+* Runtime Scan now clears and verifies only isolated Complianz frontend consent state (cmplz_* cookies plus usprivacy where present, Complianz TCF localStorage, and Complianz-owned sessionStorage) before every measured lifecycle when compatibility is enabled.
+* Real Complianz settings and banner CSS changes now invalidate UltraCache once per request when compatibility is enabled; admin banner-preview CSS generation is ignored. The Setup Wizard silently enables Complianz Compatibility when active Complianz Lite/Premium is detected and otherwise preserves the current setting.
+* Async Consent Banner CSS and Auto-detect static Consent CSS remain independent general consent-CSS controls; the new Complianz switch does not force either setting. No saved visible JavaScript policy list is migrated or rewritten; Populate Defaults remains the only mechanism that repopulates canonical list contents.
+
+= 3.13.01 =
+* Setup Wizard now silently enables the existing Real Cookie Banner Compatibility setting when an active Real Cookie Banner Lite or Pro installation is detected. No separate wizard UI, status, badge, or message is added; when RCB is not detected the wizard preserves the current setting instead of forcing it off.
+* Moved the existing Real Cookie Banner Compatibility switch from JavaScript safeguards to Advanced → Advanced settings. Compatibility behavior, Runtime Scan isolation, RCB cache invalidation, visible JavaScript lists, and the Runtime Script Classification Firewall are unchanged.
+
+= 3.12.38 =
+* Added an explicit Real Cookie Banner Compatibility switch, OFF by default. When enabled, only Real Cookie Banner controller/blocker/vendor/TCF infrastructure keeps its native lifecycle; visible Do Not Defer or Delay and Defer Instead of Delay lists remain higher authority.
+* Real Cookie Banner service scripts materialized after consent still pass through the existing Runtime Script Classification Firewall and normal NATIVE / DEFER / DELAY policy. No consent-* placeholder, vendor service, Mailchimp, Facebook, Google, or other released script receives a blanket exemption.
+* Runtime Scan now clears and verifies only the isolated credentialless real_cookie_banner* cookie/localStorage/sessionStorage state before every measured lifecycle when compatibility is enabled. A reset that cannot be verified fails closed and the contaminated measurement is discarded.
+* Real Cookie Banner settings, customization, consent-revision, and Pro/Lite license-state changes now invalidate UltraCache once per request when compatibility is enabled, preventing stale consent-transformed HTML. No consent-cookie page-cache variants are introduced.
+* The parser-early Dynamic Script Finder receives only the explicit RCB infrastructure provenance required to avoid holding RCB's own webpack/runtime chunks as pending before the full classifier initializes. Visible JavaScript lists are not migrated or rewritten.
+
+= 3.12.37 =
+* Runtime Scan measurements now start from a single fresh browser lifecycle. Final same-site URL/redirect resolution happens server-side before the one-time scan token is minted, so the scanner no longer loads the target once for browser resolution and then reloads the same credentialless context for measurement.
+* Runtime Scan now fails closed when the verified collector is missing from the pre-resolved target instead of rebinding/reloading a potentially contaminated measurement context. HEAD redirect resolution falls back to a bounded one-byte GET only when the server does not support HEAD.
+* The Runtime Scan progress popup now shows the actual current target from the real target-start callback, including target number/count, label, and URL, instead of permanently showing the default site/front-page URL.
+* No JavaScript Router, NATIVE/DEFER/DELAY policy, visible list, Inline Registry, Delay timer, defaults, migrations, or frontend execution behavior changed.
+
+= 3.12.36 =
+* Added the Unified Inline Registry: every non-NATIVE inline JavaScript occurrence is collected into one inert per-page manifest with occurrence-based identity (ordinal + exact-code fingerprint), so same-handle product/event payloads are never collapsed by the registry.
+* DEFER inline occurrences now use one shared cached dispatcher asset at their original DOM positions instead of generating one deferred-inline file per occurrence. This preserves WordPress before/external/after topology while making UltraCache the execution owner of non-NATIVE inline JavaScript.
+* DELAY inline placeholders now resolve their source from the same registry when released by the existing delayed loader. NATIVE, explicit optimizer opt-outs, non-JavaScript script types, and parser-sensitive document.write/document.writeln inline code remain browser-owned.
+* Added a 50-occurrence same-handle regression proving 50 distinct payloads execute 50 times in original order. No vendor/site hardcode, ordering timer, default migration, or visible-list rewrite was added.
+
+= 3.12.35 =
+* Added unified WordPress script-family classification for registered and runtime-created handles that own executable inline before/after/data/translations companions. Families that would otherwise be split by broad Delay All or first-party non-critical classification are kept in DEFER, not promoted to NATIVE.
+* Visible Do Not Defer or Delay and Defer Instead of Delay remain higher authority. Explicit safe/functional third-party Delay pattern matches remain DELAY, so user-visible Google/Site Kit or other intentionally delayed families are not silently promoted.
+* Exported the current-request inline-companion family handle set into the existing unified runtime policy so dynamically recreated copies use the same NATIVE / DEFER / DELAY decision table. No vendor hardcode, timeout, mutation settlement, runtime ordering layer, defaults, migrations, or list rewrite was added.
+
+= 3.12.34 =
+* Add a Runtime Script Classification Firewall so every runtime-created executable script intercepted by UltraCache receives exactly one NATIVE, DEFER, or DELAY lane before execution. Runtime DEFER and DELAY scripts are neutralized before DOM insertion and execute only through the UltraCache executor; NATIVE remains the explicit passthrough lane.
+* Extend runtime capture beyond direct Node insertion to nested/subtree scripts, ParentNode append/prepend/replaceChildren paths, insertAdjacentElement, Range insertion, connected src assignment, and document.write/writeln script fragments.
+* Add a bounded runtime classification registry and persistent lane provenance on dynamic scripts. Runtime Scan now combines the existing resource-request invariant with seen = NATIVE + DEFER + DELAY, pending = 0, and escaped = 0.
+* Keep runtime DEFER placeholders out of the normal DELAY queue so the selected lane remains authoritative. No Mailchimp, Real Cookie Banner, vendor, consent-manager, ordering timeout, companion-ordering, default, migration, or visible-list policy was added.
+
+= 3.12.33 =
+* Runtime Scan: retry transient per-URL warm lock contention instead of failing the scan target, and perform exact-target purge only after the shared URL warm lock is acquired.
+* Runtime Scan: clear prior console, suggestion, aggregate, and diagnostic-queue state at the start of every new scan, and preserve a true zero-finding result instead of showing stale findings.
+* JavaScript runtime scheduling remains the 3.12.30 implementation; no dynamic settlement or companion-ordering changes from 3.12.31/3.12.32 are included.
+
+= 3.12.30 =
+* Changed Runtime Scan progress to cycle-weighted progress: each possible cycle contributes 100 / (targets x max cycles), unused cycle slots are consumed when a target resolves early, and 100% is reserved for final whole-scan completion.
+* Runtime Scan progress now preserves one-decimal precision for fractional cycle steps such as 2.5%.
+
+= 3.12.29 =
+* Fixed Runtime Scan inventory merging so distinct WordPress inline execution segments sharing one registered handle are keyed by their concrete script id instead of being collapsed into one handle record. Delayed `-js-before`, `-js-after`, `-js-extra`, and `-js-translations` providers therefore remain independently discoverable.
+* Server-side inventory enrichment now attaches inline source text to the exact matching execution segment while preserving the browser-observed DELAY/DEFER/NATIVE state. This allows generic missing-receiver analysis to prove a delayed inline provider and feed the existing reversible Move to Delay repair without vendor-specific rules.
+* Updated provider-review wording to refer to scanned execution segments rather than only loaded scripts.
+* No JavaScript Router, LCP identification/protection, loader serialization, defaults, migrations, or visible-list policy changed.
+
+= 3.12.28 =
+* Split Runtime Scan inline-companion analysis into exact execution identity and WordPress policy-owner identity. Browser errors from `-js-before`, `-js-after`, `-js-extra`, or `-js-translations` now inspect the actual inline code and DOM position without collapsing it into the parent external handle, while visible-list repairs still target the registered parent owner.
+* Missing-object/property provider resolution now keeps distinct inline companion writers separate and can prove the nearest preceding inline receiver provider before offering the existing reversible Move to Delay repair. No Google/Site Kit/vendor-specific rule was added.
+* Replaced Runtime Scan progress parsing from status text with explicit numeric progress. Every real scan target contributes one step and final aggregation is the last step, so the modal starts at 0% and reaches 100% only when the scan completes, with or without WooCommerce targets.
+* No JavaScript Router, LCP identification/protection, defaults, migrations, or hidden execution policy changed.
+
+= 3.12.27 =
+* Added reversible Runtime Scan repair for a consumer that was previously moved earlier by an automatic UltraCache safeguard while its proven provider remains in DELAY. The scanner now prefers moving that consumer back into the same DELAY execution island before promoting analytics/providers earlier.
+* Added scanner-write provenance for the three visible JavaScript policy lists. Automatic rollback/removal is permitted only for exact lines previously written by Runtime Scan; any manual save of a visible list clears scanner ownership for that list, so user-authored policy remains authoritative.
+* Added DOM-order-aware provider selection for missing runtime receivers and a visible Move to Delay action for persistent already-listed consumers when a delayed provider/consumer relationship is proven. Reversible trial moves restore the exact prior three-list state if the same finding persists on the next scan cycle.
+* No JavaScript defaults, migrations, LCP identification/protection, Router classification, or hidden execution policy changed.
+
+= 3.12.26 =
+* Added final JavaScript execution-identity dedupe after LCP restoration and dependency lane normalization so a payload promoted from DELAY to DEFER/NATIVE cannot execute alongside a duplicate representation.
+* Duplicate groups mirror the delayed-loader identity contract: duplicate ids, normalized external src + script mode, and identical handled inline payloads execute once; the earliest lane wins (NATIVE before DEFER before DELAY).
+* No JavaScript defaults, visible policy lists, migrations, Scanner behavior, LCP identification logic, or delay-classification rules changed.
+
+= 3.12.25 =
+* Unified the server-side LCP candidate and browser-confirmed LCP mapping into one page-scoped protection context.
+* Browser-locked LCP mappings now take authority over provisional server heuristics when resolving the final LCP boundary.
+* Added a generic LCP-protected DEFER veto before broad JavaScript DELAY rules, with dependency-lane promotion and runtime-policy parity.
+* Added a final HTML LCP protection pass so generic non-critical/delay-all classification cannot re-delay scripts tied to the locked LCP fingerprint.
+
+= 3.12.24 =
+* Restored Runtime Scan speed-first self-healing for recommended findings without a unique target: Defer Instead first, then Do Not Defer or Delay only if the error persists on the next cycle.
+* Restored the DB-backed JS Diagnostic Queue / Appendable Fixes panel after Runtime Site Scan and removed the duplicate aggregate findings panel while retaining pre-existing baseline errors as diagnostic-only output.
+
+= 3.12.23 =
+* Repaired Runtime Scan result integrity: generated UltraCache runtime bundles are diagnostic infrastructure only and can no longer become appendable Defer/Do Not candidates; pre-existing baseline console errors remain visible but are excluded from automatic repair.
+* Removed duplicate Runtime Scan finding cards by presenting one unified Runtime Scan Results panel with Needs Action, Already Applied, Review Only, and Pre-existing Baseline Errors sections.
+* Runtime Scan no longer performs global Purge All before each target. It invalidates only the selected URL and warms that URL through the ordinary crawl-page / warm_page_pipeline path, preserving the rest of the site's warmed cache and media state.
+* No JavaScript routing policy, visible-list defaults, migrations, Delay semantics, or runtime activation chain changed.
+
+= 3.12.22 =
+* Fixed runtime lane activation so generated bundles self-activate their requested dependency-free modules from compile-time bundle state instead of depending on document.currentScript metadata.
+* Enforced runtime bundle execution order through WordPress dependencies: NATIVE precedes DEFER, and DEFER precedes the DELAY bundle when those predecessor lanes are present. Runtime bundle HTML metadata remains diagnostic only.
+* No JavaScript routing policy, visible lists, defaults, migrations, integrations, Auto Release semantics, or Delay classification changed.
+
+= 3.12.21 =
+* Fixed Runtime Scan bootstrap reliability by loading the diagnostic `runtime-js-scan-collector.js` standalone/native on authorized scan requests instead of routing the collector through the runtime-bundle module transport it is meant to diagnose.
+* The collector config is emitted directly before the standalone collector through WordPress script APIs. The collector can also recover its scan ID from the authorized Runtime Scan URL if inline config execution is reordered, preventing an early no-op bootstrap. Runtime Scan verification remains strict and still requires the expected scan ID plus the live `__ultracacheRuntimeJsScan` object.
+* No JavaScript scheduling policy, defaults, visible lists, integrations, migrations, Auto Release, or Minimum Delay semantics changed.
+
+= 3.12.20 =
+* Fixed Runtime Scan collector verification for the 3.12 runtime-bundle architecture. The scanner now recognizes `runtime-js-scan-collector` from the external runtime bundle's `data-ultracache-modules` activation metadata instead of requiring the retired standalone `runtime-js-scan-collector.js` request.
+* Kept verification strict: the frame must still be same-origin/accessibly loaded, expose the scan config with the expected scan ID, and expose the activated `__ultracacheRuntimeJsScan` collector object. The controlled final-URL rebind behavior is unchanged.
+* Added regression coverage for bundled collector detection and for rejecting unrelated runtime bundle module metadata. No JavaScript routing, visible-list defaults, migrations, integrations, Auto Release, or scheduling policy changed.
+
+= 3.12.19 =
+* Removed the 3.12.08 and 3.12.09 JavaScript settings migrations from the sanitizer. Saving visible JavaScript policy lists now preserves the user-edited values instead of silently restoring or appending policy entries.
+* Removed `contact-form-7-js` and `author-arc-handler-js` from canonical Do Not Defer or Delay defaults. Populate Defaults remains the explicit mechanism for restoring canonical JavaScript list contents.
+* Added regression coverage forbidding 3.12.x JavaScript list migration/reinjection, including the stray `co` entry. No JavaScript router, runtime scheduling, UI box, integration, Auto Release, or Minimum Delay behavior changed.
+
+= 3.12.18 =
+* Fixed runtime-bundle module activation transport so finalized NATIVE/DEFER activation metadata is persisted on the actual external WordPress bundle registration and reapplied to that external `<script>` at the end of the script-loader filter chain; `document.currentScript` now reads the requested module list from the element that actually loads the bundle rather than relying on a separate `-js-before` tag.
+* Added real emitted-tag and runtime activation regressions covering NATIVE, DEFER, Runtime Scan collector installation/rebind persistence, and the delayed-js loader factory execution path.
+* Added a functional Auto Release regression proving that a DEFER-bundle-activated delayed-js loader with Auto Release 2 seconds / Minimum Disabled actually releases and requests a delayed external script. JavaScript policy, visible lists, integrations, dependency promotion, Auto Release semantics, and Minimum Delay semantics are unchanged.
+
+= 3.12.17 =
+* Added a development-only JavaScript architecture validation report that combines Lighthouse metrics with Runtime Scan classification evidence: Performance/FCP/LCP/TBT/CLS/Speed Index/DOM, forced-reflow duration, UltraCache render-blocking request footprint, NATIVE/DEFER/DELAY distribution, and unclassified script escapes.
+* Kept validation completely outside the production runtime: no frontend asset, hook, setting, route, Auto Release, Minimum Delay Release, or scheduler behavior is changed in this measurement release.
+* Added regression coverage for UltraCache render-blocking attribution, lane deduplication, classification-invariant failures, and Lighthouse-only runs that deliberately do not invent missing Runtime Scan evidence.
+
+= 3.12.16 =
+* Replaced the blanket inline-companion NATIVE handoff with lane-coherent WordPress script groups: delayable before/after/data/translations companions now follow the registered external script into ordered DEFER or DELAY, while non-delayable/author-opted-out companions conservatively keep the group NATIVE.
+* Replaced the blanket "has enqueued dependents => cannot DELAY" safeguard with a final dependency-lane invariant: a registered dependency may remain DELAY when its dependents are also DELAY, and is promoted only as early as required when a dependent resolves to DEFER or NATIVE.
+* Restricted parallel/async transport to dependency-independent registered scripts. Dependency-connected DEFER scripts use ordered defer, and dependency-connected delayed groups carry an ordered marker so the existing Delay loader disables parallel execution for those groups.
+* Removed the old inline-companion/enqueued-dependent exclusions from LCP-boundary and non-critical classification while preserving visible-list precedence, explicit integrations, Auto Release, and Minimum Delay Release behavior.
+
+= 3.12.15 =
+* Completed the final hidden vendor-rule audit across the generic JavaScript scheduler and browser Delay runtime. Removed provider/library identities from the hidden first-party non-critical classifier, leaving only generic semantic candidates.
+* Removed the private analytics/vendor allowlist from legacy Async external scripts transport; when that opt-in path is used it now consumes the same user-visible Delay third-party JS Patterns list instead of a second hidden provider policy.
+* Removed the WooCommerce-only special case from generic visible-exclusion fragment matching and removed Elementor/Woo-specific triggers from the legacy jQuery exclusion-cluster heuristic.
+* Extracted the unconditional Elementor lazy-background runtime from the generic delayed-js-loader into a dedicated DEFER runtime module that is requested only when the explicit Elementor Compatibility switch is enabled and the Delay runtime is active. Auto Release and Minimum Delay Release are unchanged.
+
+= 3.12.14 =
+* Added diagnostics-only JavaScript classification audit records for registered and runtime-created executable scripts, including URL/handle, NATIVE/DEFER/DELAY lane, reason, decision source, matched rule/pattern, catch path, and runtime initiator where available.
+* Compared those records with actual browser ResourceTiming entries whose initiator type is script and report concrete unclassified requests as Finder/Router escape bugs instead of creating hidden compatibility policy.
+* Reused the existing verified Runtime Scan collector/report transport and in-memory state only; the parser-early Dynamic Finder exposes only a tiny nullable recorder hook while all heavy audit recording, stack capture, DOM observation, and ResourceTiming comparison remain inside the diagnostics-only collector. Normal production emits no classification-audit DOM metadata, creates no audit sink, and adds no frontend request or persistence channel.
+* Preserved classification provenance when delayed placeholders are replaced by executable scripts. Auto Release, Minimum Delay Release, and all non-JavaScript frozen subsystems are unchanged.
+
+= 3.12.13 =
+* Locked Runtime Scan and JavaScript Error Fixer policy writes to the three visible JavaScript lists only: Delay third-party JS Patterns, Defer Instead of Delay, and Do Not Defer or Delay.
+* Added a strict visible-policy descriptor to automatic self-healing decisions and reject any automatic fix that does not map to an explicit visible setting/lane.
+* Marked diagnostic suggestions as visible-list authority with no hidden override semantics, and clarified that DB-backed Diagnostic Queue results are findings only and never become execution policy.
+* Kept manual suggestion actions as visible list-draft edits and added regression coverage proving the JavaScript engine never reads diagnostic queue state. Auto Release and Minimum Delay Release behavior are unchanged.
+
+= 3.12.12 =
+* Added the visible JavaScript Minimum Delay Release setting (Disabled, 1, 2, 3, or 4 seconds) as an additive gate in front of the existing delayed-JavaScript release state machine.
+* Early interaction, After page load, Runtime Scan, and existing Auto Release requests are retained while the minimum gate is closed; the gate never creates a release request by itself.
+* Preserved interaction-first ordering when both an interaction request and a full Auto Release request become pending before the minimum expires, then resumes the existing full release after the interaction lane completes.
+* Kept the existing Auto Release setting, options, defaults, migration, timer generation, and trigger semantics unchanged.
+
+= 3.12.11 =
+* Added one server-generated declarative JavaScript execution-policy table consumed by both the registered-script Router and the runtime-created script classifier, removing their separate NATIVE / DEFER / DELAY precedence trees.
+* Moved visible-list precedence, Delay All, safe/functional/all-third-party, first-party non-critical, optimization-disabled, and default Defer decisions into the shared policy evaluator while keeping WordPress dependency and explicit integration state as environment-specific facts.
+* Converted the remaining third-party/inline/non-critical helper classifiers into adapters of the unified evaluator so fallback HTML processing cannot silently diverge from the Central Router.
+* Aligned runtime-created scripts with registered-script stage semantics, including preventing stage-one Defer policy from independently turning dynamic scripts into DELAY. Auto Release remains unchanged and no production telemetry or standalone request was added.
+
+= 3.12.10 =
+* Added a parser-early generic Dynamic Script capture bootstrap for runtime-created executable scripts, with full NATIVE / DEFER / DELAY classification handed off to the existing deferred loader so DOM-injected scripts can no longer bypass policy solely because they were created after server-side HTML processing.
+* Routed dynamic DELAY decisions into the existing inert delayed-script format and existing deferred Delay executor, with visible Do Not Defer or Delay / Defer Instead of Delay precedence and no vendor/plugin identity rules in the browser finder.
+* Covered appendChild, insertBefore, replaceChild, connected script.src/setAttribute(src), and complete document.write/writeln script fragments, while preventing release recursion and re-reading runtime-created third-party placeholders at the full third-party boundary.
+* Added no standalone frontend request or production telemetry; existing Auto Release behavior remains unchanged.
+
+= 3.12.09 =
+* JavaScript policy: moved WooCommerce variable-product protection behind a visible WooCommerce JS Compatibility switch and surfaced the remaining CF7/author-arc native fallbacks in the editable Do Not Defer or Delay list.
+* Architecture: removed the final hidden vendor-specific JavaScript scheduling debts from the generic engine.
+
+= 3.12.08 =
+* Made visible JavaScript policy authoritative across registered-script and ordered HTML rewrite paths: Do Not Defer or Delay wins NATIVE on overlap, then Defer Instead of Delay resolves DEFER, then normal strategy classification applies.
+* Restored the user-editable third-party Delay pattern defaults removed during the 3.09.04 hidden consent-policy era, while preserving all customized saved lists.
+* Added regression coverage for visible-list precedence and the restored default migration.
+
+= 3.12.07 =
+* Removed hidden consent/CMP scheduling overrides so consent-management scripts follow the normal JavaScript router and visible exception lists.
+* Removed the temporary dynamic tracker injection gate and its DOM insertion monkey-patches from the parser-early interaction bootstrap.
+* Reduced parser-early bootstrap configuration to configured interaction events only; no tracker/CMP pattern payload is emitted.
+* Updated JavaScript diagnostics to describe consent-management assets as visible-policy candidates instead of automatic native-lifecycle exceptions.
+* Reduced explicit JavaScript architecture debt to the remaining WooCommerce variable-product, Contact Form 7, and author-arc vendor-policy items.
+
+= 3.12.06 =
+* Completed the first per-module UltraCache frontend self-cost audit and reduced parser-early NATIVE runtime assignments from eleven modules to three, with the runtime scanner NATIVE only on explicit diagnostic scan requests.
+* Kept only early visitor-interaction capture and LCP request-credentials learning as normal production parser-early modules because their pre-defer information cannot be reconstructed after deferred execution.
+* Moved async CSS activation, dynamic icon-font interception, font-display CSSOM patching, MailerLite lazy nonce handling, runtime font CSS URL rewriting, WooCommerce cart-fragment control, WooCommerce ESI opt-in, and the variable-product submit guard to the shared DEFER runtime bundle.
+* Removed the completed UltraCache helper blanket-native item from the JavaScript policy-debt manifest; Auto Release, Varnish/ESI/media/cache/multilingual behavior, and all feature activation settings remain unchanged.
+
+= 3.12.05 =
+* Consolidated requested UltraCache frontend runtime modules into generated content-addressed NATIVE / DEFER / DELAY lane bundles, with at most one normal-path network request per active lane.
+* Generated each lane variant from only the modules requested or explicitly reserved for the current page so inactive helpers and diagnostics are not shipped merely because they exist in the runtime registry.
+* Preserved parser-early queue position with lane placeholders, kept dependency-bound modules behind their declared WordPress dependencies, and added zero-network late activation for reserved ESI and automatic consent-CSS runtimes.
+* Added a compatibility fallback to the existing standalone helper assets when a generated bundle cannot be persisted; Auto Release behavior and the eleven current NATIVE lane assignments remain unchanged for the later self-cost audit.
+
+= 3.12.04 =
+* Added one canonical UltraCache frontend runtime registry covering every production `assets/js` module with handle, asset, current NATIVE/DEFER/DELAY lane, dependencies, current-request enabled state, and an explicit lane reason.
+* Moved UltraCache-owned helper identification and route selection to the runtime registry, removing the duplicated helper handle/asset inventories from the JavaScript classification trait while preserving existing 3.12.03 loading behavior.
+* Made frontend helper registration consume canonical registry asset/dependency/footer metadata and added the previously separately force-blocked WooCommerce variable-product guard to the same runtime inventory.
+* Kept module activation conditions, Auto Release behavior, production telemetry, frontend request count, and all Varnish/ESI/media/cache/multilingual behavior unchanged; the eleven current NATIVE module assignments remain explicit architecture debt for the later self-cost audit.
+
+= 3.12.03 =
+* Added a Central Script Router as the single registered-script classification authority for NATIVE / DEFER / DELAY lane selection.
+* Refactored the script_loader_tag path into route classification plus route application so transformations no longer own a second scheduling decision tree.
+* Preserved existing 3.12.02 scheduling behavior and the nine explicit policy-debt items while labeling legacy consent/helper/group decisions inside the router for later removal or re-homing.
+* Kept async execution as a transport inside the NATIVE lane, added no production telemetry or frontend requests, and left the existing Auto Release behavior unchanged.
+
+= 3.12.02 =
+* Added the development-only JavaScript Policy Contract defining NATIVE / DEFER / DELAY as the only execution lanes and visible Defer Instead of Delay / Do Not Defer or Delay lists as the scheduling authority.
+* Defined the only allowed non-list bypass categories as HTML/JavaScript semantics, explicit author opt-outs, and explicit integration switches; generic vendor/plugin identity and UltraCache ownership alone are not valid hidden scheduling policy.
+* Added an explicit nine-entry JavaScript policy-debt manifest that freezes the known 3.12.01 hidden scheduling rules so subsequent 3.12 releases can only remove or re-home them without silently adding new debt.
+* Froze the existing Auto Release behavior as an architecture contract; the future Minimum Delay Release setting must be additive and must not modify Auto Release UI, defaults, migration, timer, or trigger semantics.
+* No production frontend scheduling behavior changed in this release.
+
+= 3.12.01 =
+* Started the 3.12 JavaScript architecture reset baseline. Version boundary only; frontend scheduling behavior remains unchanged from 3.11.29 so subsequent policy/router changes can be measured independently from the retained Varnish, ESI, media, cache, and multilingual fixes.
+
+= 3.11.29 =
+* Removed stale blanket native-execution exclusions for Elementor webpack/frontend handles from non-critical first-party Delay classification. Elementor protection now follows the existing per-page compatibility resolver instead of an unconditional fallback list.
+* Removed the blanket WooCommerce plugin/assets path exclusion from non-critical first-party Delay classification. Variable-product interaction-critical scripts remain protected by the dedicated runtime resolver, while ordinary WooCommerce frontend assets can reach normal Delay classification.
+* Preserved existing dependency, inline-companion, explicit user exclusion, Contact Form 7, and author-arc safeguards. Added a source-contract regression preventing blanket Elementor/WooCommerce protections from being reintroduced below the adaptive guards.
+
+= 3.11.28 =
+* Kept the parser-early dynamic tracker gate configuration CMP-proof by moving tracker pattern data out of companion inline JavaScript and onto the external bootstrap as opaque base64url data.
+* Preserved the 3.11.27 dynamic tracker injection gate and early-interaction capture behavior while preventing consent plugins from disarming its configuration as marketing code.
+
+= 3.11.27 =
+* Fixed dynamically injected analytics/marketing scripts escaping Delay JS from native consent control-plane blocks.
+* Extended the existing parser-early Delay bootstrap with a dynamic tracker insertion gate tied to the active safe third-party Delay patterns, avoiding an extra blocking request.
+* Released queued dynamic trackers only at the normal full third-party Delay boundary; interaction-only release remains unchanged.
+
+= 3.11.26 =
+* Added a development-only forced-reflow source mapper that extracts Lighthouse reflow/layout source locations and maps document `(index):line:column` references back to the exact inline `<script>` block in the saved served HTML.
+* Added source attribution output with inline script line range, script id/handle-style identifier, bounded code snippet, duration when Lighthouse exposes it, and evidence/confidence-based ownership instead of inferring plugin/theme responsibility from a line number alone.
+* Added explicit handling for one-based DevTools display lines versus zero-based protocol locations and kept external-script sources separate from inline-document ownership.
+* Added regression coverage for reflow-audit filtering, duration ranking, document-vs-external source separation, WooCommerce inline attribution, unknown-owner preservation, and zero-based line fallback. Production frontend behavior remains unchanged from 3.11.25.
+
+= 3.11.25 =
+* Audited UltraCache frontend helper loading requirements and kept parser-early execution only for helpers that must install interception/error/stylesheet hooks before dependent frontend activity.
+* Moved the full `delayed-js-loader.js` off the parser-blocking path and onto native `defer`. Added a small parser-early `delayed-js-interaction-bootstrap.js` only when interaction auto-triggers are configured, preserving early mouse/touch/pointer/keyboard/click capture until the full loader initializes.
+* Preserved the existing interaction-release contract by handing the strongest captured early interaction into the normal first-party/functional-third-party release and replay state machine. The bootstrap never cancels or stops the visitor's original event.
+* Added an explicit frontend-helper native-defer whitelist so the full Delay JS loader, lazy third-party iframe runtime, and full LCP observer use native `defer`, while MailerLite nonce interception, async CSS activation, runtime scan collection, font/CSS interception, cart-fragment interception, LCP request-credentials bootstrap, and the new Delay JS interaction bootstrap remain parser-early where required.
+* Added regression coverage for helper loading policy, conditional bootstrap enqueueing, interaction priority/target preservation, listener handoff, and the native-deferred full loader.
+
+= 3.11.24 =
+* Split LCP frontend discovery into a minimal parser-early request-credentials bootstrap and a native-deferred full observer. The early bootstrap is loaded only while request-credentials learning is enabled; normal LCP discovery no longer blocks HTML parsing.
+* Preserved early runtime image credential-mode learning by buffering `img.src`/`setAttribute("src")` assignments in the bootstrap and handing that map to the deferred LCP observer.
+* Kept LCP discovery correctness through `PerformanceObserver` buffered entries, so observations that occur before deferred execution remain available to the full observer.
+* Added explicit UltraCache helper classification for the bootstrap and kept the full observer protected from Delay JS while forcing native `defer`.
+
+= 3.11.23 =
+* Added a development-only visual-initialization decision gate that consumes the 3.11.22 DOM/runtime audit and ranks delayed execution windows by source-proven DOM growth, visual-runtime identity, release lane, and execution duration.
+* Added synchronous DOM-operation stack attribution to the decision output so Swiper/Slider Revolution/Elementor-style mutation candidates can be tied to the code path that actually created them before any scheduler or CSS change is made.
+* Added an explicit no-speculation boundary: when the audit does not prove a visual-init culprit, UltraCache does not introduce generic slider/Elementor release exclusions or layout workarounds. Production frontend behavior remains unchanged from 3.11.22.
+* Added regression coverage for the attribution evidence gate, visual-runtime ranking, exact DOM deltas, and rejection of small non-visual activity as justification for a production fix.
+
+= 3.11.22 =
+* Added a development-only DOM/runtime attribution audit for post-LCP/Speed Index investigations without changing frontend optimization behavior.
+* Added delayed-script replacement attribution with handle, source, delay reason, inferred release lane, and DOM/Swiper/Slider counters at the replacement boundary.
+* Added mutation-batch and synchronous DOM-operation evidence grouped by JavaScript call-stack source so large DOM growth can be assigned to the actual frontend code path instead of inferred from final DOM size.
+* Added explicit instrumentation guidance: attribution runs add overhead and must not be used as Lighthouse score runs.
+
+= 3.11.21 =
+* Added development-only controlled A/B measurement tooling for Lighthouse JSON exports and browser runtime snapshots without changing frontend optimization behavior.
+* Added a Lighthouse comparator that reports Performance, FCP, LCP, TBT, CLS, Speed Index, DOM size, Google Tag Manager transfer/main-thread cost, and key diagnostic deltas across named runs.
+* Added a browser probe for delayed-script classification/release evidence, UltraCache loader markers, tracker resource start times, CMP/control-plane resources, DOM size, Swiper duplicate count, and consent/dataLayer state.
+
+= 3.11.20 =
+* Added a Delay JS runtime lane/release-order regression suite that executes the production interaction eligibility predicates and locks first-party/functional-third-party interaction release while analytics/marketing third-party payloads remain in the normal delayed lane.
+* Verified that early interactions cannot directly trigger the full delayed queue, pre-DOM interactions wait for DOMContentLoaded, and a concurrent full trigger is deferred until the restricted interaction release finishes.
+
+= 3.11.19 =
+* Added a comprehensive Delay JS classification regression matrix without changing production behavior. The suite locks consent control-plane runtimes, semantic inline consent directives, executable analytics/marketing payloads, inert CMP placeholders, and explicit optimizer exclusions.
+* Added provider coverage for GTM/gtag/GA4, Google Analytics, Meta Pixel, TikTok, Clarity, Hotjar, Bing UET, and LinkedIn Insight when decorated with CMP metadata.
+* Added sibling-isolation coverage ensuring protected Site Kit/gtag inline consent configuration cannot promote the external provider sibling to the native consent lifecycle.
+* Added MIME and legacy-inline guard coverage so text/plain/application/ld+json placeholders remain non-delayable, ordinary JavaScript stays delayable, and document.write inline scripts remain protected from delayed execution.
+
+= 3.11.18 =
+* Separated generic CMP metadata from explicit JavaScript optimizer opt-outs. Executable scripts carrying data-consent-* categorization/purpose metadata no longer become group-wide native exclusions solely because a CMP decorated the tag.
+* Preserved explicit interoperability exclusions including data-no-defer, data-noptimize, data-no-optimize, data-skip-moving, consent-skip-blocker/data-consent-skip-blocker, Cloudflare data-cfasync="false", and the existing supported optimizer skip markers.
+* Preserved CMP-disarmed placeholders such as type="text/plain" as non-delayable through the existing JavaScript MIME gate, keeping consent-blocked payloads untouched while allowing executable analytics/marketing siblings to remain delayable.
+* Added regression coverage for generic consent metadata, explicit optimizer opt-outs, and inert text/plain placeholders.
+
+= 3.11.17 =
+* Narrowed consent control-plane protection for external JavaScript to script handle and source URL identity. CMP-added classes and data attributes on executable analytics/marketing payload tags no longer promote those payloads to the native consent lifecycle.
+* Preserved native consent handling for recognized CMP runtimes, WP Consent API, Site Kit consent synchronization, and semantic inline consent default/update directives.
+* Added a consent control-plane scope regression suite covering protected runtimes, inline consent directives, and CMP-decorated executable GTM/gtag/Meta payloads that must remain independently delayable.
+
+= 3.11.16 =
+* Fixed Apache Static HTML Delivery enablement on Apache origins behind Varnish. The settings validator now trusts the existing local server detection (`SERVER_SOFTWARE` via the setup server capability detector) when it identifies Apache, so a public capability probe obscured by Varnish cannot reject the wizard save with `ultracache_apache_static_unverified`.
+* Preserved the real `.htaccess` write/sync failure handling: Apache Static still fails the settings transaction if its rules cannot actually be written, while public-path observability is no longer used to override a locally detected Apache origin.
+* Extended the production-load regression contract to prevent a detected Apache origin from being rejected by the public probe gate.
+
+= 3.11.15 =
+* Fixed WordPress Plugin Check errors in packaged regression harnesses: added direct-access guards, WordPress-escaped dynamic test output, removed direct fwrite usage, and updated their documented invocation to run inside WordPress context.
+* Corrected readme.txt Stable tag to match the plugin version.
+* Removed frontend direct custom-table queries from the media URL resolver. Terminal upload/local-asset lookups now go through the media queue repository helpers with request-level memoization, preserving the 3.11.07 no-filesystem terminal fast path without embedding database access in the URL-rewrite trait.
+* Removed the runtime scanner's post__not_in query parameter. The scanner now requests enough random published-page candidates to cover the small exclusion set and filters excluded IDs in PHP, preserving target selection without an exclusionary WP_Query predicate.
+* Extended the production-load regression suite to lock the frontend DB-repository boundary and the no-post__not_in scanner query contract.
+
+= 3.11.14 =
+* Added the final combined production-load regression suite for the completed-media/crawler-storm contract, covering terminal media fast paths, non-actionable indeterminate lookups, actionable-only worker dispatch, explicit-only repair, bounded/canonical affected-page discovery, CSS cache-first reads, and runtime schema readiness.
+* Removed remaining current-schema SHOW TABLES checks from Analytics and LCP runtime ensures. Current stored DB versions are now authoritative on normal runtime paths; structural existence verification remains available through explicit forced lifecycle/failure-recovery calls.
+* Applied the same version-trusting runtime readiness contract to action-job storage and the cron warm queue. Warm status/read paths no longer perform SHOW TABLES when the stored queue schema version is current.
+* Updated the centralized schema lifecycle to force structural verification for Analytics, action jobs, the cron warm queue, and LCP observations, preserving activation/upgrade verification without charging normal frontend traffic.
+* Final 3.11.x regression result: media state machine 11/11, Retry Failed Media 8/8, production-load contract 14/14.
+
+= 3.11.13 =
+* Added a dedicated Retry Failed Media regression suite that locks the explicit FAILED-only retry contract across parent queue rows, physical units, worker dispatch, status semantics, and the Media Optimization UI.
+* Validated and preserved the always-visible Retry failed media control: it remains disabled when no failed work is retryable and displays the persistent `Failed media: N` count beneath the action.
+* Wired the dashboard enable/disable decision to the backend `retryable` status contract when available, with the failed-parent count retained as a compatibility fallback. `recoverableInterrupted` remains a separate worker-recovery diagnostic and cannot enable Retry failed media.
+* Confirmed Retry failed media dispatches background generation only when failed parent rows or failed physical units were actually reset to PENDING; PROCESSING rows/units remain untouched.
+
+= 3.11.12 =
+* Added a persistent media state-machine regression suite covering terminal DONE/FAILED/PROCESSING behavior, actionable dispatch gating, indeterminate lookup handling, crawler-repeat invariants, logical affected-page normalization, local-asset terminal handling, on-demand work budgeting, and zero-introspection runtime schema readiness.
+* Removed the remaining automatic completed-media repair from normal queue fetch/worker flow. Storage-health `needsRepair` now reports `explicit_repair_required`; DONE/SKIPPED rows are not silently reset to PENDING by routine queue processing.
+* Hardened generic non-forced media upserts so FAILED remains terminal until explicit Retry Failed and PROCESSING remains worker-owned, including callers outside the frontend on-demand path.
+* Kept explicit rebuild/repair mechanisms available while preventing normal runtime traffic or worker polling from becoming an implicit completed-media repair trigger.
+
+= 3.11.11 =
+* Added a centralized schema lifecycle for UltraCache-owned runtime-critical tables. Activation and schema-contract upgrades now run media queue/units, affected-page refs, cache-asset refs, CSS rewrite-map, action-jobs, warm-queue, analytics, and LCP schema ensures under one shared lifecycle owner instead of allowing overlapping component migrations.
+* Added the token-owned `ultracache_schema_upgrade_v1` database lock. The shared locks table bootstraps through its existing narrow option lock first; only the global schema-lock owner may proceed into later dbDelta/ALTER-capable lifecycle work.
+* Added a tiny autoloaded schema-lifecycle contract marker so normal plugin releases do not re-verify every table or add a standalone frontend option query. A lifecycle run occurs only when the schema contract is bumped, on explicit repair, or on activation; concurrent upgrade requests wait for the single lock owner and do not perform duplicate schema work.
+* Added an explicit centralized schema-repair entry point and retained the 3.11.08/3.11.09 rule that normal frontend runtime with a completed schema contract performs no schema introspection.
+
+= 3.11.10 =
+* Reordered runtime CSS rewrite-map reads so object/request cache lookup happens before schema readiness checks. Cached positive and negative source/generated URL lookups now return without touching schema state or SQL.
+* Added explicit cache-hit detection for CSS rewrite-map entries, preserving negative-cache hits stored as empty arrays and preventing repeated authoritative SELECTs for known misses within the cache lifetime.
+* Kept the UltraCache-owned rewrite-map table authoritative on cache miss: only a real miss reaches the existing schema-version readiness gate and indexed source/generated URL SELECT.
+* Preserved all write/deactivation cache invalidation behavior and the 3.11.08 zero-introspection runtime schema policy; no schema or DB version change is introduced in this release.
+
+= 3.11.09 =
+* Added request-level schema verification memoization for the runtime-critical media queue, physical media units, affected-page refs, CSS rewrite map, cache-asset refs, and shared UltraCache locks table. Repeated forced/lifecycle checks in one PHP request now reuse the first verified result instead of repeating SHOW TABLES / SHOW COLUMNS / SHOW INDEX.
+* Consolidated index introspection per table: media queue, physical-unit, and media-page-ref verification now issue one SHOW INDEX per table per verification cycle and filter the memoized rows for individual index contracts instead of re-running SHOW INDEX for every index name.
+* Memoized table-existence and required-column capability checks within the request while preserving the 3.11.08 zero-introspection fast path when stored schema versions are current.
+* Added explicit memo invalidation around dbDelta and manual DROP/ADD INDEX repairs so schema migration never reuses pre-mutation verification results.
+* Kept schema verification semantics unchanged: activation/version-mismatch paths may still inspect and repair schema, while normal frontend runtime with current schema versions remains at zero schema-introspection queries.
+
+= 3.11.08 =
+* Eliminated repeated media/CSS runtime schema introspection when UltraCache's stored schema version is current. Media queue, physical media units, affected-page refs, CSS rewrite map, cache-asset refs, and the shared locks table now trust their version marker during normal runtime instead of issuing SHOW TABLES / SHOW COLUMNS / SHOW INDEX on hot-path lookups. Direct media queue/unit/page-ref existence helpers likewise trust the current version marker unless explicit schema verification is requested.
+* Kept full schema verification available through an explicit force flag and wired plugin activation to force verification of these runtime-critical tables. Missing/outdated schema versions still enter the existing dbDelta/index-repair path.
+* Preserved all existing schema definitions and DB version numbers; this release changes readiness policy only and does not introduce a database migration.
+* Scope is intentionally limited to runtime introspection elimination. Request-level schema memoization, centralized lifecycle locking, and structural-query failure recovery remain scheduled for subsequent 3.11.x releases.
+
+= 3.11.07 =
+* Added a DB-authoritative completed-media fast path before filesystem/variant freshness checks.
+* Completed upload conversion units now serve their recorded optimized target directly without frontend stat/filemtime/filesize integrity scans.
+* Failed/skipped upload units and completed/failed/skipped local assets are terminal in frontend lookup and do not fall through to on-demand discovery.
+* Added a lightweight URL-only local source identity resolver so terminal local assets can be recognized without touching the source filesystem.
+* Added an indexed upload-unit source path lookup for the frontend fast path.
+
+= 3.11.06 =
+* Hardened the AVIF / WebP Batch Conversion Retry Failed action so it retries terminal failed media only. Parent queue rows and physical media units in `processing` state are no longer reset by this action; interrupted/stale processing recovery remains owned by the existing worker-recovery path.
+* Kept failed media as an explicit terminal state until administrator action: Retry failed media performs `FAILED -> PENDING`, resets retry/failure metadata for those failed rows/units, and dispatches background generation only when failed work was actually reset.
+* Updated media queue status semantics so `retryable` now represents failed parent media only and no longer includes recoverable processing claims. The separate `recoverableInterrupted` diagnostic remains available for worker-recovery visibility.
+* Updated the Media Optimization UI so Retry failed media is always visible, disabled when there are no failed media, and shows a persistent `Failed media: N` count directly beneath the button.
+* Updated Retry Failed action/help copy to stop describing interrupted processing recovery as part of the failed-media action. Existing stale/interrupted worker recovery behavior remains unchanged.
+
+= 3.11.05 =
+* Changed the Media Generate On Demand per-request limit from a successful-enqueue counter into a true attempted-discovery work budget.
+* Every missing/stale candidate now consumes budget before attachment/local-asset resolution, queue-state lookup, dedupe locking or queue mutation.
+* Applied one shared budget at the common media discovery choke point, covering uploads, local theme/plugin assets and Slider Revolution lookups.
+* Removed success-only counter increments and duplicate child-level cap checks so rejected, duplicate, locked, raced and already-known candidates can no longer bypass the request limit.
+* Preserved the existing `ultracache_media_on_demand_queue_max_per_request` setting/filter and its default of 20; its semantics are now explicitly attempted work per request.
+
+= 3.11.04 =
+* Canonicalized media affected-page URLs through the shared UltraCache query-cache policy so arbitrary crawler, tracking, facet, nonce, and other non-cache-significant query arguments collapse to one logical page reference instead of creating unbounded query-string graph variants.
+* Preserved only legitimate page-cache query dimensions: explicitly enabled/allowlisted generic query keys and valid WPML parameter-language values. Canonical key/value sorting uses the same ordering contract as UltraCache page-cache query keys.
+* Applied the same logical-page normalization to direct frontend REQUEST_URI discovery and explicit warm/cron/stale/manual rewrite page contexts, so background and frontend media discovery cannot disagree on the affected-page identity.
+* Kept exact purge targeting for cache-significant query variants while query URLs that UltraCache would not cache as distinct HTML variants map to the queryless logical page.
+* Kept 3.11.03 actionable-only affected-page writes and the per-request write cap unchanged; no arbitrary per-source page cap was added because that could drop legitimate purge relationships for media shared across many real pages.
+
+= 3.11.03 =
+* Hardened on-demand affected-page tracking so completed/failed/skipped media never create speculative pending page references. Existing pending/processing work may still attach the current page for correct purge targeting.
+* Removed pre-enqueue and dedupe-lock-failure page-ref writes from attachment and local-asset frontend discovery. New page refs are now recorded only after a queue upsert actually creates actionable pending work.
+* Added race-aware affected-page attachment: if another request creates pending/processing work between discovery and the protected insert, the losing request may attach its page to that active work without mutating or dispatching the queue.
+* Added a bounded per-request affected-page write budget (`ultracache_media_page_refs_max_per_request`, default 50; hard ceiling 500) to prevent a single request from generating an unbounded number of page/media relation writes. Duplicate relations in the same request remain memoized and do not consume additional budget.
+* Kept 3.11.01 terminal-state protections, `indeterminate` discovery suppression, and 3.11.02 actionable-only worker dispatch unchanged. Query-string/canonical page-key normalization remains scheduled for 3.11.04.
+
+= 3.11.02 =
+* Added explicit media queue upsert effect tracking (`inserted`, `promoted`, `touched`, `preserved`, `failed`) while preserving the existing boolean return contract for compatibility with current callers.
+* Background media dispatch and media work-summary invalidation now occur only when an upsert actually creates actionable pending work. Merely touching, preserving, or observing an existing queue row can no longer schedule a worker.
+* Applied actionable-work dispatch gating to both frontend on-demand attachment/local-asset discovery and the generate-on-upload enqueue path. Existing pending/processing/terminal rows therefore do not cause redundant worker dispatch from these paths.
+* Kept 3.11.01 terminal-state/race protections intact: frontend on-demand inserts still preserve any row created concurrently, and `indeterminate` media freshness remains non-discoverable.
+* Scope remains limited to queue-result/dispatch semantics. Affected-page graph mutation/normalization and attempted-work budgeting remain scheduled for subsequent 3.11.x releases.
+
+= 3.11.01 =
+* Hardened frontend Media Generate On Demand queue state so any already-known queue row is authoritative for normal page discovery: pending work is not duplicated, processing work remains worker-owned, and done/skipped/failed media are not resurrected by frontend or crawler traffic. Existing pending/processing work can still receive the current page relationship needed for later purge targeting.
+* Removed forced pending promotion from normal attachment and local-asset on-demand discovery. Frontend inserts now use non-forced queue writes with race protection that refuses to mutate any row created concurrently after the discovery-state lookup. Explicit rebuild/readiness callers that intentionally use forced queue promotion are unchanged in this release.
+* Removed `indeterminate` filesystem freshness from the set of discoverable media work states across generic AVIF/WebP lookup and Slider Revolution inventory. A transient/unknown stat result now remains lookup-only and cannot create conversion work.
+* Removed the memoized-false AVIF/WebP lookup side effect that retried on-demand queue discovery on later lookups in the same request. A lookup now performs discovery at most on its original evaluation path; subsequent memo hits are read-only.
+* Added positive-only per-request memoization of existing on-demand queue states so repeated references to the same already-queued/terminal source do not repeat the queue-row status SELECT. Negative lookups are not cached, preventing a newly inserted row from being hidden inside the same request.
+* Scope is intentionally limited to media queue terminal-state/discovery hardening. Actionable upsert result semantics, affected-page graph normalization, attempted-work budgeting, Retry Failed UI changes, completed-media pre-filesystem fast paths, and runtime schema-introspection elimination remain scheduled for later 3.11.x releases.
+
+= 3.10.16 =
+* Fixed Slider Revolution AVIF/WebP cache-bucket finalization when Warm Cache is launched by a logged-in administrator. The warm runner now marks only its anonymous public-cache bucket finalization as explicit public cache storage, so the runner's authentication state cannot disable SR7 image-list reconciliation.
+* Real logged-in frontend requests, normal cache-output callbacks that are later skipped, runtime scans, and other non-warm media rewrites keep the existing UltraCache logged-in frontend bypass. The public-cache override is scoped to the warm bucket rewrite and restored immediately afterward.
+* Kept the 3.10.15 SR7 `data-dbsrc` bucket-aware finalizer, shared-source warm rendering, media queue behavior, Slider Revolution JavaScript scheduling, ordered-fetch concurrency 4, delayed loader, Interaction Replay, Consent CSS, WooCommerce ESI, Elementor handling, and generic media rewriting unchanged.
+
+= 3.10.15 =
+* Added bucket-aware Slider Revolution image-list finalization to the final full-document media rewrite. Warm/cache storage may render WordPress once with the `orig` Accept bucket and derive AVIF/WebP HTML buckets from that shared source; SR7 image-list URLs are now reconciled again while UltraCache has the explicit target bucket Accept context.
+* Inside `<image_lists>` only, UltraCache decodes Slider Revolution's base64 `data-dbsrc` canonical original, validates that it resolves to a local image source, and rewrites `data-src` to an already-existing UltraCache AVIF/WebP variant allowed by the target cache bucket. `data-dbsrc` remains unchanged as SR7's canonical identity.
+* Real `data-src2` values continue to be treated independently and are rewritten only when their own existing UltraCache variant is available. UltraCache does not synthesize `data-src2` when Slider Revolution omitted it.
+* Missing variants remain lookup-only during HTML finalization and reuse the existing 3.10.14 Slider inventory/background queue path; the current request never performs synchronous image conversion. If no valid target-bucket variant exists, Slider Revolution's existing `data-src`/`data-src2` fallback remains untouched.
+* Kept shared-source warm rendering, cache bucket generation, Slider Revolution JavaScript scheduling, ordered-fetch concurrency 4, delayed loader, Interaction Replay, Consent CSS, WooCommerce ESI, Elementor handling, and generic media rewriting unchanged.
+
+= 3.10.14 =
+* Extended the Slider Revolution media adapter so canonical `orig` images discovered through `sr_get_image_lists` are inventoried into UltraCache's existing background media conversion queue when the Fix sliders / hero sections switch and Media Optimization are enabled. The current page render remains lookup-only and never performs synchronous conversion.
+* Slider inventory reuses the existing `best` media queue policy rather than creating a Slider-specific queue. One queued attachment therefore generates the site's configured media outputs (AVIF plus optional WebP fallback, or WebP-only) through the normal conversion workers, affected-page tracking, and purge flow.
+* Existing UltraCache variants still win immediately. When a canonical Slider source has no current variant, Slider Revolution's current optimized `src` remains in the HTML for that request while missing work is queued in the background; a later regenerated/purged page can then consume the new UltraCache AVIF/WebP through the 3.10.13 adapter.
+* Real `src2` Retina/high-DPI sources are inventoried independently only when Slider Revolution supplied a distinct source. UltraCache still does not synthesize `src2` when it is absent.
+* Inventory obeys the existing media background/on-demand enablement, output-format policy, request-context checks, queue dedupe, and the existing on-demand discovery cap (`ULTRACACHE_MEDIA_ON_DEMAND_QUEUE_MAX_PER_REQUEST`, default 20). No new queue tunable, frontend image generator, or synchronous conversion path was added.
+* Kept 3.10.12 JavaScript scheduling, ordered-fetch concurrency 4, delayed loader, Interaction Replay, Consent CSS, WooCommerce ESI, Elementor handling, generic media HTML rewrite, and Slider Revolution runtime scheduling unchanged.
+
+= 3.10.13 =
+* Added a dedicated Slider Revolution media adapter on the plugin's canonical `sr_get_image_lists` filter at priority 20, after Slider Revolution's own optimizer runs at priority 10. The adapter is active only when Media Optimization and the existing Fix sliders / hero sections (`slider_safe_mode`) switch are both enabled.
+* The adapter keeps Slider Revolution's `orig` value unchanged as the canonical identity, prefers an already-existing UltraCache AVIF variant when the current media policy/browser bucket allows it, then an already-existing WebP variant, and otherwise preserves Slider Revolution's current optimized `src`. The lookup is read-only: rendering a slider does not synchronously generate media and does not enqueue a missing variant merely because the image list was rendered.
+* A real Slider Revolution `src2` Retina/high-DPI source is rewritten independently when an existing UltraCache variant is available. UltraCache no longer synthesizes `src2` when Slider Revolution did not provide one; source verification shows SR7 already falls back from `src2` to `src` internally.
+* Removed the older post-render `<image_lists>` reconciliation pass that mirrored optimized `data-src` into missing `data-src2`. Generic media HTML rewriting remains independent, while SR7-specific canonical-map behavior is now owned by the Fix sliders / hero sections adapter.
+* Exact duplicate Slider Revolution image-list records are de-duplicated only when the complete post-rewrite record is identical. Entries with different `orig`, `src2`, library IDs, alt/title data, or other metadata remain separate.
+* Kept 3.10.12 JavaScript scheduling unchanged: Slider Revolution core runtimes remain eligible for Delay JS, ordered-fetch concurrency remains 4, and the delayed loader, Interaction Replay, Consent CSS, WooCommerce ESI, Elementor handling, and LCP scheduling are unchanged.
+
+= 3.10.12 =
+* Reverted the 3.10.11 Slider Revolution/SR7 core-runtime Delay exclusion. `revbuilder-backend`, `tp-tools`, and `sr7` are again eligible for the same Delay JS scheduling policy used in 3.10.10 instead of being forced onto the native-defer/DCL-blocking path.
+* Regression reason: HAR comparison showed that the 3.10.11 native-defer policy did not eliminate duplicate RevSlider image acquisition, while on a stalled persistent first-party HTTP/2 connection it amplified transport delay into 17-20 second DOMContentLoaded times and severe visual instability.
+* Scope: exact functional rollback only. Media Replacement (`data-src`/`data-src2`), delayed-js-loader, Interaction Replay, Consent CSS Auto, WooCommerce ESI, Elementor handling, and ordered fetch concurrency remain unchanged.
+
+= 3.10.11 =
+* Added an automatic Slider Revolution / SR7 core hydration-order protection after HAR evidence showed the native SR7 inline bootstrap running during parsing while the three core external runtimes (`revbuilder-backend` / `tools.js`, `tp-tools` / `tptools.js`, and `sr7` / `sr7.js`) were rewritten to `text/ultracache-delayed-js`. That split can make the initial SR7 image/bootstrap phase visibly separate from the final runtime hydration phase, presenting as the slider loading twice on slow or highly throttled runs.
+* The three stable SR7 core runtime handles/files are now excluded from Delay JS. They remain eligible for UltraCache's normal native Defer handling, which preserves parser completion and document-order execution without placing them in the delayed interaction/timer queue. The protection also recognizes the same core file paths when RevSlider assets are served through another host/CDN.
+* Optional Revolution Slider addons are intentionally not blanket-protected; only `/admin/assets/js/tools/tools.js`, `/public/js/libs/tptools.js`, and `/public/js/sr7.js` (or their observed core handles) are covered. This keeps the compatibility change narrow and avoids restoring all RevSlider payload to the initial execution budget.
+* Source verification corrected the earlier data-src/data-src2 hypothesis: SR7's inline bootstrap selects `data-src2` whenever `devicePixelRatio` is truthy and can fall back to the original encoded source when it is absent, so 3.10.11 deliberately does not remove or collapse mirrored `data-src2` values. The existing media-replacement Retina compatibility map is unchanged.
+* Benchmark target: verify visually that the hero/slider no longer presents two separated load phases, and confirm in served HTML that the three SR7 core runtimes are no longer `text/ultracache-delayed-js`. HAR may still show SR7-owned repeated image acquisition under disabled-cache Lighthouse conditions; this release targets the UltraCache-created hydration timing split, not Slider Revolution's internal image cache implementation.
+* Kept ordered-fetch concurrency at 4 for the remaining eligible delayed scripts, interaction release/replay, delayed-loader reflow cleanup, Consent CSS static/Auto behavior, WooCommerce ESI conditional runtime logic, Elementor compatibility, and LiteSpeed/Varnish ESI behavior unchanged.
+
+= 3.10.10 =
+* Added an opt-in **Auto-detect static Consent CSS** mode alongside the existing manual Async Consent Banner CSS switch. Manual mode keeps its existing semantics and takes precedence when both settings are enabled.
+* Auto mode runs only in the final HTML stylesheet pass and recognizes the same explicit static CMP fingerprints already used by the manual policy: Complianz, CookieYes, Cookiebot, Real Cookie Banner, and OneTrust. Late-injected CMP stylesheets remain untouched; no consent-specific MutationObserver or dynamic runtime interception was reintroduced.
+* Auto-only mode is zero-cost on the frontend when no recognized static CMP stylesheet is rewritten: `async-css-runtime.js` is not pre-enqueued merely because Auto mode is enabled. If a recognized static CMP link survives the existing local/external exclusion lists and is actually converted to UltraCache-managed `media=print`, the existing generic `async-css-runtime.js` is printed exactly once through WordPress script APIs near the end of the finalized document so it can activate that rewritten stylesheet. If another Async CSS feature already printed the generic runtime, Auto mode emits no duplicate asset.
+* The existing manual Async Consent Banner CSS path remains unchanged: enabling it still keeps the generic Async CSS runtime ready through the normal head enqueue path and uses the same CMP fingerprints/exclusion precedence as before.
+* Benchmark/tuning note: 3.10.10 introduces no new JavaScript asset and does not change `assets/js/async-css-runtime.js`. On typewritink.com the observed Complianz banner stylesheet is runtime-injected rather than static final-HTML CSS, so Auto mode is expected to produce no consent rewrite and no additional runtime request there. Verify Auto primarily by served HTML/HAR marker presence rather than Lighthouse score.
+* Kept ordered-fetch concurrency at 4, interaction release/replay, delayed-loader reflow cleanup, WooCommerce ESI conditional runtime behavior, JavaScript Delay/Defer classification, Elementor compatibility, and LiteSpeed/Varnish ESI logic unchanged.
+
+= 3.10.09 =
+* Made the Varnish WooCommerce browser opt-in helper conditional on finalized HTML. `woocommerce-esi-optin.js` is no longer enqueued preemptively on every frontend request where the verified Woo ESI contract is available.
+* Final-buffer detection now checks only the two stable markers already understood by the helper itself: `data-ultracache-esi-adapter="woocommerce-classic-mini-cart"` and `data-ultracache-esi-auto="woocommerce-mini-cart"`. Theme-specific selectors, WooCommerce page conditionals, and heuristic DOM guesses are intentionally not used.
+* When one of those markers is present, the same helper asset is rendered exactly once immediately before `</body>` after the normal JavaScript Delay/Defer rewrite phase, using the existing WordPress script registration/enqueue/print APIs rather than a raw hard-coded script tag. When no marker is present, no Woo ESI opt-in asset or config is emitted. Existing `ultracache_esi_optin=1` cookie semantics and helper logic are unchanged.
+* Kept WooCommerce mini-cart fragment rendering, Varnish ESI placeholder conversion, cart-fragments restoration, LiteSpeed ESI behavior, ordered-fetch concurrency (4), interaction release/replay, and all JavaScript Delay/Defer classification unchanged.
+* Benchmark target: the 3.10.08 typewritink.com no-interaction Lighthouse/HAR set still loaded `woocommerce-esi-optin.js` (~0.64 KiB) on the tested page. 3.10.09 removes that request whenever finalized HTML has no recognized Woo ESI mini-cart marker; verify by HAR rather than score alone.
+
+= 3.10.08 =
+* Reworked delayed-JavaScript interaction release so an interaction no longer calls the global `triggerAll()` path by default. The interaction lane now releases pending first-party scripts plus scripts explicitly classified as `functional-third-party`, while `safe-third-party` / analytics / marketing scripts stay delayed until the normal timer/after-load/full trigger runs.
+* Added best-effort interaction replay after the interaction lane finishes. The strongest pending event wins (`click` > `keydown` > `pointerdown` > `touchstart` > `mousemove`), so pointer/touch precursors can be superseded by the later actionable click while scripts are still loading.
+* Preserved the 3.06.26 parser-race safeguard: interactions received while `document.readyState === loading` are latched until `DOMContentLoaded`, preventing a partial-DOM delayed-script snapshot. A full timer/after-load trigger that fires while the interaction lane is active is queued and resumes after the targeted lane completes.
+* Replay is additive: UltraCache does not cancel or stop the original trusted browser event. The synthetic replay suppresses its own native default action so replay cannot intentionally perform a second navigation, form submission, control toggle, or keystroke; it exists only as a second chance for JavaScript handlers installed after the original interaction.
+* If the normal full delayed queue has already started when the user interacts, UltraCache waits for that existing full run to complete and replays once instead of starting a competing interaction lane.
+* Added runtime markers for interaction release scope/count, in-progress/pending-full state, replay pending/result, and whether the replay waited for the existing full run.
+* Benchmark/tuning note: the interaction release scope is intentionally fixed in 3.10.08 to `firstparty-functional-thirdparty`; there is no UI switch yet. `orderedFetchConcurrency` remains 4, the per-script timeout remains 8000 ms, and no Delay/Defer classification, Elementor protection, consent CSS, WooCommerce ESI, or non-interaction auto-start timing was changed.
+* Loader-size benchmark note: the unminified `delayed-js-loader.js` source grows from 32,665 bytes in 3.10.07 to 38,918 bytes in 3.10.08 (+6,253 bytes; approximately +1.2 KiB with gzip-9 in the local package check). Keep this explicit for the final regression-consolidation pass; if Lighthouse shows parser/transfer cost without interaction, compact the replay helper before changing its semantics.
+
+= 3.10.07 =
+* Reworked the Elementor lazy-background helper in `delayed-js-loader.js` to remove the repeated `getBoundingClientRect()` -> class write -> next `getBoundingClientRect()` layout-thrashing loop observed in Lighthouse forced-reflow diagnostics.
+* Modern browsers now use `IntersectionObserver` for non-immediate Elementor lazy-background candidates. The observer keeps the previous proximity window exactly: one viewport above through one viewport below the visible viewport (equivalent to the former `rect.bottom > -viewportHeight` and `rect.top < viewportHeight * 2` test).
+* Kept the existing scan cap at 80 `.e-con.e-parent` elements and the existing first-three-parent immediate reveal rule unchanged. Repeated DOM-ready/load/scroll/resize/orientation/touch/pointer helper scheduling is also unchanged.
+* Legacy browsers without `IntersectionObserver` keep the previous geometry criteria, but the fallback now batches every `getBoundingClientRect()` read before applying any `e-lazyloaded` class writes, preventing read/write interleaving inside the scan.
+* Added runtime markers for observer-tracked candidates, observer reveals, and legacy fallback geometry reads so Lighthouse/HAR/DOM diagnostics can verify which reflow path was used.
+* Benchmark target note: the 3.10.06 third Lighthouse run attributed 20 ms of forced reflow to `delayed-js-loader.js:1073`; 3.10.07 changes only this Elementor lazy-background geometry path. Ordered-fetch concurrency remains 4, and Delay/Defer execution order, interaction release timing, consent CSS, Elementor script protection, and WooCommerce ESI are unchanged.
+
+= 3.10.06 =
+* Converted **Async Consent Banner CSS** to a static-final-HTML-only optimization. Recognized CMP stylesheet links are still rewritten server-side before the response reaches the browser, but late-injected CMP stylesheets are now left entirely under the CMP's native runtime timing.
+* Removed `assets/js/async-consent-css-runtime.js`, its `UltraCacheAsyncConsentCssRuntimeConfig` payload, and the consent-specific MutationObserver path. The generic `async-css-runtime.js` remains responsible only for activating UltraCache-managed server-rewritten `media=print` stylesheet links after those stylesheets load.
+* Kept the explicit CMP fingerprints unchanged: Complianz, CookieYes, Cookiebot, Real Cookie Banner, and OneTrust. Existing local/external Async CSS exclusion lists still take precedence over the static consent-CSS rewrite.
+* 3.10.05 benchmark note: with Async Consent Banner CSS genuinely ON, two Lighthouse runs scored 94/94 (FCP 0.6/0.7 s, LCP 0.9/1.0 s, SI 2.3/2.2 s, TBT 0, CLS 0). HAR inspection showed the dedicated dynamic consent runtime added an approximately 177-205 ms parser-blocking script request while Complianz `banner-1-optin.css` still began at VeryHigh request priority before the MutationObserver could alter the inserted link. This is why the dynamic path was removed rather than tuned further.
+* Kept ordered-fetch concurrency at 4 and left JavaScript Delay/Defer scheduling, parallel-execution switches, Elementor protection, WooCommerce ESI, and script execution order unchanged.
+
+= 3.10.05 =
+* Fixed the Async Consent Banner CSS settings persistence bug: `asyncConsentCssEnabled` is now part of the REST settings-update schema, so the dashboard ON/OFF state survives the save/read-back cycle instead of immediately reverting to OFF.
+* Restored `assets/js/async-css-runtime.js` byte-for-byte to the 3.10.03 runtime. When Async Consent Banner CSS is OFF, UltraCache no longer prints consent-pattern configuration or executes consent-specific scanning code in the generic Async CSS runtime.
+* Moved late-injected CMP stylesheet handling into a dedicated `assets/js/async-consent-css-runtime.js` asset that is enqueued only when Async Consent Banner CSS is ON. Its configuration object (`UltraCacheAsyncConsentCssRuntimeConfig`) is also emitted only in the ON state.
+* Kept the 3.10.04 CMP fingerprints and local/external exclusion precedence unchanged for the ON experiment; static final-HTML CMP stylesheet rewriting remains server-side and late-injected recognized CMP stylesheets remain runtime-managed only while the switch is enabled.
+* Benchmark/A-B note: the 3.10.04 Lighthouse runs were captured with the switch effectively OFF because of the REST persistence bug, so they do not measure Async Consent Banner CSS itself. 3.10.05 establishes an explicit zero-cost-OFF boundary for a valid OFF-vs-ON comparison.
+* Kept ordered-fetch concurrency at 4 and left JavaScript Delay/Defer scheduling, parallel-execution switches, Elementor protection, WooCommerce ESI, and script execution order unchanged.
+
+= 3.10.04 =
+* Added a dedicated **Async Consent Banner CSS** switch, disabled by default, so CMP/banner CSS can be benchmarked independently from generic Async Remaining CSS, Aggressive Async CSS, and Async external CSS.
+* When enabled, recognized CMP stylesheet links are rewritten to UltraCache non-blocking `media=print` delivery and restored to their original target media after load; static final-HTML rewrites keep the existing noscript stylesheet fallback.
+* Added the same CMP policy to `async-css-runtime.js` so consent stylesheets inserted after the original HTML are also converted before the next rendering opportunity instead of escaping the server-side final-HTML pass.
+* Initial explicit CMP fingerprints: Complianz (`/wp-content/uploads/complianz/`, `/complianz-gdpr/`, `/complianz/`), CookieYes (`/cookie-law-info/`, `/cookieyes/`, `/cookie-law-info-public/`), Cookiebot (`consent.cookiebot.com`, `/cookiebot/`, `/cookiebot-cmp/`), Real Cookie Banner (`/real-cookie-banner/`, `/devowl-wp/`), and OneTrust (`cdn.cookielaw.org`, `optanon.blob.core.windows.net`, `/onetrust/`, `/optanon/`). Unknown CMPs are intentionally not changed.
+* The dedicated consent-CSS path still honors the existing local Async CSS Exclude List and external CSS exclude list; it does not override explicit user exclusions.
+* Benchmark note: 3.10.04 intentionally adds no synthetic hide/show rule or generic critical consent-banner CSS shell. The first A/B measures only blocking-vs-async delivery; if a specific verified CMP shows FOUC/CLS, a vendor-specific minimal shell can be added and measured separately.
+* Kept the 3.10.03 ordered-fetch concurrency at 4 and left all JavaScript Delay/Defer scheduling, parallel-execution switches, Elementor protection, WooCommerce ESI, and script execution order unchanged.
+
+= 3.10.03 =
+* Added a bounded network-prefetch lane for delayed same-origin external classic JavaScript: UltraCache now starts up to 4 script downloads concurrently while keeping the existing first-party execution sequence strictly ordered.
+* The new fetch scheduler is active only when First-party parallel execution is OFF; it does not change or enable the existing First-party/Third-party parallel execution modes. Inline scripts, third-party scripts, module scripts, duplicate URLs, and non-delayable records are not added to this prefetch lane.
+* Benchmark tuning note: `orderedFetchConcurrency` is currently set to 4 and clamped to a maximum of 8. This value is intentionally explicit and has no UI switch yet so later Lighthouse A/B tests can compare values such as 2, 4, and 6 without mixing execution-model changes.
+* Added runtime markers for ordered-fetch configured/enabled state, concurrency, queued/skipped resources, active fetches, completed fetches, and failed preloads so slow-run HAR/DOM captures can verify whether network overlap actually occurred.
+* Kept delayed-script execution order, pre-dependency inline execution, jQuery ready holding/flushing, the 8000 ms per-script execution timeout, and all existing Delay/Defer classification logic unchanged.
+
+= 3.10.02 =
+* Narrowed Elementor DCL protection so interaction evidence inside shared bootstrap files is scoped to each element_ready hook's local source segment instead of promoting every registered widget because unrelated code elsewhere in the file binds an input event.
+* Protected Elementor bootstrap handles only when widget-specific handler/chunk analysis proves that the mapped widget itself binds immediate interaction; direct declared widget dependencies remain protected when their own source proves immediate input handling.
+* Revved the versioned Elementor compatibility knowledge policy so stale broad positive classifications from the previous heuristic are discarded automatically.
+
+= 3.10.01 =
+* Isolated consent control-plane protection per script so inline consent declarations no longer promote an entire WordPress script group out of Delay JS.
+* Kept recognized external consent lifecycle runtimes ordered with native defer instead of parser-blocking execution.
+* Preserved GTM, gtag and analytics/provider siblings as independently delayable when they merely share a handle group with protected consent code.
+
+= 3.09.04 =
+* Added universal script optimizer opt-out handling for established no-defer/no-move/no-optimize/consent attributes across Delay and Defer paths.
+* Added native lifecycle protection for recognized CMPs, WP Consent API, Google Consent Mode directives, and Real Cookie Banner control-plane scripts.
+* Removed broad gtag/dataLayer bootstrap fragments and CMPs from default Delay JS pattern lists, with automatic migration for untouched legacy defaults.
+* Removed Complianz, Sourcebuster, and WooCommerce order-attribution markers from unconditional non-critical delay classification.
+* Protected whole WordPress script groups when a companion script opts out of optimization or owns consent lifecycle state.
+* Expanded JavaScript diagnostics awareness for Real Cookie Banner and WP Consent API.
+
+= 3.09.03 =
+* Protected Google Site Kit's `googlesitekit-consent-mode` lifecycle synchronizer from UltraCache interaction/timer Delay JS, including Delay All and same-group inline companions, so its one-shot DOMContentLoaded consent-state synchronization is not missed.
+* Kept Google Tag Manager, gtag.js, WooCommerce Google Analytics, and unrelated Google Site Kit assets eligible for the configured Delay/Defer strategy; the fix is intentionally limited to the consent lifecycle script that requires native document timing.
+* Prevented generic `google-site-kit/dist/assets/js` and `dataLayer` safe-third-party patterns from overriding this lifecycle protection while preserving existing user exclusions and dependency handling.
+
+= 3.09.02 =
+* Setup Wizard now performs a cache-layer preflight before applying settings and names active conflicting Page Cache/Object Cache plugins that must be deactivated first.
+* Added a shared capability-aware cache plugin registry covering major Page Cache, Object Cache, dual-cache, network-active, MU-plugin, and hosting-integration fingerprints; optimization-only plugins such as Autoptimize are no longer treated as hard cache conflicts.
+* Added the Wizard-only “Do not manage Object Cache with UltraCache” choice; selecting it leaves foreign object-cache.php implementations untouched and disables only UltraCache Object Cache ownership when necessary.
+* When no active competing owner exists, stale foreign advanced-cache.php and object-cache.php leftovers are removed silently before UltraCache takes ownership; real delete/write/verification failures still stop setup with the actual error.
+* Page Cache enablement now silently normalizes literal external WP_CACHE declarations, including duplicate/conflicting true/false declarations, inside the existing verified wp-config.php transaction; non-standard/dynamic WP_CACHE expressions remain untouched and return a deterministic error.
+* Fixed duplicate WP_CACHE inventory classification and made advanced-cache.php installation verification fail explicitly instead of reporting success while a foreign or unwritable drop-in remains.
+
+= 3.09.01 =
+* Setup Wizard homepage preparation now uses the exact same multilingual-aware `warmFrontpageHtml()` / `warmFrontpageHtmlCss()` dashboard actions as the manual Warm Homepage controls, including the post-CSS-exclusion rebuild.
+* Local Google Fonts enablement now shares one post-enable rebuild action between the settings control and Setup Wizard; the Wizard waits for the rebuild result instead of only saving the enabled flag.
+* Delay Icon Fonts enablement now shares one front-page detection/population action between the settings control and Setup Wizard; the Wizard persists detected icon-font patterns instead of leaving an enabled feature with an empty list.
+* Added Wizard font-phase warning propagation when Google Fonts rebuild or icon-font discovery cannot complete, without changing the existing Varnish, Object Cache, Runtime Scan, LiteSpeed ESI, or JavaScript Error Fixer flows.
+* Warm Homepage actions now return an explicit success result for orchestration callers while preserving their existing manual dashboard behavior.
+
+= 3.08.17 =
+* Browser Scanner and Setup Wizard now invoke the same exported Runtime Site Scan action instead of entering the low-level self-healing engine through separate orchestration paths.
+* The shared action owns automatic target discovery, per-target baselines, bounded repair cycles, safeguard carry-forward, target failure handling, and multi-target finding aggregation.
+* Browser Scanner remains manual-single-target when Page URL to scan is populated and automatic multi-target when blank; Setup Wizard always invokes the same action in automatic mode.
+* Added a structural regression invariant: the Browser button handler and Wizard JavaScript verification both call `runRuntimeSiteScanAction()`, while only that shared action may call `runRuntimeJsSelfHealingCycles()` for site-scan orchestration.
+* Existing Error Fixers, collector/ownership lifecycle, LiteSpeed/Varnish integrations, ESI behavior, cache logic, and safeguard semantics are unchanged.
+
+= 3.08.16 =
+* Browser Runtime Scan now uses an automatic bounded site target set when Page URL to scan is blank: front page, one random published page, the WooCommerce shop page, and one random published product when available.
+* Entering any Page URL to scan keeps the existing single-page Runtime Scan behavior and scans only that URL.
+* Every automatic target gets its own unoptimized baseline and bounded repair cycles; deterministic safeguards applied on earlier targets carry forward to later targets without resetting existing Error Fixer behavior.
+* WooCommerce targets are resolved dynamically through WordPress/WooCommerce APIs, automatic targets are deduplicated, and unavailable page/shop/product roles are skipped instead of failing the whole site scan.
+* Runtime Site Scan progress identifies the current target, records per-target completion/unresolved/failure state, and aggregates duplicate JavaScript findings with the pages on which each finding was detected.
+* Existing JavaScript Error Fixers, Runtime Scan collector/ownership lifecycle, LiteSpeed/Varnish integrations, ESI behavior, and page-cache logic are unchanged.
+
+= 3.08.15 =
+* JavaScript Error Fixer now recognizes source-proven jQuery-Bridget registrations such as Flickity's dynamic `fn[name]` provider path, so an explicit `.flickity is not a function` failure can resolve the real delayed provider instead of falling through to an unrelated stack-wrapper dependency.
+* The jQuery-Bridget resolver is strictly additive: all existing direct jQuery.fn, alias, UMD/factory, computed-global, declared-dependency, lifecycle, and compatibility fixers retain their existing order and behavior.
+* Minified `.bridget("method", ...)` aliases require same-bundle jQuery-Bridget implementation evidence; unrelated objects named `bridget` are not accepted as providers.
+
+= 3.08.14 =
+* Runtime Scan now performs one deterministic same-origin collector rebind when the anonymous frame lands on a different final URL before verified collector injection.
+* Runtime Scan warm preparation now reacquires foreground warm ownership once when `/crawl-page` reports an ownership-loss 409, instead of failing the diagnostic immediately.
+* Advanced-cache Runtime Scan control-query recognition now consistently includes token, mode, and context markers while leaving normal visitor cache behavior unchanged.
+
+= 3.08.13 =
+* JavaScript Error Fixer now resolves browser-proven jQuery plugin method failures before generic declared-dependency repair, preventing secondary wrappers from preempting the real provider/consumer fix (for example a delayed Flickity provider behind a blocking Salient consumer).
+* Runtime Scan now observes already-scheduled bounded one-shot browser timers before final reporting so late SDK/provider timeout failures can be captured instead of disappearing after lifecycle settle.
+* Runtime Scan status now reports raw optimized-page error counts even when baseline subtraction leaves zero UltraCache-specific differential errors.
+* Variable-product preload hints no longer emit speculative empty-version script URLs such as `wp-util.min.js?ver`; resources whose exact WordPress version is not finalized are skipped.
+* Existing LiteSpeed/Varnish ESI, cache, warm-up ownership, and JavaScript safeguard behavior remain unchanged outside these diagnostics/preload fixes.
+= 3.08.12 =
+* Fixed LiteSpeed WooCommerce automatic ESI parent seeding when a clean anonymous response sets the expected Woo session cookie alongside configured safe tracking cookies such as `_fbp`; unrelated/private response cookies still block storage.
+* Added a variable-product interaction guard so a visitor cannot submit a fully selected WooCommerce variable product before the variation runtime has resolved `variation_id`; the queued submit resumes automatically on WooCommerce `found_variation`.
+* Added early WordPress preload hints for WooCommerce variable-product runtime dependencies and protected variation/swatch/single-product interaction scripts from UltraCache Delay JS on variable product pages.
+= 3.08.11 =
+* Added automatic native LiteSpeed ESI conversion for WooCommerce's canonical empty classic mini-cart container (`div.widget_shopping_cart_content`) on normal frontend pages; no shortcode or theme-specific integration is required.
+* The automatic adapter preserves the theme-owned outer container and uses a dedicated private canonical fragment whose live output is only the container body, keeping WooCommerce's standard cart-fragments selector contract intact.
+* A clean anonymous page that creates only a WooCommerce session response cookie may now seed the local UltraCache page cache only after the finalized HTML is verified as a Woo mini-cart LiteSpeed ESI parent. The cookie-bearing response itself remains `no-cache,esi=on` for LiteSpeed/shared caches. Requests arriving with Woo/auth state, query strings, dynamic Woo routes, non-Woo response cookies, or another cache-forbidding response header remain excluded.
+* Kept the change isolated to the LiteSpeed ESI path; the existing Varnish automatic mini-cart integration, advanced-cache contract, and managed LiteSpeed rules schema 3 are unchanged.
+
+= 3.08.10 =
+* Prevented WooCommerce sessions routed into the native LiteSpeed Woo ESI vary bucket from reusing the anonymous UltraCache early-hit object on the first request after cart/session creation.
+* Provisional LiteSpeed Woo ESI requests now continue through the existing verified-parent render/store gate so the first Woo bucket fill carries the current private mini-cart state and subsequent requests can become native LSCache hits.
+* Kept anonymous UltraCache early hits, non-ESI LiteSpeed behavior, managed LiteSpeed rules schema 3, and the Varnish integration unchanged.
+
+= 3.08.09 =
+* Added guarded first-fill support for the native LiteSpeed WooCommerce ESI shared vary bucket so the first cart/session request can populate that bucket instead of remaining permanently uncached.
+* Woo session-cookie relaxation now requires the managed LiteSpeed Woo ESI request marker plus persisted/configured LiteSpeed ESI support; no server detection or `.htaccess` write occurs on visitor requests.
+* Added a final-output safety gate: provisional Woo session requests are stored only when the finalized HTML is a verified UltraCache Woo mini-cart LiteSpeed ESI parent; non-ESI responses remain no-cache.
+* Aligned PHP-origin LiteSpeed vary response metadata with `uc_woo_esi_{orig,webp,avif}` (or `uc_woo_esi`) when provisioning the shared Woo ESI parent.
+* Kept Varnish integration behavior unchanged.
+
+= 3.08.08 =
+* Made LiteSpeed ESI capability persistent and tri-state (`supported`, `not_supported`, `not_tested`); normal frontend requests now read the stored capability only and never perform LiteSpeed/ESI detection or `.htaccess` regeneration.
+* Upgraded the UltraCache LiteSpeed managed block to rules schema 3 and added persistent desired-context, desired-rule, and applied-rule hashes with `applied`, `disabled`, `pending`, and newer-schema states.
+* Regenerate LiteSpeed rules only from lifecycle/admin events: UltraCache activation/schema migration, explicit LiteSpeed detection, relevant settings saves, and WooCommerce activation/deactivation (including network activation state).
+* Added WooCommerce-active gating for shared Woo ESI vary rules; WordPress sites without active WooCommerce do not receive Woo-specific LiteSpeed ESI rules.
+* Preserve failed `.htaccess` writes as pending state and expose persisted ESI capability/rules state through LiteSpeed diagnostics.
+* Kept the Varnish integration isolated and unchanged.
+
+= 3.08.07 =
+* Added schema-versioned UltraCache LiteSpeed managed rules. Legacy/no-schema blocks are upgraded as schema 1 to schema 2, while newer schemas are left untouched on rollback.
+* Added a LiteSpeed-only WooCommerce ESI shared vary bucket so cart/session cookies can reuse verified native ESI parents without weakening hard bypasses for logged-in, dynamic WooCommerce, query, or other unsafe requests.
+* Kept LiteSpeed response vary metadata aligned with the Woo ESI request bucket for orig, WebP, and AVIF HTML variants.
+
+= 3.08.06 =
+* Allowed WooCommerce session cookies to reuse an existing cached parent only when native LiteSpeed is enabled and the exact UltraCache cache object has a validated `.lsesi` sidecar explicitly identifying a WooCommerce mini-cart ESI parent.
+* Preserved the existing full-page bypass for logged-in/authenticated cookies, non-Woo unsafe cookies, WooCommerce dynamic paths and query actions, non-ESI LiteSpeed pages, missing/invalid LiteSpeed ESI metadata, and all requests when native LiteSpeed is disabled.
+* Kept the Varnish path isolated and unchanged: the LiteSpeed Woo shared-parent exception does not read Varnish `.esi` metadata or alter Varnish request/cookie handling.
+
+= 3.08.05 =
+* Fixed native LiteSpeed ESI cache-lifecycle ordering so signed LiteSpeed ESI placeholders are converted inside the same final HTML pipeline that UltraCache writes to page cache, before the parent can enter LSCache.
+* Added a LiteSpeed-only `.lsesi` page-cache sidecar so advanced-cache.php can restore `esi=on` on cached LiteSpeed parents without reusing or changing the existing Varnish `.esi` metadata contract.
+* Forced identity delivery only for LiteSpeed ESI parents, preventing precompressed UltraCache HTML variants from bypassing LiteSpeed ESI parsing while preserving the existing Varnish compression behavior.
+* Kept LiteSpeed ESI parsing enabled even on non-cacheable parent responses by retaining `esi=on` alongside `no-cache`; this allows first-render/fallback responses to be processed without making them publicly cacheable.
+* Kept the change isolated to verified native LiteSpeed ESI runtime: LiteSpeed ESI remains disabled whenever Varnish is the active frontend runtime, and the Varnish ESI/VCL path is unchanged.
+
+= 3.08.04 =
+* Fixed automatic WooCommerce Varnish ESI lifecycle ordering so canonical/semantic mini-cart placeholders are prepared inside the same final HTML pipeline that is written to UltraCache page cache, before trusted ESI directives are converted and stored.
+* Prevented the first origin render from showing working ESI only to the client while persisting a pre-ESI page-cache object; subsequent UltraCache/Varnish hits now retain the same ESI parent markup and metadata.
+* Kept the change additive: VCL, private WooCommerce cookie transport, fragment signing/rendering, manual adapter behavior, and the WordPress template-enhancement ESI pass are unchanged.
+
+= 3.08.03 =
+* Added automatic Varnish ESI conversion for WooCommerce's canonical empty classic cart-widget placeholder (`div.widget_shopping_cart_content`) directly in the existing WordPress template enhancement output layer. The theme-owned outer element is preserved and only its empty body becomes the private ESI include.
+* Kept automatic detection theme-agnostic and template-path-independent: the canonical WooCommerce widget/refresh-fragments contract is used only for the primary empty placeholder, while existing semantic-hook and explicit shortcode/PHP adapter paths remain additive fallbacks.
+* Fixed secondary cart-fragment collection so it can be prepared before final canonical-placeholder detection; secondary bounded/passive fragments are applied only when a primary/semantic mini-cart ESI target was actually found in the rendered page.
+* Changed the Woo ESI opt-in helper to enqueue for verified Woo ESI capability but set `ultracache_esi_optin=1` only when the finalized DOM contains an UltraCache ESI mini-cart marker, allowing late template-buffer detection without opting unrelated pages into shared-parent reuse.
+
+= 3.08.02 =
+* Changed automatic WooCommerce Varnish ESI detection so classic mini-cart semantic hooks no longer require a wc_get_template() frame; themes that render the public WooCommerce mini-cart contract through alternate wrappers can now use the existing private ESI pipeline without theme-specific integration.
+* Added WooCommerce cart-fragments-aware secondary ESI support for bounded passive theme/plugin fragments such as cart counters and badges. Fragment selectors and markup come from the public woocommerce_add_to_cart_fragments contract; UltraCache does not maintain a theme selector catalogue.
+* Preserved exact WooCommerce/theme fragment responses instead of overwriting the canonical cart-fragments map, while keeping the explicit UltraCache mini-cart shortcode/PHP adapter available as an additive fallback.
+* Removed the WooCommerce integration trait's direct output-buffer ownership from the registered ESI renderer; renderer output is captured by the existing UltraCache ESI registry buffer.
+
+= 3.08.01 =
+* Added automatic theme-agnostic Varnish ESI integration for WooCommerce classic mini-carts rendered through WooCommerce's semantic mini-cart hooks, preserving the active theme/plugin template output as the inline fallback.
+* Automatic mini-cart ESI now carries the live WooCommerce template identifier and bounded scalar template arguments in the existing signed private-fragment context, so the ESI subrequest re-renders the same WooCommerce template through wc_get_template_html() without hardcoded theme paths.
+* Reused the WordPress template enhancement output buffer for automatic mini-cart placeholder conversion; no additional page-level output buffer, theme-specific selector list, or filesystem template guess was added.
+* Preserved the existing explicit shortcode/PHP mini-cart adapter and WooCommerce cart-fragments compatibility as additive fallback behavior.
+
+= 3.07.08 =
+* Added a narrow lifecycle-aware delayed-script ordering repair for source-proven inline configuration/runtime pairs that become unsafe only after both scripts are moved beyond window.load.
+* Inline configuration is reordered before its delayed runtime only when the inline block publishes a global plus ready event and the registered local runtime source proves support for the pre-existing global, the same ready event, and a document.readyState/load fallback.
+* Kept the 3.07.07 Delay classifier unchanged; no global dependency metadata, blanket dependency promotion, or plugin-specific WooCommerce/GA rule was added.
+* Applied the same proven pre-runtime ordering in both ordered and parallel delayed execution lanes.
+
+= 3.07.07 =
+* Replaced the broad Elementor Compatibility allowlist with adaptive per-page Elementor-aware JavaScript analysis. UltraCache now discovers rendered Elementor widget types, reads their live `get_script_depends()` declarations, and scans the installed Elementor/Elementor Pro/addon JavaScript sources for deterministic interaction-handler evidence before deciding which handles must stay out of Delay.
+* Added versioned persistent Elementor compatibility knowledge using WordPress options. The knowledge map is invalidated when Elementor/Elementor Pro versions or relevant Elementor ecosystem plugin main files change, while newly encountered page/widget evidence is merged additively.
+* Added deterministic support for Elementor Pro webpack handler bootstraps and installed dynamic chunk bundles, plus `frontend/element_ready/<widget>.default` addon handlers such as Header Footer Elementor. Only interaction-critical widget bootstraps and their widget-declared dependencies are protected; the rest of the Elementor runtime remains eligible for normal UltraCache optimization.
+* Setup Wizard Elementor detection continues to enable Elementor Compatibility automatically.
+* Bound compatibility source inspection to scripts present in the current rendered/enqueued response plus live widget dependencies, and added a final HTML repair pass so scripts already converted to delayed/parallel form before per-page widget resolution are restored to ordered native defer when the adaptive policy proves them interaction-critical.
+
+= 3.07.06 =
+* Added an explicit Elementor Compatibility switch under Advanced Frontend JavaScript manipulation. The layer protects Elementor core/Pro bootstrap runtimes, `pro-elements-handlers`, declared SmartMenus/sticky dependencies, and Header Footer Elementor frontend interaction runtime from UltraCache Delay and parallel execution while preserving ordered native defer.
+* Setup Wizard Elementor detection now enables Elementor Compatibility automatically when Elementor or Elementor Pro is active.
+* Added deterministic protection for non-critical/local Delay, third-party/CDN Delay, LCP Boundary Delay, Delay-all, and first-party/third-party parallel execution paths without changing the existing WPBakery compatibility behavior.
+
+= 3.07.05 =
+* Extended the existing jQuery-plugin provider resolver to prove minified IIFE aliases injected through a jQuery-first Zepto fallback such as `window.jQuery || window.Zepto`, restoring deterministic provider detection for libraries such as iCheck.
+* Kept the proof narrow and additive: direct jQuery injection remains unchanged, while Zepto-first and unrelated OR-expression wrappers are still rejected.
+
+= 3.07.04 =
+* Render Redis and Varnish secret inputs inside non-submitting forms with autocomplete disabled and explicit infrastructure-secret field names.
+* Preserve existing settings bindings and secret storage behavior.
+
+= 3.07.03 =
+* Removed artificial `<form>` wrappers around shared UltraCache password-setting fields while preserving `autocomplete="new-password"`, preventing Chrome from treating infrastructure secret inputs as standalone login forms.
+
+= 3.07.02 =
+* Browser Runtime Scan now performs JavaScript Strategy safeguard preparation inside the shared scanner cycle engine, so standalone scans and Setup Wizard scans use identical reset behavior.
+* Restores Defer Instead of Delay, Do Not Defer or Delay, and Delay third-party JS Patterns to plugin defaults only for direct Defer → Delay or Delay → Defer transitions; Off transitions and Runtime Scan baseline Off toggles do not trigger a reset.
+
+= 3.07.01 =
+* Fixed the Varnish ESI compatibility renderer to delegate to the canonical renderer instead of duplicating raw output, resolving the WordPress output-escaping compliance finding without changing generated ESI/fallback markup.
+
+= 3.06.27 =
+* Browser Runtime Scan now waits for pending settings saves and tracks actual JavaScript Strategy mutations, so the next scan restores Defer Instead of Delay, Do Not Defer or Delay, and Delay third-party JS Patterns to plugin defaults after any real Off/Defer/Delay change, even when the prior scan marker happens to match the new strategy.
+* Setup Wizard Optimize for Speed now enables Main Thread Relief together with Delay, Do not autostart JS, and the Mouse move, Keyboard, Touch / pointer, and Click release triggers.
+
+= 3.06.26 =
+* Fixed an early-interaction delayed-JavaScript race: Mouse move, Keyboard, Touch / pointer, and Click now latch while the document is still parsing and release the delayed queue at DOMContentLoaded, ensuring later parser-discovered delayed script placeholders are included.
+* Preserved immediate interaction release after DOMContentLoaded and left timed autostart, After page load, Infinite visitor behavior, and the Runtime Scan Infinite trigger unchanged.
+
+= 3.06.25 =
+* Added a Setup Wizard JavaScript Strategy choice above Object Cache: Optimize for User Experience keeps the existing Defer + 2-second behavior, while Optimize for Speed uses Delay with Mouse move, Keyboard, Touch / pointer, and Click triggers and no fallback autostart timer.
+* Removed Scroll from delayed-JavaScript release triggers. Existing installations/imports with Scroll enabled migrate to Mouse move, Keyboard, Touch / pointer, and Click, and runtime event generation no longer listens for Scroll/wheel/touchmove as a delayed-JS release signal.
+* Renamed the visible Infinite delayed-JS timer option to Do not autostart JS while preserving the internal `infinite` value for backward compatibility and Runtime Scan behavior.
+
+= 3.06.24 =
+* Browser Runtime Scan now remembers the JavaScript Strategy used by the previous scan and restores Defer Instead of Delay, Do Not Defer or Delay, and Delay third-party JS Patterns to their plugin defaults only when that strategy has changed; first-ever and same-strategy scans preserve the current lists.
+
+= 3.06.23 =
+* Browser Runtime Scan now releases pending delayed JavaScript 10 seconds after window load only when Infinite Delay is selected, allowing Infinite-mode scans to complete while leaving normal visitors and timed delay modes unchanged.
+
+= 3.06.22 =
+* Computed `window[var]()` runtime failures now run the existing exact computed-global provider resolver before generic declared-dependency repair. This preserves all existing fallbacks while preventing an unrelated WordPress dependency from preempting the proven Delay-first consumer fix.
+
+= 3.06.21 =
+* Fixed Browser Runtime Scan parity: authorized instrumented scan responses now receive the same final frontend performance transformations as real anonymous optimized visitors while remaining excluded from page-cache lookup/store.
+* Added a Runtime-Scan-only transform callback on the WordPress template enhancement buffer; existing visitor cache, warm, Error Fixer, and JavaScript safeguard behavior is unchanged.
+
+= 3.06.20 =
+* Aligned Console Error Handler and the DB-backed JS Diagnostic Queue with the Delay-first Runtime Scan repair engine for proven delayed-provider/deferred-consumer conflicts.
+* Diagnostic findings with deterministic `delaySuggestion` evidence now show the exact consumer as the first append action in Delay third-party JS Patterns instead of prematurely recommending the provider in Defer Instead.
+* Added tier-aware UI state so a newly appended Delay fix is saved/purged/rescanned before any escalation; only a later scan that still reproduces the error while the Delay fix is already active advances to Defer Instead, then Do Not Defer or Delay.
+
+= 3.06.19 =
+* Moved Delay third-party JS Patterns and Known Functional Third-Party Delay Patterns directly below Defer Instead of Delay and Do Not Defer or Delay, before Browser Scanner and Console Error Handler.
+* Unified the four JavaScript safeguard/pattern editors behind one Save Lists action while preserving the existing setting keys and Runtime Scan automatic-save behavior.
+* Renamed Delay safe third-party JS to Delay third-party JS and Safe Third-Party Delay Patterns to Delay third-party JS Patterns.
+
+= 3.06.18 =
+* Increased the real Browser Runtime Scan / JavaScript Error Fixer repair-cycle budget from 6 to 10; scans still stop early when the page is clean or no further deterministic repair exists.
+* Added performance-first automatic repair escalation for proven execution-order failures: first append the exact deferred consumer to Safe Third-Party Delay Patterns when its provider is already delayed, then promote the proven provider through Defer Instead of Delay, and use Do Not Defer or Delay only as the final fallback if the same error persists.
+* Extended deterministic provider/consumer findings, including computed-window globals and declared dependencies, with exact consumer-to-delay evidence while preserving the existing provider fixers as additive fallback paths; no WooCommerce, gtag, or site-specific hardcoding was added.
+
+= 3.06.17 =
+* Runtime Scan now invalidates results when JavaScript resources fail to load and gives browser/content-blocker guidance for likely client-side blocking instead of allowing a false clean result.
+* Runtime Scan now settles browser event-loop, render, observer, and post-load callbacks before finalizing the report so delayed post-load exceptions are captured.
+* JavaScript Error Fixer now additively resolves computed-global failures such as `window[r] is not a function` by proving the exact consumer, same-owner callback/global configuration, unique real provider, and execution-order conflict before suggesting a fix.
+
+= 3.06.16 =
+* Extended the additive jQuery plugin provider resolver to browser errors with member receivers such as `this.instance.flickity is not a function`, using the exact stack consumer, exact member-method call, one source-proven earlier same-owner `jQuery.fn.<method>` provider, and an actionable execution-order conflict before recommending a provider fix.
+* Kept the existing explicit-jQuery and minified/local alias resolver paths unchanged, with regression guards for cross-owner providers, reversed document order, and non-member globals such as `window.gtag`.
+
+= 3.06.15 =
+* Changed the Delayed JS Scroll interaction trigger from raw `scroll` events to user-input `wheel` and `touchmove` events, preventing browser/programmatic scroll changes from releasing Infinite-delayed JavaScript without visitor interaction.
+* Preserved case-sensitive dashboard action parameter names so Runtime Scan `manualToken` and `preserveForegroundWarm` reach Flush All unchanged; foreground ownership is now genuinely preserved before `/crawl-page` verification instead of being reset by lowercased parameter names.
+
+= 3.06.14 =
+* Gave Browser Runtime Scan foreground warm-up ownership before Flush All, so background warm work triggered by cache clearing yields before it can acquire the selected scan URL.
+* Classified retryable coalesced `url-lock-busy` crawl results as HTTP 202 instead of HTTP 500 and added exactly three Runtime Scan retries with 5-second waits for that transient lock condition only.
+
+= 3.06.13 =
+* Added an additive jQuery plugin provider fallback for minified/local aliases such as `t(...).hoverIntent()` and `t(...).fancybox()` when strict alias-to-jQuery proof cannot be reconstructed. The fallback requires one exact stack consumer, the exact method call in that consumer source, one earlier loaded same-owner script that registers `jQuery.fn.<method>` from source text, and an actionable execution-order conflict before recommending the provider.
+* Kept all existing JavaScript Error Fixer paths unchanged and added regression coverage for `hoverIntent`/`fancybox` provider promotion to Do Not Defer or Delay plus cross-owner and reversed-order false-positive guards.
+
+= 3.06.12 =
+* Fixed admin password-field DOM semantics for managed Redis and Varnish credentials by placing password inputs in non-submitting form contexts while preserving the existing React save flow.
+
+= 3.06.11 =
+* Fixed the LiteSpeed admin card regression where the existing AccordionBox component was referenced by cache.js but not exported by the shared admin UI module, causing the Cache tab to fail with `AccordionBox is not a function`.
+
+= 3.06.10 =
+* Integrated phase-aware Setup Wizard failure state so persisted errors identify the actual configuration, warm-up, media, or JavaScript phase that failed instead of collapsing every issue into one generic previous-attempt error.
+* Made an explicit administrator media-generation pause a scoped Setup Wizard media warning: homepage cache/CSS preparation continues, live homepage image conversion is skipped, and the administrator pause remains untouched.
+* Wrapped cache flush, homepage warm, CSS preparation, media conversion, menu warm, and full-site warm operations in deterministic Wizard phase contracts for precise resume/error reporting.
+
+= 3.06.09 =
+* Replaced the ambiguous persistent media-generation pause record with a versioned explicit administrator pause contract that records a unique pause ID, authenticated actor, request source, and timestamp.
+* Retired legacy v1 administrator pause records so stale or provenance-free state can no longer block future dashboard manual media sessions with a false HTTP 409.
+* Kept explicit current administrator pauses persistent until Resume, while manual-session start now consults only the authoritative v2 pause contract.
+
+= 3.06.08 =
+* Added a separate native LiteSpeed ESI subsystem with its own registry, signed fragment tokens, same-origin endpoint, output-buffer rendering, and LiteSpeed cache-control contract.
+* Added native LiteSpeed WooCommerce classic mini-cart ESI using request-fresh private/session rendering while the parent page remains publicly cacheable, with explicit cookie allowlists and WooCommerce cart-fragment compatibility.
+* Enabled LiteSpeed ESI parent processing with `esi=on`, neutralized untrusted raw ESI markup before trusted directives are inserted, and isolated LiteSpeed fragment signing from the Varnish ESI token namespace.
+* Restricted native LiteSpeed ESI to ESI-capable LiteSpeed Enterprise/Web ADC runtimes, excluded OpenLiteSpeed, and kept the existing Varnish ESI/VCL capability contract independent when Varnish is the active frontend runtime.
+
+= 3.06.07 =
+* Isolated the existing ESI implementation as the Varnish ESI subsystem instead of a provider-neutral ESI core.
+* Kept Varnish ESI activation bound to the existing end-to-end VCL capability proofs, including private/session and WooCommerce transport proofs.
+* Moved Varnish ESI registry, rendering, endpoint, and lifecycle code under the Varnish integration and gave internal classes/functions explicit Varnish ownership.
+* Separated the WooCommerce classic mini-cart adapter as WooCommerce Varnish ESI while preserving existing VCL wire protocol, signed fragment URLs, shortcode, and legacy PHP API aliases.
+
+= 3.06.06 =
+* Hardened the WooCommerce routing contract to represent dynamic pages as either real path routes or exact query routes, so query-based Cart, Checkout, and My Account URLs remain private without collapsing their identity into `/`.
+* Added WooCommerce endpoint query keys from the current `WC_Query::get_query_vars()` contract, including administrator-customized endpoint slugs, and carried those rules into the early advanced-cache layer.
+* Switched WooCommerce page permalink resolution to the supported no-fallback form, made plain permalinks representable, preserved real root-page exclusions, and aligned root endpoint materialization with WooCommerce's Checkout/My Account front-page routing semantics.
+
+= 3.06.05 =
+* Added a canonical public HTML cache eligibility contract with CACHEABLE, BYPASS, and PRIVATE states plus one deterministic reason for each request decision.
+* Routed the main runtime request flow and warm/preload cache checks through the canonical eligibility object while preserving the existing boolean bypass methods as compatibility adapters.
+* Exposed the eligibility state in URL inspection and X-Ultra-Cache-Eligibility response diagnostics so request policy, warm decisions, and shared-cache backends report the same cacheability classification.
+
+= 3.06.04 =
+* Added a read-only Last LiteSpeed Detection accordion showing the exact anonymous Redetect request, resolved URL, request headers, HTTP status, response time, and relevant LiteSpeed/UltraCache response headers.
+* Extended the LiteSpeed origin probe result with structured request/response observability, including Server, Cache-Control, X-LiteSpeed-Cache, X-LiteSpeed-Cache-Control, X-LiteSpeed-Vary, X-QC-Cache, and UltraCache cache-decision headers.
+* Surfaced the latest LiteSpeed origin detection exchange directly inside the LiteSpeed card for faster troubleshooting.
+
+= 3.06.03 =
+* Separated LiteSpeed/OpenLiteSpeed origin detection from native cache HIT/MISS behaviour verification; direct origin evidence is now the authority for enabling the native LiteSpeed integration.
+* Removed the LiteSpeed capability/HIT test from the dashboard, REST action, client API, diagnostics payload, and Setup Wizard so a missing cache-status HIT can no longer block or warn on an otherwise confirmed LiteSpeed origin.
+* Tightened detection semantics so LiteSpeed Cache plugin hooks/markers or QUIC.cloud metadata alone do not label the origin as LiteSpeed, while Redetect LiteSpeed performs the anonymous origin probe independently of whether native HTML cache is already enabled.
+
+= 3.06.02 =
+* Fixed the WooCommerce dynamic routing contract so query-routed page URLs such as `/?page_id=11` are never collapsed into the root `/` path exclusion.
+* Kept authoritative WooCommerce page URLs in the contract while projecting only genuinely path-representable routes into `dynamicPaths`, preventing an unrelated homepage from being classified as a WooCommerce dynamic path.
+* Preserved the existing WooCommerce request-aware Cart, Checkout, My Account, endpoint, query, and cookie bypass logic; no LiteSpeed detection or capability behavior is changed in this release.
+
+= 3.06.01 =
+* Added Infinite to Javascript -> Javascript Manipulation -> Delayed JS auto-start -> If no event happens, autostart JS after. Infinite disables the fallback release timer instead of emulating it with a large timeout.
+* When Infinite is selected with no Event Triggers, UltraCache automatically enables Mouse move, Scroll, Touch / pointer, Click, and Keyboard triggers. The rule is enforced during settings sanitization as well as in the dashboard interaction.
+* Updated the Setup Wizard / Apply Optimal Settings defaults to enable Mouse move, Scroll, Touch / pointer, Click, and Keyboard event triggers.
+
+= 3.05.04 =
+* Finalized the LiteSpeed Automation contract by removing the retired Refresh Ahead candidate/scanner implementation and all obsolete LiteSpeed warm/refill/stale/refresh-ahead dashboard setting keys from defaults, sanitization, REST schemas, persistence change detection, admin state, and runtime rendering.
+* Added a one-time canonical settings cleanup that strips retired LiteSpeed keys from the stored UltraCache settings option and removes the obsolete LiteSpeed refresh-ahead state/candidate options without flushing cache or changing active Automation behavior.
+* Removed legacy LiteSpeed refresh-ahead queue/result compatibility branches; any pre-existing targeted queue row now follows the ordinary shared page-warm stage contract instead of a separate refresh-ahead preparation path.
+* Kept only the agreed LiteSpeed controls and observability contract: native LiteSpeed HTML Cache control, Flush All inclusion, capability test/manual purge/redetect actions, detection/transport status, stale exact-purge capability, production counters, and recent operations. Varnish behavior remains unchanged.
+
+= 3.05.03 =
+* Removed the separate LiteSpeed stale-regeneration switch from the dashboard and Setup Wizard.
+* LiteSpeed exact/stale invalidation now follows the central Automation Stale While Revalidate policy automatically, including the effective Fresh TTL and Max stale window boundary.
+* Kept LiteSpeed stale exact purge as a backend capability/status signal while preserving Flush All integration, native cache controls, diagnostics, counters, operations, and the shared Automation warm pipeline.
+* Preserved legacy LiteSpeed stale-setting storage only for upgrade compatibility; it no longer controls runtime invalidation behavior.
+* Left the Varnish integration unchanged.
+
+= 3.05.02 =
+* Removed the LiteSpeed-specific "Refill after targeted invalidation" and "Warm with site warm-up" dashboard switches; the shared Automation warm pipeline is now the single user-facing warm authority.
+* Made native LiteSpeed affected-page refill and site-warm population automatic whenever native LiteSpeed HTML Cache is enabled, including homepage, menu, full-site, cron, CLI, warm-after-flush, and targeted invalidation flows.
+* Stopped the Setup Wizard from writing the retired LiteSpeed warm/refill switches and made compatibility diagnostics report the effective automatic runtime policy instead of legacy option values. Legacy setting keys are retained temporarily for upgrade compatibility and will be removed in the final cleanup step.
+
+= 3.05.01 =
+* Retired the LiteSpeed Refresh Ahead producer so it no longer scans candidates, queues proactive page work, or keeps the shared background worker alive.
+* Removed LiteSpeed Refresh Ahead, threshold, maximum-pages, pinned-URL controls, status rows, scan summaries, and related help text from the dashboard.
+* Stopped Apply optimal settings from enabling the retired LiteSpeed Refresh Ahead setting while preserving native LiteSpeed cache, stale purge, site warm, targeted refill, Flush All integration, diagnostics, counters, and operations.

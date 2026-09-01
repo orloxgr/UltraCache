@@ -29,7 +29,7 @@ trait Ultra_Cache_WP_Targeted_Warm_Pipeline_Trait
         if ('refresh-ahead' === $source_context) {
             return array('varnish');
         }
-        if ('litespeed-refresh-ahead' === $source_context) {
+        if ('litespeed-queued-invalidation' === $source_context) {
             return array('litespeed');
         }
 

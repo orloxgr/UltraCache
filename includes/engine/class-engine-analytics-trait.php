@@ -41,7 +41,7 @@ trait Ultra_Cache_Engine_Analytics_Trait
             return (string) $found === (string) $table;
         }
 
-        public static function ensure_analytics_table()
+        public static function ensure_analytics_table($force_schema_verify = false)
         {
             global $wpdb;
 
@@ -55,6 +55,9 @@ trait Ultra_Cache_Engine_Analytics_Trait
             }
 
             $version = (string) get_option(self::get_analytics_db_version_option_key(), '');
+            if (!$force_schema_verify && self::get_analytics_db_version() === $version) {
+                return true;
+            }
             if (self::get_analytics_db_version() === $version && self::analytics_table_exists()) {
                 return true;
             }

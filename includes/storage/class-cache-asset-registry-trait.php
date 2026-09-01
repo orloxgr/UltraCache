@@ -11,6 +11,19 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
 {
+    /** Per-request memo for UltraCache custom-table existence/schema readiness. */
+    private static $custom_table_schema_request_memo = array();
+
+    private static function reset_custom_table_schema_request_memo($table = '')
+    {
+        $table = (string) $table;
+        if ('' === $table) {
+            self::$custom_table_schema_request_memo = array();
+            return;
+        }
+        unset(self::$custom_table_schema_request_memo['exists:' . $table]);
+    }
+
     private static function plugin_custom_table_exists($table)
     {
         global $wpdb;
@@ -26,9 +39,15 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
             }
         }
 
+        $memo_key = 'exists:' . $table;
+        if (array_key_exists($memo_key, self::$custom_table_schema_request_memo)) {
+            return (bool) self::$custom_table_schema_request_memo[$memo_key];
+        }
+
         // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema existence check for a validated UltraCache-owned custom table.
         $found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-        return (string) $found === (string) $table;
+        self::$custom_table_schema_request_memo[$memo_key] = ((string) $found === (string) $table);
+        return (bool) self::$custom_table_schema_request_memo[$memo_key];
     }
 
     public static function get_cache_asset_refs_table_name()
@@ -48,7 +67,7 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         return 'ultracache_cache_asset_refs_db_version';
     }
 
-    public static function ensure_cache_asset_refs_table()
+    public static function ensure_cache_asset_refs_table($force_schema_verify = false)
     {
         global $wpdb;
 
@@ -58,13 +77,18 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
 
         $table = self::get_cache_asset_refs_table_name();
         $version = (string) get_option(self::get_cache_asset_refs_db_version_option_key(), '');
-        if (self::get_cache_asset_refs_db_version() === $version && self::plugin_custom_table_exists($table)) {
+        $force_schema_verify = (bool) $force_schema_verify;
+        if (!$force_schema_verify && self::get_cache_asset_refs_db_version() === $version) {
+            return true;
+        }
+        if ($force_schema_verify && self::get_cache_asset_refs_db_version() === $version && self::plugin_custom_table_exists($table)) {
             return true;
         }
 
         if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
             return false;
         }
+        self::reset_custom_table_schema_request_memo($table);
         $charset_collate = $wpdb->get_charset_collate();
         $sql = "CREATE TABLE {$table} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -86,6 +110,7 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         ) {$charset_collate};";
 
         dbDelta($sql);
+        self::reset_custom_table_schema_request_memo($table);
         if (self::plugin_custom_table_exists($table)) {
             update_option(self::get_cache_asset_refs_db_version_option_key(), self::get_cache_asset_refs_db_version(), false);
             return true;
@@ -111,7 +136,7 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         return 'ultracache_css_rewrite_map_db_version';
     }
 
-    public static function ensure_css_rewrite_map_table()
+    public static function ensure_css_rewrite_map_table($force_schema_verify = false)
     {
         global $wpdb;
 
@@ -125,13 +150,18 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         }
 
         $version = (string) get_option(self::get_css_rewrite_map_db_version_option_key(), '');
-        if (self::get_css_rewrite_map_db_version() === $version && self::plugin_custom_table_exists($table)) {
+        $force_schema_verify = (bool) $force_schema_verify;
+        if (!$force_schema_verify && self::get_css_rewrite_map_db_version() === $version) {
+            return true;
+        }
+        if ($force_schema_verify && self::get_css_rewrite_map_db_version() === $version && self::plugin_custom_table_exists($table)) {
             return true;
         }
 
         if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
             return false;
         }
+        self::reset_custom_table_schema_request_memo($table);
         $charset_collate = $wpdb->get_charset_collate();
         $sql = "CREATE TABLE {$table} (
             id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -158,6 +188,7 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         ) {$charset_collate};";
 
         dbDelta($sql);
+        self::reset_custom_table_schema_request_memo($table);
         if (self::plugin_custom_table_exists($table)) {
             update_option(self::get_css_rewrite_map_db_version_option_key(), self::get_css_rewrite_map_db_version(), false);
             return true;
@@ -429,14 +460,21 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         global $wpdb;
 
         $generated_url = self::normalize_css_rewrite_map_url($generated_url);
-        if ('' === $generated_url || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+        if ('' === $generated_url || !($wpdb instanceof wpdb)) {
             return array();
         }
 
+        // Runtime hot path: consult the object/request cache before touching schema readiness.
+        // Negative lookups are cached as an empty array, so a cache hit can return with zero SQL.
         $cache_key = self::get_css_rewrite_map_cache_key('generated', $generated_url);
-        $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group());
-        if (is_array($cached)) {
-            return $cached;
+        $cache_found = false;
+        $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group(), false, $cache_found);
+        if ($cache_found) {
+            return is_array($cached) ? $cached : array();
+        }
+
+        if (!self::ensure_css_rewrite_map_table()) {
+            return array();
         }
 
         $table = self::get_css_rewrite_map_table_name();
@@ -456,15 +494,21 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         global $wpdb;
 
         $source_url = self::normalize_css_rewrite_map_url($source_url);
-        if ('' === $source_url || !($wpdb instanceof wpdb) || !self::ensure_css_rewrite_map_table()) {
+        if ('' === $source_url || !($wpdb instanceof wpdb)) {
             return array();
         }
 
         $optimization_type = sanitize_key((string) $optimization_type);
         $cache_key = self::get_css_rewrite_map_cache_key('source' . ('' !== $optimization_type ? '_' . $optimization_type : ''), $source_url);
-        $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group());
-        if (is_array($cached)) {
-            return $cached;
+        $cache_found = false;
+        $cached = wp_cache_get($cache_key, self::get_css_rewrite_map_cache_group(), false, $cache_found);
+        if ($cache_found) {
+            return is_array($cached) ? $cached : array();
+        }
+
+        // Only a real cache miss reaches schema readiness and the indexed authoritative SELECT.
+        if (!self::ensure_css_rewrite_map_table()) {
+            return array();
         }
 
         $table = self::get_css_rewrite_map_table_name();
@@ -744,8 +788,63 @@ trait Ultra_Cache_WP_Cache_Asset_Registry_Trait
         $limit = max(25, min(5000, (int) $limit));
         $table = self::get_cache_asset_refs_table_name();
         $now = current_time('mysql');
-        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only expired inactive UltraCache-owned generated CSS ref rows.
-        $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE active = 0 AND protect_until < %s LIMIT %d', $table, $now, $limit));
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded retention cleanup deletes only expired inactive UltraCache-owned generated CSS ref rows in index order.
+        $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE active = 0 AND protect_until < %s ORDER BY protect_until ASC, id ASC LIMIT %d', $table, $now, $limit));
         return is_numeric($deleted) ? max(0, (int) $deleted) : 0;
+    }
+
+    public static function prune_cache_asset_refs_table_batched($max_delete = 25000, $batch_size = 5000, $time_budget_seconds = 3.0)
+    {
+        global $wpdb;
+
+        $max_delete = max(1000, min(100000, (int) $max_delete));
+        $batch_size = max(250, min(5000, (int) $batch_size));
+        $time_budget_seconds = max(0.25, min(10.0, (float) $time_budget_seconds));
+        $started = microtime(true);
+        $deleted_total = 0;
+        $batches = 0;
+        $last_batch = 0;
+
+        if (!($wpdb instanceof wpdb) || !self::ensure_cache_asset_refs_table()) {
+            return array(
+                'deleted' => 0,
+                'batches' => 0,
+                'lastBatchDeleted' => 0,
+                'maxDelete' => $max_delete,
+                'batchSize' => $batch_size,
+                'elapsedSeconds' => round(max(0.0, microtime(true) - $started), 4),
+                'backlogLikely' => false,
+            );
+        }
+
+        $table = self::get_cache_asset_refs_table_name();
+        $now = current_time('mysql');
+        while ($deleted_total < $max_delete && (microtime(true) - $started) < $time_budget_seconds) {
+            $remaining = $max_delete - $deleted_total;
+            $requested = min($batch_size, $remaining);
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Catch-up retention cleanup deletes only expired inactive UltraCache-owned generated CSS refs in bounded batches.
+            $deleted = $wpdb->query($wpdb->prepare('DELETE FROM %i WHERE active = 0 AND protect_until < %s ORDER BY protect_until ASC, id ASC LIMIT %d', $table, $now, $requested));
+            $last_batch = is_numeric($deleted) ? max(0, (int) $deleted) : 0;
+            $deleted_total += $last_batch;
+            $batches++;
+
+            if ($last_batch < $requested) {
+                break;
+            }
+        }
+
+        $elapsed = max(0.0, microtime(true) - $started);
+        $budget_exhausted = $deleted_total >= $max_delete || $elapsed >= $time_budget_seconds;
+        $backlog_likely = $budget_exhausted && $last_batch > 0;
+
+        return array(
+            'deleted' => $deleted_total,
+            'batches' => $batches,
+            'lastBatchDeleted' => $last_batch,
+            'maxDelete' => $max_delete,
+            'batchSize' => $batch_size,
+            'elapsedSeconds' => round($elapsed, 4),
+            'backlogLikely' => $backlog_likely,
+        );
     }
 }

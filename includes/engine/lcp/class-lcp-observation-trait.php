@@ -258,11 +258,15 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
 
         $parts = wp_parse_url($url);
         $home_parts = wp_parse_url(home_url('/'));
-        if (!is_array($parts) || !is_array($home_parts) || empty($parts['host']) || empty($home_parts['host'])) {
+        if (!is_array($parts) || !is_array($home_parts) || empty($parts['host'])) {
             return '';
         }
 
-        if (strtolower((string) $parts['host']) !== strtolower((string) $home_parts['host'])) {
+        if (function_exists('ultracache_is_strict_frontend_loopback_url')) {
+            if (!ultracache_is_strict_frontend_loopback_url($url)) {
+                return '';
+            }
+        } elseif (empty($home_parts['host']) || strtolower((string) $parts['host']) !== strtolower((string) $home_parts['host'])) {
             return '';
         }
 
@@ -497,6 +501,326 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
     private function has_confirmed_lcp_observation_for_current_request()
     {
         return !empty($this->get_lcp_observation_records_for_current_request());
+    }
+
+
+    /**
+     * Build one page-scoped LCP protection context shared by the HTML boundary
+     * logic and the JavaScript router.
+     *
+     * Authority order is intentional: an explicit manual target wins, then a
+     * browser-confirmed locked mapping, then a browser learning mapping. The
+     * server heuristic is available only when final HTML is supplied because it
+     * is a provisional fallback, not a persistent browser truth.
+     *
+     * @param string $html Optional final HTML for server-side fallback evidence.
+     * @return array<string,mixed>
+     */
+    private function ultracache_get_lcp_protection_context($html = '')
+    {
+        static $request_context = null;
+
+        if ('' === (string) $html && is_array($request_context)) {
+            return $request_context;
+        }
+
+        $page_url = $this->normalize_lcp_observation_page_url($this->get_current_request_url());
+        $context = array(
+            'source' => 'none',
+            'pageUrl' => $page_url,
+            'locked' => false,
+            'selectors' => array(),
+            'resourceUrls' => array(),
+            'records' => array(),
+            'tokens' => array(),
+        );
+
+        $manual = $this->get_effective_manual_lcp_configuration($page_url);
+        $manual_selectors = isset($manual['selectors']) && is_array($manual['selectors'])
+            ? array_values(array_filter(array_map('strval', $manual['selectors'])))
+            : array();
+        $manual_images = isset($manual['images']) && is_array($manual['images'])
+            ? array_values(array_filter(array_map('strval', $manual['images'])))
+            : array();
+
+        if (!empty($manual_selectors) || !empty($manual_images)) {
+            $context['source'] = 'manual';
+            $context['locked'] = true;
+            $context['selectors'] = $manual_selectors;
+            $context['resourceUrls'] = $manual_images;
+        } else {
+            $grouped = $this->get_lcp_observation_records_for_current_request();
+            $locked = array();
+            $learning = array();
+            foreach ($grouped as $viewport_records) {
+                if (!is_array($viewport_records)) {
+                    continue;
+                }
+                foreach ($viewport_records as $record) {
+                    if (!is_array($record)) {
+                        continue;
+                    }
+                    $state = sanitize_key((string) ($record['learning_state'] ?? 'learning'));
+                    if ('locked' === $state) {
+                        $locked[] = $record;
+                    } else {
+                        $learning[] = $record;
+                    }
+                }
+            }
+
+            $active_records = !empty($locked) ? $locked : $learning;
+            if (!empty($active_records)) {
+                $context['source'] = !empty($locked) ? 'browser-locked' : 'browser-learning';
+                $context['locked'] = !empty($locked);
+                $context['records'] = $active_records;
+                foreach ($active_records as $record) {
+                    $selector = trim((string) ($record['selector'] ?? ''));
+                    $resource_url = trim((string) ($record['resource_url'] ?? ''));
+                    if ('' !== $selector && 'unknown' !== strtolower($selector)) {
+                        $context['selectors'][] = $selector;
+                    }
+                    if ('' !== $resource_url) {
+                        $context['resourceUrls'][] = $resource_url;
+                    }
+                }
+            }
+        }
+
+        if ('none' === $context['source'] && is_string($html) && '' !== $html) {
+            $candidate = $this->find_best_sr7_lcp_candidate($html);
+            if (null === $candidate) {
+                $candidate = $this->find_best_lcp_candidate_with_tag_processor($html);
+            }
+            if (is_array($candidate) && !empty($candidate['url'])) {
+                $context['source'] = 'server-heuristic';
+                $context['resourceUrls'][] = (string) $candidate['url'];
+                $context['records'][] = $candidate;
+            }
+        }
+
+        $context['selectors'] = array_values(array_unique(array_filter(array_map('strval', $context['selectors']))));
+        $context['resourceUrls'] = array_values(array_unique(array_filter(array_map('strval', $context['resourceUrls']))));
+        $context['tokens'] = $this->ultracache_build_lcp_protection_tokens($context['selectors'], $context['resourceUrls']);
+
+        if ('' === (string) $html) {
+            $request_context = $context;
+        }
+
+        return $context;
+    }
+
+    /** Build distinctive, vendor-agnostic tokens from the LCP selector/resource fingerprint. */
+    private function ultracache_build_lcp_protection_tokens(array $selectors, array $resource_urls)
+    {
+        $tokens = array();
+        $stop = array_fill_keys(array(
+            'active', 'background', 'banner', 'container', 'content', 'desktop', 'element',
+            'first', 'frontend', 'header', 'hero', 'image', 'inner', 'last', 'loaded',
+            'main', 'mobile', 'outer', 'page', 'poster', 'section', 'slide', 'slider',
+            'tablet', 'video', 'wrapper',
+        ), true);
+
+        $add = static function ($token) use (&$tokens, $stop) {
+            $token = strtolower(trim((string) $token));
+            $token = trim($token, " .#:_\\/\t\n\r\0\x0B");
+            if (strlen($token) < 5 || isset($stop[$token]) || preg_match('/^[0-9_-]+$/', $token)) {
+                return;
+            }
+            $tokens[$token] = true;
+        };
+
+        foreach ($selectors as $selector) {
+            $selector = str_replace('\\\\', '', (string) $selector);
+            if (preg_match_all('/[#.]([A-Za-z_][A-Za-z0-9_-]{3,})/', $selector, $matches)) {
+                foreach ((array) $matches[1] as $identifier) {
+                    $add($identifier);
+                    foreach (preg_split('/[-_]+/', (string) $identifier) as $part) {
+                        $add($part);
+                    }
+                }
+            }
+        }
+
+        foreach ($resource_urls as $resource_url) {
+            $path = (string) wp_parse_url((string) $resource_url, PHP_URL_PATH);
+            $base = rawurldecode((string) pathinfo($path, PATHINFO_FILENAME));
+            $base = preg_replace('/-\d+x\d+$/', '', (string) $base);
+            $add($base);
+            foreach (preg_split('/[-_]+/', (string) $base) as $part) {
+                $add($part);
+            }
+        }
+
+        $result = array_keys($tokens);
+        usort($result, static function ($a, $b) {
+            $length = strlen((string) $b) <=> strlen((string) $a);
+            return 0 !== $length ? $length : strcmp((string) $a, (string) $b);
+        });
+        return array_slice($result, 0, 24);
+    }
+
+    /** Expose request-scoped LCP tokens to the browser runtime policy. */
+    private function ultracache_get_lcp_protection_patterns_for_current_request()
+    {
+        $context = $this->ultracache_get_lcp_protection_context();
+        return isset($context['tokens']) && is_array($context['tokens']) ? array_values($context['tokens']) : array();
+    }
+
+    /**
+     * Determine whether one local script has deterministic evidence tying it to
+     * the current LCP fingerprint. This is intentionally page-scoped and only
+     * scans local source during HTML/cache generation; static cache hits never
+     * execute this classifier.
+     *
+     * @return string Matched LCP evidence token or an empty string.
+     */
+    private function ultracache_lcp_protection_context_matches_script($handle, $src, $tag = '', array $settings = array(), array $context_override = array())
+    {
+        if (empty($settings['lcp_image_priority'])) {
+            return '';
+        }
+
+        $context = !empty($context_override) ? $context_override : $this->ultracache_get_lcp_protection_context();
+        $tokens = isset($context['tokens']) && is_array($context['tokens']) ? $context['tokens'] : array();
+        if (empty($tokens) || 'none' === (string) ($context['source'] ?? 'none')) {
+            return '';
+        }
+
+        $haystack = strtolower((string) $handle . "\n" . (string) $src . "\n" . (string) $tag);
+        foreach ($tokens as $token) {
+            $token = strtolower(trim((string) $token));
+            if (strlen($token) >= 5 && false !== strpos($haystack, $token)) {
+                return $token;
+            }
+        }
+
+        if (!$this->is_same_host_public_url($src) || !$this->is_local_wp_content_script_url($src)) {
+            return '';
+        }
+
+        $local_path = $this->resolve_local_path_from_public_url($src);
+        if ('' === $local_path || !is_readable($local_path)) {
+            return '';
+        }
+        $size = (int) @filesize($local_path);
+        if ($size <= 0 || $size > 1572864) {
+            return '';
+        }
+
+        $mtime = (int) @filemtime($local_path);
+        $cache_key = md5($local_path . '|' . $mtime . '|' . implode('|', $tokens));
+        static $matches = array();
+        if (array_key_exists($cache_key, $matches)) {
+            return (string) $matches[$cache_key];
+        }
+
+        $source = function_exists('ultracache_guarded_asset_file_get_contents')
+            ? ultracache_guarded_asset_file_get_contents($local_path, 'js', 'lcp_script_protection_match', true)
+            : '';
+        if (!is_string($source) || '' === $source) {
+            $matches[$cache_key] = '';
+            return '';
+        }
+
+        $source = strtolower($source);
+        foreach ($tokens as $token) {
+            $token = strtolower(trim((string) $token));
+            if (strlen($token) >= 5 && false !== strpos($source, $token)) {
+                $matches[$cache_key] = $token;
+                return $token;
+            }
+        }
+
+        $matches[$cache_key] = '';
+        return '';
+    }
+
+    /** Match a browser-observed simple selector against one raw opening tag. */
+    private function ultracache_observed_lcp_selector_matches_raw_tag($selector, $tag_name, $opening_tag)
+    {
+        $selector = trim(str_replace('\\\\', '', (string) $selector));
+        $tag_name = strtolower(trim((string) $tag_name));
+        if ('' === $selector || 'unknown' === strtolower($selector) || '' === $tag_name || '' === (string) $opening_tag) {
+            return false;
+        }
+
+        if (preg_match('/^#([A-Za-z_][A-Za-z0-9_-]*)$/', $selector, $id_match)) {
+            return (string) $this->extract_attribute_from_html_tag($opening_tag, 'id') === (string) $id_match[1];
+        }
+
+        if (!preg_match('/^([A-Za-z][A-Za-z0-9:-]*)?((?:\.[A-Za-z_][A-Za-z0-9_-]*)+)$/', $selector, $class_match)) {
+            return false;
+        }
+        $selector_tag = strtolower((string) ($class_match[1] ?? ''));
+        if ('' !== $selector_tag && $selector_tag !== $tag_name) {
+            return false;
+        }
+
+        preg_match_all('/\.([A-Za-z_][A-Za-z0-9_-]*)/', (string) ($class_match[2] ?? ''), $required_matches);
+        $required = array_values(array_filter((array) ($required_matches[1] ?? array())));
+        if (empty($required)) {
+            return false;
+        }
+        $classes = preg_split('/\s+/', trim((string) $this->extract_attribute_from_html_tag($opening_tag, 'class')));
+        $class_map = array_fill_keys(array_filter(is_array($classes) ? $classes : array()), true);
+        foreach ($required as $class_name) {
+            if (!isset($class_map[$class_name])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Find the final-HTML boundary represented by the browser mapping. */
+    private function ultracache_find_observed_lcp_boundary_offset($html)
+    {
+        if (!is_string($html) || '' === $html) {
+            return -1;
+        }
+
+        $context = $this->ultracache_get_lcp_protection_context();
+        if (!in_array((string) ($context['source'] ?? ''), array('browser-locked', 'browser-learning'), true)) {
+            return -1;
+        }
+
+        $boundaries = array();
+        foreach ((array) ($context['records'] ?? array()) as $record) {
+            if (!is_array($record)) {
+                continue;
+            }
+            $resource_url = trim((string) ($record['resource_url'] ?? ''));
+            if ('' !== $resource_url) {
+                foreach (array($resource_url, esc_url($resource_url), esc_attr($resource_url), str_replace('&', '&amp;', $resource_url)) as $needle) {
+                    $pos = '' !== $needle ? stripos($html, $needle) : false;
+                    if (false !== $pos) {
+                        $boundaries[] = (int) $pos + strlen($needle);
+                    }
+                }
+            }
+
+            $selector = trim((string) ($record['selector'] ?? ''));
+            $tag_name = strtolower(trim((string) ($record['element_tag'] ?? ($record['tag'] ?? ''))));
+            if ('' === $selector || '' === $tag_name) {
+                continue;
+            }
+            foreach ((array) ultracache_scan_raw_html_tags($html, array($tag_name)) as $tag_record) {
+                if (!empty($tag_record['closing'])) {
+                    continue;
+                }
+                $opening = (string) ($tag_record['raw'] ?? '');
+                if (!$this->ultracache_observed_lcp_selector_matches_raw_tag($selector, $tag_name, $opening)) {
+                    continue;
+                }
+                $end = (int) ($tag_record['end'] ?? 0);
+                if ($end > 0) {
+                    $boundaries[] = $end;
+                }
+                break;
+            }
+        }
+
+        return empty($boundaries) ? -1 : max($boundaries);
     }
 
     private function observed_lcp_attribute_contains_url($value, array $resource_urls, $page_url)
@@ -1069,12 +1393,7 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             return;
         }
 
-        $handle = 'ultracache-lcp-observer';
-        if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'lcp-observer.js', array(), false)) {
-            return;
-        }
-
-        $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheLcpObserverConfig', array(
+        $observer_config = array(
             'ajaxUrl'         => admin_url('admin-ajax.php'),
             'action'          => 'ultracache_lcp_observation',
             'pageUrl'         => $page_url,
@@ -1083,7 +1402,30 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             'observeRequestCredentials' => $credentials_learning_enabled,
             'manualSelectors'           => $selector_data,
             'automatic'       => $automatic_data,
-        ));
+        );
+
+        /*
+         * 3.11.24: keep only the image request-credentials hook parser-early.
+         * The full LCP observer uses buffered PerformanceObserver entries and can
+         * therefore execute with native defer without losing pre-defer LCP data.
+         */
+        if ($credentials_learning_enabled) {
+            $bootstrap_handle = 'ultracache-lcp-request-credentials-bootstrap';
+            if (!$this->ultracache_enqueue_frontend_js_helper($bootstrap_handle, 'lcp-request-credentials-bootstrap.js', array(), false)) {
+                return;
+            }
+            $this->ultracache_add_frontend_js_helper_data($bootstrap_handle, 'ultracacheLcpObserverConfig', $observer_config);
+        }
+
+        $handle = 'ultracache-lcp-observer';
+        if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'lcp-observer.js', array(), false)) {
+            return;
+        }
+        $this->ultracache_add_frontend_js_helper_script_data($handle, 'strategy', 'defer');
+
+        if (!$credentials_learning_enabled) {
+            $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheLcpObserverConfig', $observer_config);
+        }
     }
 
     public function handle_lcp_observation_ajax()
@@ -1123,8 +1465,12 @@ trait Ultra_Cache_Engine_LCP_Observation_Trait
             $source_url = ultracache_server_value('HTTP_REFERER');
         }
         $source_host = strtolower((string) wp_parse_url($source_url, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-        if ('' === $source_host || '' === $home_host || $source_host !== $home_host) {
+        $valid_source = '' !== $source_host && (
+            function_exists('ultracache_is_public_site_url')
+                ? ultracache_is_public_site_url($source_url)
+                : $source_host === strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST))
+        );
+        if (!$valid_source) {
             wp_send_json_error(array('message' => __('Invalid LCP observation origin.', 'ultracache')), 403);
         }
 

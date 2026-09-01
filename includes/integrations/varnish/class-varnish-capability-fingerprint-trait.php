@@ -185,6 +185,12 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
             'secretFingerprint' => (string) ($context['secretFingerprint'] ?? ''),
         );
         $transport_fingerprint = hash('sha256', (string) wp_json_encode($transport_payload));
+        $configured_site_base = function_exists('ultracache_get_configured_site_base')
+            ? (string) ultracache_get_configured_site_base()
+            : '';
+        $configured_site_origin = function_exists('ultracache_get_configured_site_origin')
+            ? (string) ultracache_get_configured_site_origin()
+            : '';
 
         if ('transport' === $contract) {
             return $transport_payload;
@@ -204,8 +210,8 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
                 'methodContract' => $method_contract,
                 'invalidationStrategy' => $context['invalidationStrategy'],
                 'hostScope' => array(
-                    'homeUrl' => (string) home_url('/'),
-                    'siteUrl' => (string) site_url('/'),
+                    'configuredBase' => $configured_site_base,
+                    'configuredOrigin' => $configured_site_origin,
                     'blogId' => function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 0,
                 ),
             );
@@ -244,7 +250,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
                     'afterTargetedInvalidation' => !empty($automation['refillAfterTargetedInvalidation']),
                     'withSiteWarmup' => !empty($automation['warmWithSiteWarmup']),
                 ),
-                'canonicalUrl' => (string) home_url('/'),
+                'canonicalUrl' => $configured_site_base,
             );
         }
 
@@ -258,8 +264,8 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
                 'privateTransportContract' => 4,
                 'browserOptInContract' => 1,
                 'woocommerceParentMetadataContract' => 1,
-                'homeUrl' => (string) home_url('/'),
-                'siteUrl' => (string) site_url('/'),
+                'configuredBase' => $configured_site_base,
+                'configuredOrigin' => $configured_site_origin,
                 'blogId' => function_exists('get_current_blog_id') ? (int) get_current_blog_id() : 0,
             );
         }
@@ -352,7 +358,7 @@ trait Ultra_Cache_WP_Varnish_Capability_Fingerprint_Trait
         $result['verified'] = false;
         $result['configurationChanged'] = true;
         $result['status'] = 'configuration-changed';
-        $result['message'] = self::maybe_translate('The Varnish transport, invalidation contract, or refill policy changed after this test. Run Test Varnish again.');
+        $result['message'] = self::maybe_translate('The Varnish transport, invalidation contract, or refill policy changed after this test. Run Redetect Varnish Capabilities again.');
         $result['varnishDetected'] = false;
         $result['connectionTested'] = false;
         $result['connectionVerified'] = false;

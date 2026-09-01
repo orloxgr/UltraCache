@@ -225,19 +225,19 @@ trait Ultra_Cache_WP_Warm_Status_Trait
                 'cron' => array(
                     'rateLimited' => true,
                     'pagesPerMinute' => max(0, (int) $settings['cron_warm_pages_per_minute']),
-                    'pageTimeBudget' => 20,
+                    'pageTimeBudget' => function_exists('ultracache_get_php_max_execution_time_seconds') ? ultracache_get_php_max_execution_time_seconds() : max(0, (int) ini_get('max_execution_time')),
                 ),
                 'ui' => array(
                     'rateLimited' => false,
-                    'pageTimeBudget' => 60,
+                    'pageTimeBudget' => function_exists('ultracache_get_php_max_execution_time_seconds') ? ultracache_get_php_max_execution_time_seconds() : max(0, (int) ini_get('max_execution_time')),
                 ),
                 'cli' => array(
                     'rateLimited' => false,
-                    'pageTimeBudget' => 180,
+                    'pageTimeBudget' => function_exists('ultracache_get_php_max_execution_time_seconds') ? ultracache_get_php_max_execution_time_seconds() : max(0, (int) ini_get('max_execution_time')),
                 ),
                 'visit' => array(
                     'rateLimited' => false,
-                    'pageTimeBudget' => 15,
+                    'pageTimeBudget' => function_exists('ultracache_get_php_max_execution_time_seconds') ? ultracache_get_php_max_execution_time_seconds() : max(0, (int) ini_get('max_execution_time')),
                 ),
             ),
             'active' => !empty($state['active']),

@@ -112,6 +112,7 @@ body.toplevel_page_ultracache #wpbody-content > .wrap {
 
 #uc-dashboard .justify-between {
 	justify-content: space-between;
+	margin-bottom: 15px;
 }
 
 #uc-dashboard .justify-end {

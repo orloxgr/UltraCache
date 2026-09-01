@@ -44,6 +44,92 @@ trait Ultra_Cache_Rest_Cache_Trait
         ), 200);
     }
 
+    public function get_setup_plan()
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_setup_plan')) {
+            return new WP_REST_Response(
+                array(
+                    'success' => false,
+                    'message' => __('Setup planning engine is not available.', 'ultracache'),
+                ),
+                500
+            );
+        }
+
+        return new WP_REST_Response(Ultra_Cache_WP::get_setup_plan(), 200);
+    }
+
+    public function get_setup_wizard_state()
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_setup_wizard_state')) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => __('Setup wizard state is not available.', 'ultracache'),
+            ), 500);
+        }
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'state'   => Ultra_Cache_WP::get_setup_wizard_state(),
+        ), 200);
+    }
+
+    public function update_setup_wizard_state(WP_REST_Request $request)
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'update_setup_wizard_state')) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => __('Setup wizard state is not available.', 'ultracache'),
+            ), 500);
+        }
+
+        $action = sanitize_key((string) $request->get_param('action'));
+        $payload = array();
+        if ($request->has_param('currentStep')) {
+            $payload['current_step'] = sanitize_key((string) $request->get_param('currentStep'));
+        }
+        if ($request->has_param('completedSteps')) {
+            $completed_steps = $request->get_param('completedSteps');
+            $payload['completed_steps'] = is_array($completed_steps) ? $completed_steps : array();
+        }
+        if ($request->has_param('lastError')) {
+            $payload['last_error'] = sanitize_text_field((string) $request->get_param('lastError'));
+        }
+        if ($request->has_param('lastErrorPhase')) {
+            $payload['last_error_phase'] = sanitize_key((string) $request->get_param('lastErrorPhase'));
+        }
+
+        $state = Ultra_Cache_WP::update_setup_wizard_state($action, $payload);
+        if (is_wp_error($state)) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => $state->get_error_message(),
+            ), 400);
+        }
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'state'   => $state,
+        ), 200);
+    }
+
+    public function setup_apache_static_capability()
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_apache_static_html_delivery_capability_probe')) {
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => __('Apache Static HTML Delivery capability verification is not available.', 'ultracache'),
+            ), 500);
+        }
+
+        $capability = Ultra_Cache_WP::run_apache_static_html_delivery_capability_probe();
+
+        return new WP_REST_Response(array(
+            'success' => true,
+            'capability' => is_array($capability) ? $capability : array(),
+        ), 200);
+    }
+
     public function compression_capabilities()
     {
         if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_html_compression_capability_probe')) {
@@ -67,7 +153,7 @@ trait Ultra_Cache_Rest_Cache_Trait
         );
     }
 
-    public function purge_all()
+    public function purge_all($request = null)
     {
         if (!$this->check_purge_all_permission()) {
             return $this->infrastructure_forbidden_response();
@@ -84,7 +170,22 @@ trait Ultra_Cache_Rest_Cache_Trait
             );
         }
 
-        $success = (bool) $engine->purge_all();
+        $purge_context = array();
+        if ($request instanceof WP_REST_Request) {
+            $reason = sanitize_key((string) $request->get_param('reason'));
+            if ('' !== $reason) {
+                $purge_context['reason'] = $reason;
+            }
+            if ((bool) $request->get_param('preserveForegroundWarm')) {
+                $manual_token = sanitize_text_field((string) $request->get_param('manualToken'));
+                if ('' !== $manual_token) {
+                    $purge_context['preserve_foreground_warm_token'] = $manual_token;
+                    $purge_context['source'] = 'runtime_scan';
+                }
+            }
+        }
+
+        $success = (bool) $engine->purge_all($purge_context);
         $response = array('success' => $success);
         if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_warmup_generation')) {
             $response['warmupGeneration'] = Ultra_Cache_WP::get_warmup_generation();
@@ -239,13 +340,6 @@ trait Ultra_Cache_Rest_Cache_Trait
         );
         $litespeed_keys = array(
             'liteSpeedCacheEnabled',
-            'liteSpeedRefillAfterTargetedInvalidation',
-            'liteSpeedWarmDuringSiteWarmup',
-            'liteSpeedStalePurgeEnabled',
-            'liteSpeedRefreshAheadEnabled',
-            'liteSpeedRefreshAheadThresholdPercent',
-            'liteSpeedRefreshAheadMaxPages',
-            'liteSpeedRefreshAheadPinnedUrls',
             'flushAllIncludeLiteSpeed',
         );
         $varnish_keys = array(
@@ -292,6 +386,9 @@ trait Ultra_Cache_Rest_Cache_Trait
     {
         $allowed_keys = array_keys($this->get_settings_update_args());
         $patch = $this->get_explicit_settings_patch($request, $allowed_keys);
+        $preserve_configured_infrastructure = !empty($patch['preserveConfiguredInfrastructure']);
+        $runtime_js_scan_decision = isset($patch['runtimeJsScanDecision']) ? (string) $patch['runtimeJsScanDecision'] : '';
+        unset($patch['preserveConfiguredInfrastructure'], $patch['runtimeJsScanDecision']);
         if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'normalize_page_delivery_mode_patch')) {
             $patch = Ultra_Cache_WP::normalize_page_delivery_mode_patch($patch);
         }
@@ -301,6 +398,10 @@ trait Ultra_Cache_Rest_Cache_Trait
         $current = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings')
             ? Ultra_Cache_WP::get_dashboard_settings()
             : $stored;
+        $runtime_scan_previous_javascript_strategy = sanitize_key((string) ($current['javascriptStrategy'] ?? 'off'));
+        if (!in_array($runtime_scan_previous_javascript_strategy, array('off', 'defer', 'delay'), true)) {
+            $runtime_scan_previous_javascript_strategy = 'off';
+        }
 
         if ($this->request_may_manage_infrastructure($stored, $patch) && !$this->check_infrastructure_permission($request)) {
             return $this->infrastructure_forbidden_response();
@@ -315,7 +416,10 @@ trait Ultra_Cache_Rest_Cache_Trait
         }
 
         if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'persist_dashboard_settings')) {
-            $response = Ultra_Cache_WP::persist_dashboard_settings($current);
+            $response = Ultra_Cache_WP::persist_dashboard_settings(
+                $current,
+                array('preserveConfiguredInfrastructure' => $preserve_configured_infrastructure)
+            );
             if (is_wp_error($response)) {
                 $error_code = $response->get_error_code();
                 $status = 'ultracache_redis_settings_validation_failed' === $error_code
@@ -333,6 +437,32 @@ trait Ultra_Cache_Rest_Cache_Trait
 
             $response['patchKeys'] = array_keys($patch);
 
+            if (method_exists($this, 'runtime_js_scan_update_policy_ownership_after_settings_save')) {
+                $this->runtime_js_scan_update_policy_ownership_after_settings_save($runtime_js_scan_decision, $patch);
+            }
+
+            if (array_key_exists('javascriptStrategy', $patch)) {
+                $runtime_scan_next_javascript_strategy = sanitize_key((string) $patch['javascriptStrategy']);
+                if (!in_array($runtime_scan_next_javascript_strategy, array('off', 'defer', 'delay'), true)) {
+                    $runtime_scan_next_javascript_strategy = 'off';
+                }
+                if ($runtime_scan_next_javascript_strategy !== $runtime_scan_previous_javascript_strategy) {
+                    $runtime_scan_strategy_option = 'ultracache_runtime_js_scan_last_javascript_strategy';
+                    $runtime_scan_dirty_option = 'ultracache_runtime_js_scan_javascript_strategy_dirty';
+                    $runtime_scan_active_strategy_switch = (
+                        ('defer' === $runtime_scan_previous_javascript_strategy && 'delay' === $runtime_scan_next_javascript_strategy)
+                        || ('delay' === $runtime_scan_previous_javascript_strategy && 'defer' === $runtime_scan_next_javascript_strategy)
+                    );
+                    if ($runtime_scan_active_strategy_switch) {
+                        update_option($runtime_scan_strategy_option, $runtime_scan_previous_javascript_strategy, false);
+                        update_option($runtime_scan_dirty_option, '1', false);
+                    } else {
+                        update_option($runtime_scan_strategy_option, $runtime_scan_next_javascript_strategy, false);
+                        delete_option($runtime_scan_dirty_option);
+                    }
+                }
+            }
+
             if (!empty($response['settings']) && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
                 $response['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
             }
@@ -341,6 +471,30 @@ trait Ultra_Cache_Rest_Cache_Trait
         }
 
         update_option(ULTRACACHE_SETTINGS_KEY, $current);
+        if (method_exists($this, 'runtime_js_scan_update_policy_ownership_after_settings_save')) {
+            $this->runtime_js_scan_update_policy_ownership_after_settings_save($runtime_js_scan_decision, $patch);
+        }
+        if (array_key_exists('javascriptStrategy', $patch)) {
+            $runtime_scan_next_javascript_strategy = sanitize_key((string) $patch['javascriptStrategy']);
+            if (!in_array($runtime_scan_next_javascript_strategy, array('off', 'defer', 'delay'), true)) {
+                $runtime_scan_next_javascript_strategy = 'off';
+            }
+            if ($runtime_scan_next_javascript_strategy !== $runtime_scan_previous_javascript_strategy) {
+                $runtime_scan_strategy_option = 'ultracache_runtime_js_scan_last_javascript_strategy';
+                $runtime_scan_dirty_option = 'ultracache_runtime_js_scan_javascript_strategy_dirty';
+                $runtime_scan_active_strategy_switch = (
+                    ('defer' === $runtime_scan_previous_javascript_strategy && 'delay' === $runtime_scan_next_javascript_strategy)
+                    || ('delay' === $runtime_scan_previous_javascript_strategy && 'defer' === $runtime_scan_next_javascript_strategy)
+                );
+                if ($runtime_scan_active_strategy_switch) {
+                    update_option($runtime_scan_strategy_option, $runtime_scan_previous_javascript_strategy, false);
+                    update_option($runtime_scan_dirty_option, '1', false);
+                } else {
+                    update_option($runtime_scan_strategy_option, $runtime_scan_next_javascript_strategy, false);
+                    delete_option($runtime_scan_dirty_option);
+                }
+            }
+        }
         $client_settings = is_array($current) ? array_diff_key($current, array_flip(array('redisPassword', 'varnishCliKey'))) : array();
         return new WP_REST_Response(array('success' => true, 'settings' => $client_settings, 'patchKeys' => array_keys($patch)), 200);
     }
@@ -447,7 +601,7 @@ trait Ultra_Cache_Rest_Cache_Trait
     }
 
 
-    public function varnish_discover()
+    public function varnish_discover(WP_REST_Request $request)
     {
         if (!$this->check_infrastructure_permission()) {
             return $this->infrastructure_forbidden_response();
@@ -465,7 +619,11 @@ trait Ultra_Cache_Rest_Cache_Trait
             Ultra_Cache_WP::reset_settings_cache();
         }
 
-        $result = Ultra_Cache_WP::run_varnish_discovery();
+        $verify_candidate = rest_sanitize_boolean($request->get_param('verifyCandidate'));
+        $persist_verified = null === $request->get_param('persistVerified')
+            ? true
+            : rest_sanitize_boolean($request->get_param('persistVerified'));
+        $result = Ultra_Cache_WP::run_varnish_discovery($verify_candidate, $persist_verified);
         if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
             Ultra_Cache_WP::reset_settings_cache();
         }
@@ -476,7 +634,7 @@ trait Ultra_Cache_Rest_Cache_Trait
     }
 
 
-    private function run_varnish_exact_url_test_response()
+    private function run_varnish_exact_url_test_response($diagnostic_enable = false)
     {
         if (!$this->check_infrastructure_permission()) {
             return $this->infrastructure_forbidden_response();
@@ -489,7 +647,7 @@ trait Ultra_Cache_Rest_Cache_Trait
         if (method_exists('Ultra_Cache_WP', 'reset_settings_cache')) {
             Ultra_Cache_WP::reset_settings_cache();
         }
-        $result = Ultra_Cache_WP::run_varnish_basic_test();
+        $result = Ultra_Cache_WP::run_varnish_basic_test($diagnostic_enable);
         if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
             $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
         }
@@ -508,9 +666,11 @@ trait Ultra_Cache_Rest_Cache_Trait
         return $this->run_varnish_exact_url_test_response();
     }
 
-    public function varnish_test_behavior()
+    public function varnish_test_behavior(WP_REST_Request $request)
     {
-        return $this->run_varnish_exact_url_test_response();
+        return $this->run_varnish_exact_url_test_response(
+            rest_sanitize_boolean($request->get_param('diagnosticEnable'))
+        );
     }
 
     public function varnish_performance_snapshot()
@@ -656,18 +816,18 @@ trait Ultra_Cache_Rest_Cache_Trait
         }
 
 
-        $profile_probe = filter_var($request->get_param('profileProbe'), FILTER_VALIDATE_BOOLEAN)
+        $capability_probe = filter_var($request->get_param('capabilityProbe'), FILTER_VALIDATE_BOOLEAN)
             || filter_var($request->get_param('skipPayloadProbe'), FILTER_VALIDATE_BOOLEAN);
 
         $result = Ultra_Cache_WP::test_object_cache_backend($backend, $settings);
-        $result['profileProbe'] = (bool) $profile_probe;
+        $result['capabilityProbe'] = (bool) $capability_probe;
 
-        // Profile auto-selection needs backend availability only. Do not mix the
+        // Optimal-settings capability detection needs backend availability only. Do not mix the
         // runtime object payload probe into that decision, because the active
-        // runtime backend may still be the previous setting until the profile is
-        // saved and WordPress bootstraps again. Manual backend tests keep the
+        // runtime backend may still be the previous setting until the new settings
+        // are saved and WordPress bootstraps again. Manual backend tests keep the
         // payload probe so users can explicitly verify object payload storage.
-        if (!$profile_probe && !empty($result['success']) && class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads')) {
+        if (!$capability_probe && !empty($result['success']) && class_exists('Ultra_Cache_Object_Cache_Manager') && method_exists('Ultra_Cache_Object_Cache_Manager', 'test_runtime_object_cache_payloads')) {
             $payload_probe = Ultra_Cache_Object_Cache_Manager::test_runtime_object_cache_payloads();
             $result['payloadProbe'] = is_array($payload_probe) ? $payload_probe : array();
             if (empty($payload_probe['success'])) {
@@ -678,8 +838,8 @@ trait Ultra_Cache_Rest_Cache_Trait
             }
         }
         $status = !empty($result['blocked']) ? 400 : (!empty($result['success']) ? 200 : 500);
-        if ($profile_probe && empty($result['blocked'])) {
-            // Profile auto-setup treats a determinate unavailable backend as a
+        if ($capability_probe && empty($result['blocked'])) {
+            // Optimal-settings auto-setup treats a determinate unavailable backend as a
             // normal probe result, not as a browser-level server failure.
             // Manual backend tests keep strict HTTP status semantics.
             $status = 200;
@@ -714,6 +874,28 @@ trait Ultra_Cache_Rest_Cache_Trait
 
         $result = Ultra_Cache_WP::flush_object_cache($backend);
         return new WP_REST_Response($result, !empty($result['success']) ? 200 : 500);
+    }
+
+
+    public function cache_conflict_preflight_status(?WP_REST_Request $request = null)
+    {
+        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'get_cache_conflict_preflight_status')) {
+            return new WP_REST_Response(array('success' => false, 'message' => __('Cache conflict preflight is not available.', 'ultracache')), 500);
+        }
+
+        $page_cache_requested = true;
+        $object_cache_requested = false;
+        if ($request instanceof WP_REST_Request) {
+            if ($request->has_param('pageCacheRequested')) {
+                $page_cache_requested = rest_sanitize_boolean($request->get_param('pageCacheRequested'));
+            }
+            if ($request->has_param('objectCacheRequested')) {
+                $object_cache_requested = rest_sanitize_boolean($request->get_param('objectCacheRequested'));
+            }
+        }
+
+        $result = Ultra_Cache_WP::get_cache_conflict_preflight_status($page_cache_requested, $object_cache_requested);
+        return new WP_REST_Response($result, 200);
     }
 
 
@@ -790,13 +972,15 @@ trait Ultra_Cache_Rest_Cache_Trait
         $cursor = (string) $request->get_param('cursor');
         $limit = max(1, min(500, absint($request->get_param('limit')) ?: 100));
         $scope = sanitize_text_field((string) $request->get_param('scope'));
+        $operation = sanitize_key((string) $request->get_param('operation'));
+        $language = sanitize_text_field((string) $request->get_param('language'));
 
         if (!$engine || !method_exists($engine, 'get_crawl_urls')) {
             return new WP_REST_Response($this->paginate_complete_item_set(array(), $offset, $limit), 200);
         }
 
         if (method_exists($engine, 'get_crawl_urls_cursor_batch')) {
-            return new WP_REST_Response($engine->get_crawl_urls_cursor_batch($cursor, $limit, $scope), 200);
+            return new WP_REST_Response($engine->get_crawl_urls_cursor_batch($cursor, $limit, $scope, $operation, $language), 200);
         }
 
         if (method_exists($engine, 'get_crawl_urls_batch')) {
@@ -849,6 +1033,13 @@ trait Ultra_Cache_Rest_Cache_Trait
         return $result;
     }
 
+    /** Return whether this target may build a CSS bundle under multilingual warm policy. */
+    private function multilingual_warm_allows_css_bundle_for_url($url)
+    {
+        return !function_exists('ultracache_multilingual_public_url_allows_warm_operation')
+            || ultracache_multilingual_public_url_allows_warm_operation($url, 'css_bundle');
+    }
+
     public function crawl_page(WP_REST_Request $request)
     {
         $url = esc_url_raw((string) $request->get_param('url'));
@@ -858,11 +1049,13 @@ trait Ultra_Cache_Rest_Cache_Trait
 
         $manual_token = sanitize_text_field((string) $request->get_param('manualToken'));
         $manual_heartbeat = null;
+        $manual_job_type = '';
         if ('' !== $manual_token && class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'renew_foreground_warmup_session')) {
             $manual_generation = 0;
             $initial_renewal = Ultra_Cache_WP::renew_foreground_warmup_session($manual_token, 'ui', 'page-pipeline-start', $url);
             if (!empty($initial_renewal['success'])) {
                 $manual_generation = max(0, (int) ($initial_renewal['generation'] ?? 0));
+                $manual_job_type = sanitize_key((string) ($initial_renewal['state']['jobType'] ?? ''));
             }
             $manual_heartbeat = static function ($stage = '') use ($manual_token, $manual_generation, $url) {
                 $manual_state = Ultra_Cache_WP::renew_foreground_warmup_session($manual_token, 'ui', $stage, $url, $manual_generation);
@@ -902,30 +1095,44 @@ trait Ultra_Cache_Rest_Cache_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Only local site URLs can be crawled.', 'ultracache')), 400);
         }
 
+        $purge_target_first = rest_sanitize_boolean($request->get_param('purgeTargetFirst'));
+
         $build_css_bundle = (bool) $request->get_param('buildCssBundle');
+        if ($build_css_bundle && !$this->multilingual_warm_allows_css_bundle_for_url($url)) {
+            $build_css_bundle = false;
+        }
         $warm_args = array(
             'build_css_bundle'      => $build_css_bundle,
             'force_refresh'         => '' !== $manual_token,
             'ignore_runtime_bypass' => '' !== $manual_token,
+            'purge_target_first'    => $purge_target_first,
         );
         if ('' !== $manual_token && !$build_css_bundle) {
-            // Manual HTML-only warm buttons must not trigger the automatic CSS bundle
-            // preparation path. HTML+CSS buttons opt in through buildCssBundle.
+            // Manual HTML-only warm buttons and multilingual CSS-policy exclusions
+            // must not trigger the runner's automatic CSS bundle preparation path.
             $warm_args['skip_css_bundle'] = true;
         }
 
         if ('' !== $manual_token && method_exists($engine, 'warm_page_pipeline')) {
             $warm_args['include_varnish'] = true;
             $warm_args['include_litespeed'] = true;
-            $warm_args['warm_context'] = 'manual';
+            $warm_args['warm_context'] = 'runtime_scan' === $manual_job_type ? 'runtime_scan' : 'manual';
             $warm_args['_queue_lease_heartbeat'] = $manual_heartbeat;
             $result = $engine->warm_page_pipeline($url, $warm_args);
         } else {
             $result = $engine->warm_url($url, $warm_args);
         }
+        $transient_url_lock = (
+            !empty($result['coalesced'])
+            && !empty($result['retryable'])
+            && empty($result['terminal'])
+            && 'url-lock-busy' === (string) ($result['failureClass'] ?? '')
+        );
         $status = !empty($result['ownershipLost'])
             ? 409
-            : (!empty($result['success']) || !empty($result['skipped']) ? 200 : 500);
+            : (!empty($result['success']) || !empty($result['skipped'])
+                ? 200
+                : ($transient_url_lock ? 202 : 500));
         return new WP_REST_Response($result, $status);
     }
 
@@ -1019,7 +1226,74 @@ trait Ultra_Cache_Rest_Cache_Trait
         } while (true);
     }
 
-    public function warm_frontpage_html()
+    /** Return canonical dashboard homepage targets without guessing redirects. */
+    private function get_dashboard_frontpage_warm_targets($language_code = '', $operation = 'homepage')
+    {
+        $language_code = function_exists('ultracache_multilingual_normalize_language_code')
+            ? ultracache_multilingual_normalize_language_code($language_code)
+            : trim((string) $language_code);
+        $operation = sanitize_key((string) $operation);
+        if (!in_array($operation, array('homepage', 'menu', 'full_site'), true)) {
+            $operation = 'homepage';
+        }
+
+        if ('' !== $language_code && function_exists('ultracache_multilingual_is_active') && ultracache_multilingual_is_active()) {
+            $eligible = function_exists('ultracache_multilingual_get_warm_languages')
+                ? ultracache_multilingual_get_warm_languages($operation)
+                : array();
+            if (!in_array($language_code, array_map('strval', (array) $eligible), true)) {
+                return array();
+            }
+
+            $homes = function_exists('ultracache_multilingual_get_language_home_urls')
+                ? ultracache_multilingual_get_language_home_urls()
+                : array();
+            $target = isset($homes[$language_code]) ? trim((string) $homes[$language_code]) : '';
+            if ('' === $target && function_exists('ultracache_multilingual_translate_url')) {
+                $configured_home = trim((string) get_option('home'));
+                if ('' !== $configured_home) {
+                    $target = trim((string) ultracache_multilingual_translate_url($configured_home, $language_code));
+                }
+            }
+            return '' !== $target ? array($target) : array();
+        }
+
+        if (function_exists('ultracache_get_frontpage_warm_targets')) {
+            $targets = ultracache_get_frontpage_warm_targets($operation);
+            return array_values(array_unique(array_filter(array_map('strval', (array) $targets))));
+        }
+
+        return array(home_url('/'));
+    }
+
+    /** Attach legacy fallback refills to every target result, then re-summarize. */
+    private function maybe_refill_dashboard_frontpage_fallback_result(array $result, array $targets, $label)
+    {
+        if (!empty($result['targetResults']) && is_array($result['targetResults'])) {
+            $target_results = array();
+            foreach (array_values($result['targetResults']) as $index => $target_result) {
+                if (!is_array($target_result)) {
+                    continue;
+                }
+                $url = !empty($target_result['url'])
+                    ? (string) $target_result['url']
+                    : (string) ($targets[$index] ?? '');
+                $target_result = $this->maybe_refill_varnish_after_dashboard_warm($target_result, $url);
+                $target_result = $this->maybe_refill_litespeed_after_dashboard_warm($target_result, $url);
+                $target_results[] = $target_result;
+            }
+
+            return function_exists('ultracache_summarize_frontpage_warm_results')
+                ? ultracache_summarize_frontpage_warm_results($target_results, $label)
+                : $result;
+        }
+
+        $url = !empty($result['url']) ? (string) $result['url'] : (string) ($targets[0] ?? home_url('/'));
+        $result = $this->maybe_refill_varnish_after_dashboard_warm($result, $url);
+        return $this->maybe_refill_litespeed_after_dashboard_warm($result, $url);
+    }
+
+    public function warm_frontpage_html(WP_REST_Request $request = null)
     {
         $guard = $this->guard_page_cache_enabled();
         if ($guard instanceof WP_REST_Response) {
@@ -1031,7 +1305,17 @@ trait Ultra_Cache_Rest_Cache_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
         }
 
-        $frontpage_url = home_url('/');
+        $language_code = $request instanceof WP_REST_Request ? sanitize_text_field((string) $request->get_param('language')) : '';
+        $policy_operation = $request instanceof WP_REST_Request ? sanitize_key((string) $request->get_param('operation')) : 'homepage';
+        $targets = $this->get_dashboard_frontpage_warm_targets($language_code, $policy_operation);
+        if (empty($targets)) {
+            return new WP_REST_Response(array(
+                'success' => true,
+                'skipped' => true,
+                'message' => __('No multilingual language is enabled for Warm Homepage.', 'ultracache'),
+            ), 200);
+        }
+        $frontpage_url = (string) reset($targets);
         $priority = $this->begin_dashboard_warm_priority_session('warm', $frontpage_url);
         if (empty($priority['success'])) {
             return new WP_REST_Response($priority, 409);
@@ -1039,23 +1323,32 @@ trait Ultra_Cache_Rest_Cache_Trait
 
         try {
             if (method_exists($engine, 'warm_page_pipeline')) {
-                $result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $frontpage_url, array(
-                    'force_refresh'         => true,
-                    'ignore_runtime_bypass' => true,
-                    'skip_css_bundle'       => true,
-                    'include_varnish'       => true,
-                    'include_litespeed'     => true,
-                    'warm_context'          => 'ui',
-                    '_queue_lease_heartbeat' => $priority['heartbeat'],
-                ));
+                $results = array();
+                foreach ($targets as $target_url) {
+                    $target_result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $target_url, array(
+                        'force_refresh'          => true,
+                        'ignore_runtime_bypass'  => true,
+                        'skip_css_bundle'        => true,
+                        'include_varnish'        => true,
+                        'include_litespeed'      => true,
+                        'warm_context'           => 'ui',
+                        '_queue_lease_heartbeat' => $priority['heartbeat'],
+                    ));
+                    $results[] = $target_result;
+                    if (!empty($target_result['ownershipLost'])) {
+                        break;
+                    }
+                }
+                $result = function_exists('ultracache_summarize_frontpage_warm_results')
+                    ? ultracache_summarize_frontpage_warm_results($results, 'Front page HTML warm')
+                    : (isset($results[0]) ? $results[0] : array('success' => false, 'message' => __('No front page warm target was available.', 'ultracache')));
             } else {
                 $result = $engine->warm_frontpage_html(array(
                     'force_refresh'         => true,
                     'ignore_runtime_bypass' => true,
                     'skip_css_bundle'       => true,
                 ));
-                $result = $this->maybe_refill_varnish_after_dashboard_warm($result, $frontpage_url);
-                $result = $this->maybe_refill_litespeed_after_dashboard_warm($result, $frontpage_url);
+                $result = $this->maybe_refill_dashboard_frontpage_fallback_result($result, $targets, 'Front page HTML warm');
             }
         } finally {
             $this->end_dashboard_warm_priority_session($priority['token'] ?? '');
@@ -1065,7 +1358,7 @@ trait Ultra_Cache_Rest_Cache_Trait
         return new WP_REST_Response($result, $status);
     }
 
-    public function warm_frontpage_html_css()
+    public function warm_frontpage_html_css(WP_REST_Request $request = null)
     {
         $guard = $this->guard_page_cache_enabled();
         if ($guard instanceof WP_REST_Response) {
@@ -1082,7 +1375,17 @@ trait Ultra_Cache_Rest_Cache_Trait
             return new WP_REST_Response(array('success' => false, 'message' => __('Cache engine not available.', 'ultracache')), 500);
         }
 
-        $frontpage_url = home_url('/');
+        $language_code = $request instanceof WP_REST_Request ? sanitize_text_field((string) $request->get_param('language')) : '';
+        $policy_operation = $request instanceof WP_REST_Request ? sanitize_key((string) $request->get_param('operation')) : 'homepage';
+        $targets = $this->get_dashboard_frontpage_warm_targets($language_code, $policy_operation);
+        if (empty($targets)) {
+            return new WP_REST_Response(array(
+                'success' => true,
+                'skipped' => true,
+                'message' => __('No multilingual language is enabled for Warm Homepage.', 'ultracache'),
+            ), 200);
+        }
+        $frontpage_url = (string) reset($targets);
         $priority = $this->begin_dashboard_warm_priority_session('warm_css_homepage', $frontpage_url);
         if (empty($priority['success'])) {
             return new WP_REST_Response($priority, 409);
@@ -1090,21 +1393,32 @@ trait Ultra_Cache_Rest_Cache_Trait
 
         try {
             if (method_exists($engine, 'warm_page_pipeline')) {
-                $result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $frontpage_url, array(
-                    'build_css_bundle'       => true,
-                    'force_refresh'          => true,
-                    'ignore_runtime_bypass'  => true,
-                    'include_varnish'        => true,
-                    'include_litespeed'      => true,
-                    'warm_context'           => 'ui',
-                    '_queue_lease_heartbeat' => $priority['heartbeat'],
-                ));
+                $results = array();
+                foreach ($targets as $target_url) {
+                    $build_target_css = $this->multilingual_warm_allows_css_bundle_for_url($target_url);
+                    $target_result = $this->run_dashboard_warm_pipeline_with_lock_retry($engine, $target_url, array(
+                        'build_css_bundle'       => $build_target_css,
+                        'skip_css_bundle'        => !$build_target_css,
+                        'force_refresh'          => true,
+                        'ignore_runtime_bypass'  => true,
+                        'include_varnish'        => true,
+                        'include_litespeed'      => true,
+                        'warm_context'           => 'ui',
+                        '_queue_lease_heartbeat' => $priority['heartbeat'],
+                    ));
+                    $results[] = $target_result;
+                    if (!empty($target_result['ownershipLost'])) {
+                        break;
+                    }
+                }
+                $result = function_exists('ultracache_summarize_frontpage_warm_results')
+                    ? ultracache_summarize_frontpage_warm_results($results, 'Front page HTML + CSS warm')
+                    : (isset($results[0]) ? $results[0] : array('success' => false, 'message' => __('No front page CSS warm target was available.', 'ultracache')));
             } else {
                 $result = $engine->warm_frontpage_html_with_css(array(
                     'ignore_runtime_bypass' => true,
                 ));
-                $result = $this->maybe_refill_varnish_after_dashboard_warm($result, $frontpage_url);
-                $result = $this->maybe_refill_litespeed_after_dashboard_warm($result, $frontpage_url);
+                $result = $this->maybe_refill_dashboard_frontpage_fallback_result($result, $targets, 'Front page HTML + CSS warm');
             }
         } finally {
             $this->end_dashboard_warm_priority_session($priority['token'] ?? '');

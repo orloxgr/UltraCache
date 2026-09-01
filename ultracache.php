@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: UltraCache
+ * Plugin Name: UltraCache - Cache and Speed Optimization
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 2.59.13.15
+ * Version: 3.13.12
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '2.59.13.15');
+    define('ULTRACACHE_VERSION', '3.13.12');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);
@@ -36,7 +36,8 @@ if (!defined('ULTRACACHE_URL')) {
 require_once ULTRACACHE_PATH . 'includes/core/functions.php';
 require_once ULTRACACHE_PATH . 'includes/core/html-variant-functions.php';
 require_once ULTRACACHE_PATH . 'includes/core/srcset-functions.php';
-require_once ULTRACACHE_PATH . 'includes/esi/functions.php';
+require_once ULTRACACHE_PATH . 'includes/integrations/varnish/esi/functions.php';
+require_once ULTRACACHE_PATH . 'includes/integrations/litespeed/esi/functions.php';
 require_once ULTRACACHE_PATH . 'includes/integrations/woocommerce/functions.php';
 require_once ULTRACACHE_PATH . 'includes/bootstrap/class-class-loader.php';
 Ultra_Cache_Class_Loader::register();
@@ -90,20 +91,27 @@ require_once ultracache_plugin_dir('includes/settings/class-settings-persistence
 require_once ultracache_plugin_dir('includes/admin/class-admin-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/class-varnish-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/elementor/class-elementor-cache-coherency-trait.php');
-require_once ultracache_plugin_dir('includes/esi/class-esi-endpoint-trait.php');
-require_once ultracache_plugin_dir('includes/esi/class-esi-lifecycle-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/real-cookie-banner/class-real-cookie-banner-compatibility-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/complianz/class-complianz-compatibility-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/varnish/esi/class-varnish-esi-endpoint-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/esi/class-litespeed-esi-endpoint-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/varnish/esi/class-varnish-esi-lifecycle-trait.php');
 require_once ultracache_plugin_dir('includes/diagnostics/class-diagnostics-trait.php');
 require_once ultracache_plugin_dir('includes/bootstrap/class-bootstrap-trait.php');
 require_once ultracache_plugin_dir('includes/cache/class-dropin-reconciliation-trait.php');
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-config-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/wpml/class-wpml-topology-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/multilingual/class-multilingual-topology-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-metrics-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-transport-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-control-trait.php');
+require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-queue-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refill-trait.php');
-require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refresh-candidates-trait.php');
-require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-refresh-ahead-trait.php');
 require_once ultracache_plugin_dir('includes/integrations/litespeed/class-litespeed-diagnostics-trait.php');
 require_once ultracache_plugin_dir('includes/runtime/class-runtime-cache-services-trait.php');
+require_once ultracache_plugin_dir('includes/setup/class-setup-planning-trait.php');
+require_once ultracache_plugin_dir('includes/setup/class-setup-apache-static-capability-trait.php');
+require_once ultracache_plugin_dir('includes/setup/class-setup-wizard-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-warm-plan-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-warm-rate-trait.php');
 require_once ultracache_plugin_dir('includes/warmup/class-warm-coordination-access-trait.php');
@@ -123,14 +131,17 @@ class Ultra_Cache_WP
     use Ultra_Cache_WP_Bootstrap_Trait;
     use Ultra_Cache_WP_Dropin_Reconciliation_Trait;
     use Ultra_Cache_WP_Runtime_Config_Trait;
+    use Ultra_Cache_WP_Multilingual_Topology_Trait;
     use Ultra_Cache_WP_LiteSpeed_Metrics_Trait;
     use Ultra_Cache_WP_LiteSpeed_Transport_Trait;
     use Ultra_Cache_WP_LiteSpeed_Control_Trait;
+    use Ultra_Cache_WP_LiteSpeed_Queue_Trait;
     use Ultra_Cache_WP_LiteSpeed_Refill_Trait;
-    use Ultra_Cache_WP_LiteSpeed_Refresh_Candidates_Trait;
-    use Ultra_Cache_WP_LiteSpeed_Refresh_Ahead_Trait;
     use Ultra_Cache_WP_LiteSpeed_Diagnostics_Trait;
     use Ultra_Cache_WP_Runtime_Cache_Services_Trait;
+    use Ultra_Cache_WP_Setup_Planning_Trait;
+    use Ultra_Cache_WP_Setup_Apache_Static_Capability_Trait;
+    use Ultra_Cache_WP_Setup_Wizard_Trait;
     use Ultra_Cache_WP_Warm_Plan_Trait;
     use Ultra_Cache_WP_Warm_Rate_Trait;
     use Ultra_Cache_WP_Warm_Coordination_Access_Trait;
@@ -149,8 +160,11 @@ class Ultra_Cache_WP
     use Ultra_Cache_WP_Admin_Trait;
     use Ultra_Cache_WP_Varnish_Trait;
     use Ultra_Cache_WP_Elementor_Cache_Coherency_Trait;
-    use Ultra_Cache_WP_ESI_Endpoint_Trait;
-    use Ultra_Cache_WP_ESI_Lifecycle_Trait;
+    use Ultra_Cache_WP_Real_Cookie_Banner_Compatibility_Trait;
+    use Ultra_Cache_WP_Complianz_Compatibility_Trait;
+    use Ultra_Cache_WP_Varnish_ESI_Endpoint_Trait;
+    use Ultra_Cache_WP_LiteSpeed_ESI_Endpoint_Trait;
+    use Ultra_Cache_WP_Varnish_ESI_Lifecycle_Trait;
     use Ultra_Cache_WP_Diagnostics_Trait;
 
     /** @var Ultra_Cache_WP|null */
@@ -166,6 +180,27 @@ class Ultra_Cache_WP
 
     /** @var bool Current request owns the disposable warm-runtime upgrade reset. */
     private static $public_warm_runtime_reset_active = false;
+
+    /** @var bool Coalesced WooCommerce routing-contract synchronization is pending. */
+    private static $woocommerce_endpoint_contract_sync_pending = false;
+
+    /** @var bool A late WPML public-topology comparison is pending. */
+    private static $wpml_topology_reconciliation_pending = false;
+
+    /** @var bool WPML topology reconciliation is currently mutating cache state. */
+    private static $wpml_topology_reconciliation_running = false;
+
+    /** @var string Source that requested the late WPML topology comparison. */
+    private static $wpml_topology_reconciliation_source = '';
+
+    /** @var bool A late provider-neutral multilingual topology comparison is pending. */
+    private static $multilingual_topology_reconciliation_pending = false;
+
+    /** @var bool Provider-neutral multilingual topology reconciliation is mutating cache state. */
+    private static $multilingual_topology_reconciliation_running = false;
+
+    /** @var string Source that requested the late multilingual topology comparison. */
+    private static $multilingual_topology_reconciliation_source = '';
 }
 
 function ultracache_ultracache()

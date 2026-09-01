@@ -102,7 +102,7 @@ trait Ultra_Cache_WP_Varnish_Performance_Trait
 
         $payload = array(
             'schema' => 2,
-            'homeUrl' => esc_url_raw(home_url('/')),
+            'siteOrigin' => function_exists('ultracache_get_configured_site_origin') ? ultracache_get_configured_site_origin() : '',
             'runtimeEnabled' => self::is_varnish_runtime_enabled($dashboard_settings),
             'buckets' => array_values($buckets),
             'transportFingerprint' => method_exists(static::class, 'get_varnish_capability_contract_fingerprint')

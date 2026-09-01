@@ -11,6 +11,16 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 {
 	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses a private custom physical media conversion unit table with validated table identifiers.
 
+	/** Per-request memo for physical-unit schema verification capabilities. */
+	private $media_queue_units_schema_request_memo = array();
+
+	/** Per-request latest physical-unit lookup cache used by frontend terminal-state reads. */
+	private $media_queue_terminal_unit_request_memo = array();
+
+	private function reset_media_queue_units_schema_request_memo() {
+		$this->media_queue_units_schema_request_memo = array();
+	}
+
 	/**
 	 * Return the validated physical media conversion unit table name.
 	 *
@@ -25,13 +35,76 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 			: $table;
 	}
 
+
+	/**
+	 * Return the latest physical-unit state for one uploads-relative source path.
+	 *
+	 * The query belongs to the custom media queue repository layer and is
+	 * request-memoized, so frontend URL resolution never issues the same custom
+	 * table lookup twice in one PHP request.
+	 *
+	 * @param string $source_relative_path Uploads-relative source path.
+	 * @param string $output_format        avif or webp.
+	 * @return array{status:string,target_relative_path:string}|array{}
+	 */
+	private function get_latest_media_queue_unit_state_by_source_path($source_relative_path, $output_format) {
+		$source_relative_path = function_exists('ultracache_normalize_media_source_relative_path')
+			? ultracache_normalize_media_source_relative_path((string) $source_relative_path, (string) $output_format)
+			: ltrim(str_replace('\\', '/', (string) $source_relative_path), '/');
+		$output_format = strtolower(trim((string) $output_format));
+		if (!$source_relative_path || !in_array($output_format, array('avif', 'webp'), true)) {
+			return array();
+		}
+
+		$memo_key = $output_format . '|' . md5((string) $source_relative_path);
+		if (array_key_exists($memo_key, $this->media_queue_terminal_unit_request_memo)) {
+			return (array) $this->media_queue_terminal_unit_request_memo[$memo_key];
+		}
+		if (!$this->ensure_media_queue_units_table()) {
+			$this->media_queue_terminal_unit_request_memo[$memo_key] = array();
+			return array();
+		}
+
+		global $wpdb;
+		$table = $this->get_media_queue_units_table_name();
+		$row = '' !== $table ? $wpdb->get_row(
+			$wpdb->prepare(
+				"SELECT status, target_relative_path FROM %i WHERE source_relative_path = %s AND output_format = %s ORDER BY id DESC LIMIT 1",
+				$table,
+				$source_relative_path,
+				$output_format
+			),
+			ARRAY_A
+		) : null;
+
+		if (!is_array($row)) {
+			$this->media_queue_terminal_unit_request_memo[$memo_key] = array();
+			return array();
+		}
+
+		$result = array(
+			'status'               => sanitize_key((string) ($row['status'] ?? '')),
+			'target_relative_path' => ltrim(str_replace('\\', '/', (string) ($row['target_relative_path'] ?? '')), '/'),
+		);
+		$this->media_queue_terminal_unit_request_memo[$memo_key] = $result;
+		return $result;
+	}
+
 	/**
 	 * Check whether the physical media conversion unit table exists.
 	 *
 	 * @return bool
 	 */
-	private function media_queue_units_table_exists() {
+	private function media_queue_units_table_exists($force_schema_verify = false) {
 		global $wpdb;
+
+		if (!$force_schema_verify && self::MEDIA_QUEUE_UNITS_DB_VERSION === (string) get_option(self::MEDIA_QUEUE_UNITS_DB_VERSION_OPTION, '')) {
+			return true;
+		}
+
+		if (array_key_exists('table_exists', $this->media_queue_units_schema_request_memo)) {
+			return (bool) $this->media_queue_units_schema_request_memo['table_exists'];
+		}
 
 		$table = $this->get_media_queue_units_table_name();
 		if ('' === $table) {
@@ -39,7 +112,8 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 		}
 
 		$found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-		return (string) $found === (string) $table;
+		$this->media_queue_units_schema_request_memo['table_exists'] = ((string) $found === (string) $table);
+		return (bool) $this->media_queue_units_schema_request_memo['table_exists'];
 	}
 
 	/**
@@ -56,7 +130,10 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 			return array();
 		}
 
-		$rows = $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+		if (!array_key_exists('index_rows', $this->media_queue_units_schema_request_memo)) {
+			$this->media_queue_units_schema_request_memo['index_rows'] = (array) $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+		}
+		$rows = (array) $this->media_queue_units_schema_request_memo['index_rows'];
 		$index_name = (string) $index_name;
 		$matches = array_values(
 			array_filter(
@@ -143,9 +220,12 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 			'started_at',
 			'completed_at',
 		);
-		$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
+		if (!array_key_exists('columns_exist', $this->media_queue_units_schema_request_memo)) {
+			$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
+			$this->media_queue_units_schema_request_memo['columns_exist'] = empty(array_diff($required, array_map('strval', (array) $columns)));
+		}
 
-		return empty(array_diff($required, array_map('strval', (array) $columns)));
+		return (bool) $this->media_queue_units_schema_request_memo['columns_exist'];
 	}
 
 	/**
@@ -154,7 +234,7 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 	 * @return bool
 	 */
 	private function media_queue_units_schema_is_current() {
-		return $this->media_queue_units_table_exists()
+		return $this->media_queue_units_table_exists(true)
 			&& $this->media_queue_units_columns_exist()
 			&& $this->media_queue_units_index_matches(
 				'parent_unit',
@@ -175,6 +255,11 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 				'status_id',
 				array('status', 'id'),
 				false
+			)
+			&& $this->media_queue_units_index_matches(
+				'source_path_format_id',
+				array('source_relative_path', 'output_format', 'id'),
+				false
 			);
 	}
 
@@ -183,7 +268,7 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 	 *
 	 * @return bool
 	 */
-	public function ensure_media_queue_units_table() {
+	public function ensure_media_queue_units_table($force_schema_verify = false) {
 		global $wpdb;
 
 		$table = $this->get_media_queue_units_table_name();
@@ -192,7 +277,16 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 		}
 
 		$version = (string) get_option(self::MEDIA_QUEUE_UNITS_DB_VERSION_OPTION, '');
-		if (self::MEDIA_QUEUE_UNITS_DB_VERSION === $version && $this->media_queue_units_schema_is_current()) {
+		$force_schema_verify = (bool) $force_schema_verify;
+
+		// Current stored schema version is authoritative during normal runtime.
+		// Expensive SHOW TABLES/COLUMNS/INDEX checks run only on forced lifecycle
+		// verification or when the stored version is outdated/missing.
+		if (!$force_schema_verify && self::MEDIA_QUEUE_UNITS_DB_VERSION === $version) {
+			return true;
+		}
+
+		if ($force_schema_verify && self::MEDIA_QUEUE_UNITS_DB_VERSION === $version && $this->media_queue_units_schema_is_current()) {
 			return true;
 		}
 
@@ -200,6 +294,7 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 			return false;
 		}
 
+		$this->reset_media_queue_units_schema_request_memo();
 		$charset_collate = $wpdb->get_charset_collate();
 		$sql = "CREATE TABLE {$table} (
 			id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -233,10 +328,12 @@ trait Ultra_Cache_Media_Queue_Units_Trait
 			KEY parent_status (parent_queue_id, status, id),
 			KEY attachment_format (attachment_id, output_format),
 			KEY status_id (status, id),
+			KEY source_path_format_id (source_relative_path(160), output_format, id),
 			KEY updated_at (updated_at)
 		) {$charset_collate};";
 
 		dbDelta($sql);
+		$this->reset_media_queue_units_schema_request_memo();
 		if (!$this->media_queue_units_schema_is_current()) {
 			return false;
 		}

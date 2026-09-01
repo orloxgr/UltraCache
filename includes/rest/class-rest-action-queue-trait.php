@@ -94,7 +94,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         return $exists;
     }
 
-    public function ensure_action_jobs_table()
+    public function ensure_action_jobs_table($force_schema_verify = false)
     {
         global $wpdb;
 
@@ -104,6 +104,9 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
 
         $table = $this->get_action_jobs_table_name();
         $version = (string) get_option($this->get_action_jobs_db_version_option_key(), '');
+        if (!$force_schema_verify && $this->get_action_jobs_db_version() === $version) {
+            return true;
+        }
         if ($this->get_action_jobs_db_version() === $version && $this->action_jobs_table_exists()) {
             return true;
         }
@@ -708,7 +711,11 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
 
         $normalized = array();
         foreach ($params as $key => $value) {
-            $key = sanitize_key((string) $key);
+            // Action parameter names are part of the internal REST contract and may
+            // be camelCase (for example manualToken/preserveForegroundWarm).
+            // sanitize_key() lowercases identifiers and therefore changes the
+            // parameter name before the synchronous action receives it.
+            $key = preg_replace('/[^A-Za-z0-9_-]/', '', trim((string) $key));
             if ('' === $key) {
                 continue;
             }
@@ -918,7 +925,7 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
                 return new WP_REST_Response(array('success' => true, 'job' => $this->action_queue_public_job($job)), 202);
             }
             $job['status'] = 'running';
-            $job['startedAt'] = !empty($job['startedAt']) ? (int) $job['startedAt'] : time();
+            $job['startedAt'] = time();
             $job['updatedAt'] = time();
             $job['message'] = __('Processing the next HTML JS dependency analysis batch.', 'ultracache');
             $jobs[$id] = $job;
@@ -1024,7 +1031,11 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
         try {
             switch ($action) {
                 case 'purge_all':
-                    return $this->unwrap_rest_payload($this->purge_all());
+                    $purge_request = new WP_REST_Request('POST', '/');
+                    foreach ($params as $key => $value) {
+                        $purge_request->set_param($key, $value);
+                    }
+                    return $this->unwrap_rest_payload($this->purge_all($purge_request));
                 case 'object_cache_flush':
                     $flush_request = new WP_REST_Request('POST', '/');
                     foreach ($params as $key => $value) {
@@ -1034,9 +1045,14 @@ trait Ultra_Cache_Rest_Action_Queue_Trait
                 case 'object_cache_full_count':
                     return $this->unwrap_rest_payload($this->object_cache_full_count());
                 case 'warm_frontpage_html':
-                    return $this->unwrap_rest_payload($this->warm_frontpage_html());
                 case 'warm_frontpage_html_css':
-                    return $this->unwrap_rest_payload($this->warm_frontpage_html_css());
+                    $warm_request = new WP_REST_Request('POST', '/');
+                    foreach ($params as $key => $value) {
+                        $warm_request->set_param($key, $value);
+                    }
+                    return 'warm_frontpage_html_css' === $action
+                        ? $this->unwrap_rest_payload($this->warm_frontpage_html_css($warm_request))
+                        : $this->unwrap_rest_payload($this->warm_frontpage_html($warm_request));
                 case 'varnish_test':
                     return $this->unwrap_rest_payload($this->varnish_test());
                 case 'varnish_flush_all':

@@ -11,8 +11,13 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+require_once dirname(__DIR__) . '/integrations/wpml/functions.php';
+require_once dirname(__DIR__) . '/integrations/translatepress/functions.php';
+require_once dirname(__DIR__) . '/integrations/multilingual/functions.php';
 require_once plugin_dir_path(__FILE__) . 'paths.php';
+require_once plugin_dir_path(__FILE__) . 'signing.php';
 require_once plugin_dir_path(__FILE__) . 'query-policy.php';
+require_once plugin_dir_path(__FILE__) . 'request-policy.php';
 require_once plugin_dir_path(__FILE__) . 'storage.php';
 require_once plugin_dir_path(__FILE__) . 'media-variant-paths.php';
 require_once plugin_dir_path(__FILE__) . 'debug.php';

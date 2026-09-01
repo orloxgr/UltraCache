@@ -470,6 +470,105 @@ trait Ultra_Cache_Media_Path_Url_Trait
 			return $this->get_webp_url_from_public_url($image[0]);
 		}
 
+		/**
+		 * Return a DB-authoritative terminal lookup before touching source/variant files.
+		 *
+		 * `known=false` means the caller must use the normal filesystem discovery path.
+		 * `known=true` means the queue/unit inventory is authoritative for this source:
+		 * DONE may return its recorded generated URL; FAILED/SKIPPED return the original.
+		 *
+		 * @param string $public_url Public source URL.
+		 * @param string $format     avif or webp.
+		 * @return array{known:bool,status:string,url:string|false}
+		 */
+		private function get_terminal_media_variant_lookup_from_public_url($public_url, $format) {
+			$format = strtolower(trim((string) $format));
+			$normalized = $this->normalize_public_url($public_url);
+			$memo_key = $format . '|terminal|' . md5('' !== $normalized ? $normalized : (string) $public_url);
+			if (isset($this->terminal_public_media_lookup_memo[$memo_key])) {
+				return (array) $this->terminal_public_media_lookup_memo[$memo_key];
+			}
+
+			$unknown = array('known' => false, 'status' => '', 'url' => false);
+			if (!in_array($format, array('avif', 'webp'), true)
+				|| !function_exists('ultracache_local_public_source_identity_descriptor')
+				|| self::MEDIA_QUEUE_DB_VERSION !== (string) get_option(self::MEDIA_QUEUE_DB_VERSION_OPTION, '')
+				|| self::MEDIA_QUEUE_UNITS_DB_VERSION !== (string) get_option(self::MEDIA_QUEUE_UNITS_DB_VERSION_OPTION, '')) {
+				$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+				return $unknown;
+			}
+
+			$source = ultracache_local_public_source_identity_descriptor(
+				$public_url,
+				array('jpg', 'jpeg', 'png', 'webp', 'avif')
+			);
+			if (empty($source)) {
+				$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+				return $unknown;
+			}
+
+			$scope = (string) ($source['source_scope'] ?? '');
+			if ('uploads' === $scope) {
+				$relative_path = function_exists('ultracache_normalize_media_source_relative_path')
+					? ultracache_normalize_media_source_relative_path((string) ($source['source_relative_path'] ?? ''), $format)
+					: false;
+				if (!$relative_path) {
+					$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+					return $unknown;
+				}
+
+				$row = method_exists($this, 'get_latest_media_queue_unit_state_by_source_path')
+					? $this->get_latest_media_queue_unit_state_by_source_path($relative_path, $format)
+					: array();
+				if (!is_array($row)) {
+					$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+					return $unknown;
+				}
+
+				$status = strtolower((string) ($row['status'] ?? ''));
+				if (!in_array($status, array('done', 'failed', 'skipped'), true)) {
+					$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+					return $unknown;
+				}
+				$url = false;
+				if ('done' === $status) {
+					$target_relative_path = ltrim(str_replace('\\', '/', (string) ($row['target_relative_path'] ?? '')), '/');
+					if ('' !== $target_relative_path) {
+						$url = $this->get_root_relative_optimized_media_url($format, $target_relative_path);
+					}
+				}
+				$result = array('known' => true, 'status' => $status, 'url' => $url ?: false);
+				$this->terminal_public_media_lookup_memo[$memo_key] = $result;
+				return $result;
+			}
+
+			$source_identity = strtolower(trim((string) ($source['source_identity'] ?? '')));
+			if (!preg_match('/^[a-f0-9]{64}$/', $source_identity)) {
+				$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+				return $unknown;
+			}
+			$status = method_exists($this, 'get_existing_on_demand_media_queue_status')
+				? $this->get_existing_on_demand_media_queue_status('local_asset', $source_identity, 'best', $format, 0)
+				: '';
+			if (!in_array($status, array('done', 'failed', 'skipped'), true)) {
+				$this->terminal_public_media_lookup_memo[$memo_key] = $unknown;
+				return $unknown;
+			}
+			$url = false;
+			if ('done' === $status && function_exists('ultracache_build_local_asset_optimized_media_relative_path')) {
+				$target_relative_path = ultracache_build_local_asset_optimized_media_relative_path($source, $format);
+				$base_path = function_exists('ultracache_local_asset_optimized_images_storage_url_path')
+					? ultracache_local_asset_optimized_images_storage_url_path($format)
+					: '';
+				if (is_string($target_relative_path) && '' !== $target_relative_path && '' !== $base_path) {
+					$url = trailingslashit($base_path) . implode('/', array_map('rawurlencode', explode('/', $target_relative_path)));
+				}
+			}
+			$result = array('known' => true, 'status' => $status, 'url' => $url ?: false);
+			$this->terminal_public_media_lookup_memo[$memo_key] = $result;
+			return $result;
+		}
+
 		private function get_local_image_source_descriptor_from_public_url($public_url) {
 			$normalized = $this->normalize_public_url($public_url);
 			$key = md5('' !== $normalized ? $normalized : (string) $public_url);
@@ -488,6 +587,17 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		}
 
 		private function maybe_queue_missing_optimized_media_for_source($public_url, array $source, $format, $reason, array $fingerprint = array()) {
+			$reason = strtolower(trim((string) $reason));
+			if (!in_array($reason, array('missing', 'stale'), true)) {
+				return false;
+			}
+
+			// 3.11.05: bound attempted discovery work, not successful queue inserts.
+			// This common choke point covers uploads, local assets and Slider Revolution.
+			if (!method_exists($this, 'consume_on_demand_queue_discovery_attempt') || !$this->consume_on_demand_queue_discovery_attempt()) {
+				return false;
+			}
+
 			if ('uploads' === (string) ($source['source_scope'] ?? '')) {
 				return $this->maybe_queue_missing_optimized_media_from_public_url($public_url, $format, $reason, $fingerprint);
 			}
@@ -500,14 +610,12 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		private function get_avif_url_from_public_url($public_url) {
 			$key = $this->get_public_url_lookup_cache_key('avif', $public_url);
 			if (isset($this->optimized_public_url_lookup_memo[$key])) {
-				$memoized = $this->optimized_public_url_lookup_memo[$key];
-				if (false === $memoized) {
-					$source = $this->get_local_image_source_descriptor_from_public_url($public_url);
-					if (!empty($source)) {
-						$this->maybe_queue_missing_optimized_media_for_source($public_url, $source, 'avif', 'missing');
-					}
-				}
-				return $memoized;
+				return $this->optimized_public_url_lookup_memo[$key];
+			}
+
+			$terminal = $this->get_terminal_media_variant_lookup_from_public_url($public_url, 'avif');
+			if (!empty($terminal['known'])) {
+				return $this->memoize_public_url_lookup($key, !empty($terminal['url']) ? (string) $terminal['url'] : false);
 			}
 
 			$source = $this->get_local_image_source_descriptor_from_public_url($public_url);
@@ -520,7 +628,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return $this->memoize_public_url_lookup($key, (string) $lookup['url']);
 			}
 
-			if (in_array((string) ($lookup['status'] ?? ''), array('missing', 'stale', 'indeterminate'), true)) {
+			if (in_array((string) ($lookup['status'] ?? ''), array('missing', 'stale'), true)) {
 				$this->maybe_queue_missing_optimized_media_for_source(
 					$public_url,
 					$source,
@@ -538,14 +646,12 @@ trait Ultra_Cache_Media_Path_Url_Trait
 		private function get_webp_url_from_public_url($public_url) {
 			$key = $this->get_public_url_lookup_cache_key('webp', $public_url);
 			if (isset($this->optimized_public_url_lookup_memo[$key])) {
-				$memoized = $this->optimized_public_url_lookup_memo[$key];
-				if (false === $memoized) {
-					$source = $this->get_local_image_source_descriptor_from_public_url($public_url);
-					if (!empty($source)) {
-						$this->maybe_queue_missing_optimized_media_for_source($public_url, $source, 'webp', 'missing');
-					}
-				}
-				return $memoized;
+				return $this->optimized_public_url_lookup_memo[$key];
+			}
+
+			$terminal = $this->get_terminal_media_variant_lookup_from_public_url($public_url, 'webp');
+			if (!empty($terminal['known'])) {
+				return $this->memoize_public_url_lookup($key, !empty($terminal['url']) ? (string) $terminal['url'] : false);
 			}
 
 			$source = $this->get_local_image_source_descriptor_from_public_url($public_url);
@@ -558,7 +664,7 @@ trait Ultra_Cache_Media_Path_Url_Trait
 				return $this->memoize_public_url_lookup($key, (string) $lookup['url']);
 			}
 
-			if (in_array((string) ($lookup['status'] ?? ''), array('missing', 'stale', 'indeterminate'), true)) {
+			if (in_array((string) ($lookup['status'] ?? ''), array('missing', 'stale'), true)) {
 				$this->maybe_queue_missing_optimized_media_for_source(
 					$public_url,
 					$source,

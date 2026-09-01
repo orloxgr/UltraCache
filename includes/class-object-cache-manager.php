@@ -355,7 +355,15 @@ final class Ultra_Cache_Object_Cache_Manager {
 		$dropin = self::get_dropin_path();
 
 		if (ultracache_dropin_exists('object-cache.php') && !self::is_our_dropin($dropin)) {
-			return false;
+			$conflict_status = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'get_cache_conflict_preflight_status')
+				? Ultra_Cache_WP::get_cache_conflict_preflight_status(false, true)
+				: array('blocked' => true);
+			if (!empty($conflict_status['blocked'])) {
+				return false;
+			}
+			if (!ultracache_delete_dropin('object-cache.php')) {
+				return false;
+			}
 		}
 
 		$settings = self::get_plugin_settings();

@@ -180,10 +180,21 @@
 			}
 		}
 
+		function mediaLibraryReplacementStatusNeedsPolling(status) {
+			if (!status || typeof status !== 'object') {
+				return false;
+			}
+
+			const session = status.replacementSession && typeof status.replacementSession === 'object'
+				? status.replacementSession
+				: {};
+			return session.active === true;
+		}
+
 		useEffect(() => {
 			let disposed = false;
-			const refreshReplacementStatus = async () => {
-				if (disposed || (typeof document !== 'undefined' && document.hidden)) {
+			const refreshInitialReplacementStatus = async () => {
+				if (disposed) {
 					return;
 				}
 				try {
@@ -193,23 +204,66 @@
 				}
 			};
 
-			refreshReplacementStatus();
-			const intervalId = window.setInterval(refreshReplacementStatus, 10000);
+			refreshInitialReplacementStatus();
 			return () => {
 				disposed = true;
-				window.clearInterval(intervalId);
 			};
 		}, []);
 
-		async function persistMediaLibraryReplacementWorkflowStage(stage, message = '') {
-			const response = await apiRequest('media_library_replacement_workflow_stage', {
-				cacheBust: getMediaConversionTestCacheBust(),
-				stage,
-				message,
-			});
-			setMediaLibraryReplacementStatus(response || null);
-			return response;
-		}
+		const mediaLibraryReplacementPollingActive = mediaLibraryReplacementBusy
+			|| mediaLibraryReplacementStatusNeedsPolling(mediaLibraryReplacementStatus);
+
+		useEffect(() => {
+			if (!mediaLibraryReplacementPollingActive) {
+				return undefined;
+			}
+
+			let disposed = false;
+			let timeoutId = 0;
+			const clearScheduledRefresh = () => {
+				if (timeoutId) {
+					window.clearTimeout(timeoutId);
+					timeoutId = 0;
+				}
+			};
+			const scheduleRefresh = () => {
+				clearScheduledRefresh();
+				if (disposed || (typeof document !== 'undefined' && document.hidden)) {
+					return;
+				}
+				timeoutId = window.setTimeout(refreshReplacementStatus, 10000);
+			};
+			const refreshReplacementStatus = async () => {
+				timeoutId = 0;
+				if (disposed || (typeof document !== 'undefined' && document.hidden)) {
+					return;
+				}
+				try {
+					await refreshMediaLibraryReplacementWorkflowStatus();
+				} catch (error) {
+					reportNonFatalAdminError('media-replacement.status-refresh', error, { severity: 'debug', dedupeKey: 'media-replacement.status-refresh', dedupeWindowMs: 30000 });
+				} finally {
+					if (!disposed) {
+						scheduleRefresh();
+					}
+				}
+			};
+			const handleVisibilityChange = () => {
+				if (document.hidden) {
+					clearScheduledRefresh();
+					return;
+				}
+				scheduleRefresh();
+			};
+
+			scheduleRefresh();
+			document.addEventListener('visibilitychange', handleVisibilityChange);
+			return () => {
+				disposed = true;
+				clearScheduledRefresh();
+				document.removeEventListener('visibilitychange', handleVisibilityChange);
+			};
+		}, [mediaLibraryReplacementPollingActive]);
 
 		async function loadMediaLibraryReplacementPreviewPage(offset = 0) {
 			const response = await apiRequest('media_library_replacement_preview', {
@@ -368,7 +422,7 @@
 		function getMediaLibraryReplacementWorkflowStage() {
 			const statusData = mediaLibraryReplacementStatus && typeof mediaLibraryReplacementStatus === 'object' ? mediaLibraryReplacementStatus : {};
 			const persistedStage = statusData.workflowStage ? String(statusData.workflowStage) : '';
-			if (['prepare', 'do', 'verify', 'delete', 'complete'].indexOf(persistedStage) !== -1) {
+			if (['prepare', 'do', 'verify', 'delete', 'rollback', 'complete'].indexOf(persistedStage) !== -1) {
 				if ('delete' === persistedStage && !statusData.workflowVerifyCompleted) {
 					return 'verify';
 				}
@@ -399,7 +453,7 @@
 				return 'prepare';
 			}
 
-			if (['do', 'verify', 'delete'].indexOf(persistedStage) !== -1 && persistedStage === derivedStage) {
+			if (['do', 'verify', 'delete', 'rollback'].indexOf(persistedStage) !== -1 && persistedStage === derivedStage) {
 				return persistedStage;
 			}
 
@@ -554,7 +608,6 @@
 					const response = await apiRequest('media_library_replacement_readiness_scan', {
 						reset: !!(item && item.reset),
 						limit: 50,
-						time_budget: 15,
 					});
 					resetPending = false;
 					latestReadiness = response || {};
@@ -719,7 +772,6 @@
 							sessionToken: String(token || ''),
 						collisionPolicy: 'block',
 						limit: 50,
-						time_budget: 15,
 					});
 					resetPending = false;
 					latestPrepare = response && typeof response === 'object' ? response : {};
@@ -916,7 +968,6 @@
 					const response = await apiRequest('media_library_replacement_do', {
 						sessionToken: String(token || ''),
 						limit: 50,
-						time_budget: 15,
 					});
 					latestDo = response && typeof response === 'object' ? response : {};
 					return {
@@ -1075,7 +1126,6 @@
 						response = await apiRequest('media_library_replacement_verify', {
 							sessionToken: String(token || ''),
 							limit: 50,
-							time_budget: 15,
 						});
 					} catch (error) {
 						const errorData = error && error.data && typeof error.data === 'object' ? error.data : {};
@@ -1137,6 +1187,173 @@
 				return __('Resume Verification', 'ultracache');
 			}
 			return __('Verify Replacement', 'ultracache');
+		}
+
+
+		function isMediaLibraryReplacementRollbackRunnerReady() {
+			return !!(mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.rollbackRunnerReady === true);
+		}
+
+		function getMediaLibraryReplacementRollbackStatus() {
+			return mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.rollback && typeof mediaLibraryReplacementStatus.rollback === 'object'
+				? mediaLibraryReplacementStatus.rollback
+				: {};
+		}
+
+		function getMediaLibraryReplacementRollbackPendingCount(status) {
+			const rollback = status && typeof status === 'object' ? status : {};
+			return Math.max(0, Number(rollback.pendingDatabaseRefs || 0))
+				+ Math.max(0, Number(rollback.pendingThemeCssFiles || 0))
+				+ Math.max(0, Number(rollback.pendingMetadata || 0))
+				+ Math.max(0, Number(rollback.pendingDestinationBackups || 0));
+		}
+
+		async function runMediaLibraryReplacementRollback() {
+			if (!isMediaLibraryReplacementRollbackRunnerReady() || busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
+				return;
+			}
+
+			let latestRollback = getMediaLibraryReplacementRollbackStatus();
+			if (latestRollback.rollbackComplete) {
+				pushToast({ type: 'success', text: __('Rollback Replacement is already complete.', 'ultracache') });
+				return;
+			}
+			if (!latestRollback.rollbackAvailable) {
+				pushToast({ type: 'error', text: latestRollback.message || __('There are no applied replacement changes available to roll back.', 'ultracache') });
+				return;
+			}
+			if (Number(latestRollback.deletedOriginals || 0) > 0) {
+				pushToast({ type: 'error', text: latestRollback.message || __('Rollback Replacement is unavailable after Delete Originals has removed original files.', 'ultracache') });
+				return;
+			}
+
+			const initialPending = getMediaLibraryReplacementRollbackPendingCount(latestRollback);
+			const job = {
+				type: 'media_replacement_rollback',
+				label: __('Rolling Back Media Library Replacement', 'ultracache'),
+				processed: 0,
+				total: initialPending,
+				hasMore: true,
+				cursor: String(latestRollback.activeStep || ''),
+				batchSize: 1,
+				logs: [latestRollback.activeStep && latestRollback.activeStep !== 'rollback_complete'
+					? __('Resuming Rollback Replacement from its saved server phase.', 'ultracache')
+					: __('Starting the server-backed Rollback Replacement.', 'ultracache')],
+				showWhenInactive: true,
+			};
+
+			const runner = createJobRunner({
+				isCancelled: () => !!cancelRequestedRef.current,
+				resetCancel: () => { cancelRequestedRef.current = false; },
+				setBusy: (value) => {
+					setBusy(!!value);
+					setMediaLibraryReplacementBusy(!!value);
+				},
+				updateProcessState,
+				persistJobState: () => {},
+				pushToast,
+				shouldAcquireExclusiveSession: (type) => type === 'media_replacement_rollback',
+				beginExclusiveSession: async (state, preferredToken) => {
+					const response = await manageMediaLibraryReplacementSession('begin', preferredToken, 'rollback');
+					if (!response.success || !response.token) {
+						throw new Error(response.message || __('Could not acquire Rollback Replacement ownership.', 'ultracache'));
+					}
+					return String(response.token);
+				},
+				endExclusiveSession: async (state, token) => {
+					try {
+						await manageMediaLibraryReplacementSession('end', token, 'rollback');
+						return true;
+					} catch (error) {
+						return false;
+					}
+				},
+				pauseExclusiveSession: async (state, token) => {
+					try {
+						await manageMediaLibraryReplacementSession('pause', token, 'rollback');
+						return true;
+					} catch (error) {
+						return false;
+					}
+				},
+				failExclusiveSession: async (state, token) => {
+					try {
+						await manageMediaLibraryReplacementSession('pause', token, 'rollback');
+						await refreshMediaLibraryReplacementWorkflowStatus();
+						return true;
+					} catch (error) {
+						return false;
+					}
+				},
+				shouldReleaseExclusiveSessionOnExit: () => true,
+				fetchBatch: async (type, cursor) => {
+					const workflow = await refreshMediaLibraryReplacementWorkflowStatus();
+					latestRollback = workflow && workflow.rollback && typeof workflow.rollback === 'object' ? workflow.rollback : {};
+					if (latestRollback.rollbackFailed) {
+						throw new Error(latestRollback.message || __('Rollback Replacement stopped on a conflict or failed restore.', 'ultracache'));
+					}
+					const complete = !!latestRollback.rollbackComplete && !latestRollback.hasMore;
+					const pending = getMediaLibraryReplacementRollbackPendingCount(latestRollback);
+					return {
+						items: complete ? [] : [{}],
+						total: initialPending,
+						processed: Math.max(0, initialPending - pending),
+						hasMore: !complete,
+						nextCursor: String(latestRollback.activeStep || cursor || ''),
+					};
+				},
+				getBatchStatePatch: (state, batch) => ({
+					total: Math.max(0, Number(batch.total || initialPending || 0)),
+					processed: Math.max(0, Number(batch.processed || state.processed || 0)),
+				}),
+				processItem: async (type, item, isCancelled, token) => {
+					const renewal = await manageMediaLibraryReplacementSession('renew', token, 'rollback');
+					if (!renewal.success) {
+						throw new Error(renewal.message || __('The Rollback Replacement lease was lost.', 'ultracache'));
+					}
+					const response = await apiRequest('media_library_replacement_rollback', {
+						sessionToken: String(token || ''),
+						limit: 50,
+					});
+					latestRollback = response && typeof response === 'object' ? response : {};
+					return {
+						line: response.message || __('Rollback Replacement chunk complete.', 'ultracache'),
+						progressIncrement: Math.max(0, Number(response.batchProcessed || 0)),
+						successIncrement: Math.max(0, Number(response.batchProcessed || 0)),
+						skippedIncrement: 0,
+						failedIncrement: 0,
+					};
+				},
+				buildCompletionNotice: () => latestRollback.rollbackComplete
+					? { type: 'success', text: __('Rollback Replacement complete. Restart Replacement Plan before preparing another replacement.', 'ultracache') }
+					: { type: 'warning', text: latestRollback.message || __('Rollback Replacement stopped before completion.', 'ultracache') },
+				onCompleted: async () => { await refreshMediaLibraryReplacementWorkflowStatus(); },
+				markProcessComplete: () => {
+					setProcess((current) => Object.assign({}, current, { active: false, complete: true, cancellable: false, cancelRequested: false, showWhenInactive: true }));
+				},
+				getFailureText: () => __('Rollback Replacement failed.', 'ultracache'),
+				onReleaseFailure: () => pushToast({ type: 'warning', text: __('Rollback Replacement finished, but its dashboard lease could not be released immediately.', 'ultracache') }),
+				onPaused: async () => {
+					await refreshMediaLibraryReplacementWorkflowStatus();
+					setProcess((current) => Object.assign({}, current, { active: false, complete: false, cancellable: false, showWhenInactive: true }));
+					pushToast({ type: 'success', text: __('Rollback Replacement paused. Resume continues from the saved restore phase.', 'ultracache') });
+				},
+			});
+			return runner(job, false, mediaLibraryReplacementSessionTokenRef.current || '');
+		}
+
+		function getMediaLibraryReplacementRollbackLabel() {
+			if (mediaLibraryReplacementBusy && process && String(process.type || '') === 'media_replacement_rollback') {
+				return __('Rolling Back Replacement…', 'ultracache');
+			}
+			const rollback = getMediaLibraryReplacementRollbackStatus();
+			if (rollback.rollbackComplete) {
+				return __('Replacement Rolled Back', 'ultracache');
+			}
+			if (rollback.runStatus === 'paused' || ['rollback_database', 'rollback_theme_css', 'rollback_metadata', 'rollback_files'].includes(String(rollback.activeStep || ''))) {
+				return __('Resume Rollback Replacement', 'ultracache');
+			}
+			return __('Rollback Replacement', 'ultracache');
 		}
 
 
@@ -1271,7 +1488,6 @@
 					const response = await apiRequest('media_library_replacement_delete', {
 						sessionToken: String(token || ''),
 						limit: 50,
-						time_budget: 15,
 					});
 					latestDelete = response && typeof response === 'object' ? response : {};
 					return {
@@ -1483,7 +1699,7 @@
 				} else if (replacementPolicyChanged) {
 					reason = '';
 				} else if (prepareStatus.prepareFailed) {
-					reason = __('Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
+					reason = __('Preparation failed. Open Advanced / Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
 				} else if (prepareStatus.decisionsRequired) {
 					reason = prepareStatus.message || __('Open Decide Blockers and resolve every blocker group to finalize Prepare.', 'ultracache');
 				} else if (prepareStatus.prepareComplete) {
@@ -1538,6 +1754,10 @@
 
 
 		function getMediaLibraryReplacementDeleteDisabledReason() {
+			const rollbackStatus = getMediaLibraryReplacementRollbackStatus();
+			if (rollbackStatus.rollbackComplete) {
+				return __('Rollback Replacement is complete. Restart Replacement Plan before deleting original files.', 'ultracache');
+			}
 			if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
 				return __('Media Library replacement is busy.', 'ultracache');
 			}
@@ -1871,90 +2091,18 @@
 
 
 
-		async function copyMediaLibraryReplacementFiles() {
-			return runMediaLibraryReplacementPrepare(false);
-		}
 
 
 
-		async function prepareMediaLibraryReplacementMetadataUpdates() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
 
 
-		async function applyMediaLibraryReplacementMetadataUpdates() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
 
 
-		async function rollbackMediaLibraryReplacementMetadataUpdates() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
 
 
-		async function scanMediaLibraryReplacementReferences() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-
-		async function matchMediaLibraryReplacementReferences() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-
-		async function scanMediaLibraryReplacementThemeCssReferences() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-		async function previewMediaLibraryReplacementThemeCssReplacements() {
-			if (busy || mediaConversionTestBusy || mediaLibraryReplacementBusy) {
-				return;
-			}
-
-			setMediaLibraryReplacementBusy(true);
-			try {
-				const response = await apiRequest('media_library_replacement_theme_css_preview', {
-					cacheBust: getMediaConversionTestCacheBust(),
-					limit: 20,
-					offset: 0,
-				});
-				pushToast({
-					type: response && response.success && !response.blocked ? 'success' : 'error',
-					text: response && response.message ? response.message : __('Theme CSS replacement preview completed.', 'ultracache'),
-				});
-			} catch (error) {
-				pushToast({ type: 'error', text: error && error.message ? error.message : 'Theme CSS replacement preview failed.' });
-			} finally {
-				setMediaLibraryReplacementBusy(false);
-			}
-		}
-
-		async function applyMediaLibraryReplacementThemeCssReplacements() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-		async function verifyMediaLibraryReplacementThemeCssReplacements() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-
-		async function applyMediaLibraryReplacementDatabaseReplacements() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-
-		async function verifyMediaLibraryReplacementDatabaseReplacements() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
-
-
-		async function rollbackMediaLibraryReplacementDatabaseReplacements() {
-			showMediaLibraryReplacementRunnerUnavailable();
-		}
 
 		return {
 			refreshMediaLibraryReplacementWorkflowStatus,
-			persistMediaLibraryReplacementWorkflowStage,
 			loadMediaLibraryReplacementPreviewPage,
 			canRefreshMediaLibraryReplacementMappingPreview,
 			canRefreshMediaLibraryReplacementDatabasePreview,
@@ -1978,6 +2126,10 @@
 			getMediaLibraryReplacementVerifyStatus,
 			runMediaLibraryReplacementVerify,
 			getMediaLibraryReplacementVerifyLabel,
+			isMediaLibraryReplacementRollbackRunnerReady,
+			getMediaLibraryReplacementRollbackStatus,
+			runMediaLibraryReplacementRollback,
+			getMediaLibraryReplacementRollbackLabel,
 			isMediaLibraryReplacementDeleteRunnerReady,
 			getMediaLibraryReplacementDeleteStatus,
 			runMediaLibraryReplacementDelete,
@@ -2012,19 +2164,6 @@
 			openMediaLibraryReplacementCleanupPreviewModal,
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			closeMediaLibraryReplacementCleanupPreviewModal,
-			copyMediaLibraryReplacementFiles,
-			prepareMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementMetadataUpdates,
-			rollbackMediaLibraryReplacementMetadataUpdates,
-			scanMediaLibraryReplacementReferences,
-			matchMediaLibraryReplacementReferences,
-			scanMediaLibraryReplacementThemeCssReferences,
-			previewMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementThemeCssReplacements,
-			verifyMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementDatabaseReplacements,
-			verifyMediaLibraryReplacementDatabaseReplacements,
-			rollbackMediaLibraryReplacementDatabaseReplacements,
 		};
 	}
 

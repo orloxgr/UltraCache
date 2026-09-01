@@ -13,11 +13,18 @@ trait Ultra_Cache_WP_Varnish_Invalidation_Trait
 {
         public function handle_varnish_after_purge_all($payload = array())
         {
+            $payload = is_array($payload) ? $payload : array();
+            $reason = sanitize_key((string) ($payload['reason'] ?? ''));
+            $correctness_boundary = in_array($reason, array('wpml_topology_change', 'multilingual_topology_change', 'translatepress_translation_change', 'translatepress_url_change'), true);
             $settings = self::get_dashboard_settings();
             if (!self::is_varnish_runtime_enabled($settings)) {
                 return;
             }
-            if (empty($settings['flushAllIncludeVarnish'])) {
+            // A multilingual topology or rendered-translation change is a cache-correctness
+            // boundary, not a manual Flush All preference. Purge enabled Varnish
+            // even when the optional manual "include Varnish" switch is off so
+            // stale language routing/rendered translations cannot remain cached.
+            if (empty($settings['flushAllIncludeVarnish']) && !$correctness_boundary) {
                 self::set_varnish_last_result(array(
                     'success' => false,
                     'skipped' => true,
@@ -130,7 +137,7 @@ trait Ultra_Cache_WP_Varnish_Invalidation_Trait
             return 'req.http.host == "' . $host . '" && req.url ~ "^' . $quoted . '$"';
         }
 
-        private static function varnish_send_expr_to_all($expr, $label = '', array $endpoint_targets = array(), $diagnostic_probe = false, $method_override = '')
+        private static function varnish_send_expr_to_all($expr, $label = '', array $endpoint_targets = array(), $diagnostic_probe = false, $method_override = '', $public_host = '')
         {
             $settings = self::get_varnish_cli_settings();
             $support = $settings['support'];
@@ -246,7 +253,9 @@ trait Ultra_Cache_WP_Varnish_Invalidation_Trait
                     $settings['timeout'],
                     $expr,
                     $effective_method,
-                    (bool) $diagnostic_probe && 'http' === $mode
+                    (bool) $diagnostic_probe && 'http' === $mode,
+                    1,
+                    $public_host
                 );
                 $success = !empty($res['ok']);
                 if ($success) {

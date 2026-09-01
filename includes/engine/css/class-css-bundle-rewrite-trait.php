@@ -47,7 +47,7 @@ private function normalize_delayed_icon_fonts_stylesheet_entry(array $entry, $ha
 
 public function enqueue_delayed_icon_font_stylesheets()
     {
-        if (function_exists('is_admin') && is_admin()) {
+        if ((function_exists('is_admin') && is_admin()) || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 
@@ -125,6 +125,10 @@ public function enqueue_delayed_icon_font_stylesheets()
 
 public function add_delayed_icon_font_style_attributes($html, $handle, $href, $media)
     {
+        if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+            return $html;
+        }
+
         $handle = (string) $handle;
         if (0 !== strpos($handle, 'ultracache-page-delayed-icon-fonts') && 0 !== strpos($handle, 'ultracache-no-bundle-delayed-icon-fonts')) {
             return $html;
@@ -403,7 +407,7 @@ private function prepare_inline_css_bundle_for_style_tag($css)
      */
     public function enqueue_page_css_bundle_stylesheet()
     {
-        if (function_exists('is_admin') && is_admin()) {
+        if ((function_exists('is_admin') && is_admin()) || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 
@@ -485,6 +489,10 @@ private function prepare_inline_css_bundle_for_style_tag($css)
      */
     public function add_page_css_bundle_style_attributes($html, $handle, $href, $media)
     {
+        if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+            return $html;
+        }
+
         if ('ultracache-page-css-bundle' !== (string) $handle || '' === (string) $html) {
             return $html;
         }

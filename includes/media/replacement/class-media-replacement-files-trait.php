@@ -860,9 +860,6 @@ trait Ultra_Cache_Media_Replacement_Files_Trait
         $args = is_array($args) ? $args : array();
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $rows = $this->get_media_replacement_copy_rows($limit);
         $state = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
         $collision_policy = $state['collision_policy'];
@@ -873,10 +870,6 @@ trait Ultra_Cache_Media_Replacement_Files_Trait
         $blocked_message = '';
         $bytes = 0;
         foreach ($rows as $row) {
-            if (($copied + $failed) > 0 && microtime(true) >= $deadline) {
-                break;
-            }
-
             $item_id = isset($row['id']) ? absint($row['id']) : 0;
             $result = $this->copy_media_replacement_item_to_library($row, $collision_policy);
             if (!empty($result['copied'])) {
@@ -1019,18 +1012,12 @@ trait Ultra_Cache_Media_Replacement_Files_Trait
 
         $limit = isset($args['limit']) ? absint($args['limit']) : 50;
         $limit = max(1, min(250, $limit));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $rows = $this->get_media_replacement_prepare_validation_rows($state['validation_cursor_item_id'], $limit);
         $validated = 0;
         $failed = 0;
         $last_id = $state['validation_cursor_item_id'];
 
         foreach ($rows as $row) {
-            if (($validated + $failed) > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $item_id = absint($row['id'] ?? 0);
             $result = $this->validate_media_replacement_destination_row($row);
             if (empty($result['valid'])) {

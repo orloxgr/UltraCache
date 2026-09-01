@@ -91,7 +91,10 @@ function ultracache_get_query_cache_hard_blocked_defaults()
         'ultracache_rt',
         'ultracache_runtime_js_scan',
         'ultracache_runtime_js_scan_id',
+        'ultracache_runtime_js_scan_token',
         'ultracache_runtime_js_scan_nonce',
+        'ultracache_runtime_js_scan_mode',
+        'ultracache_runtime_js_scan_context',
         'ultracache_rv',
         'ultracache_sqlite_exposure_probe',
         'ultracache_store_profile',
@@ -180,6 +183,153 @@ function ultracache_normalize_query_cache_policy($policy, array $fallback = arra
     );
 
     return ultracache_build_query_cache_policy($enabled, $allowlist, $excluded);
+}
+
+/**
+ * Recursively normalize a query value using the same ordering contract as the
+ * page-cache key builder.
+ *
+ * @param mixed $value Query value.
+ * @return mixed
+ */
+function ultracache_sort_query_policy_value($value)
+{
+    if (!is_array($value)) {
+        return $value;
+    }
+
+    foreach ($value as $key => $child) {
+        $value[$key] = ultracache_sort_query_policy_value($child);
+    }
+
+    if (array_keys($value) === range(0, count($value) - 1)) {
+        usort($value, static function ($a, $b) {
+            return strcmp((string) wp_json_encode($a), (string) wp_json_encode($b));
+        });
+        return $value;
+    }
+
+    ksort($value);
+    return $value;
+}
+
+/**
+ * Return only query variables that can contribute to an UltraCache public
+ * page-cache identity.
+ *
+ * Arbitrary crawler/tracking/session query arguments are intentionally dropped
+ * here. The generic query allowlist and WPML parameter-language contract are
+ * the only query dimensions retained for media affected-page references.
+ *
+ * @param mixed $query    Raw query string or parsed query array.
+ * @param array $settings UltraCache settings.
+ * @return array<string,mixed>
+ */
+function ultracache_get_cache_significant_query_vars($query, array $settings = array())
+{
+    if (is_string($query)) {
+        parse_str($query, $query_vars);
+    } elseif (is_array($query)) {
+        $query_vars = $query;
+    } else {
+        $query_vars = array();
+    }
+
+    if (empty($query_vars) || !is_array($query_vars)) {
+        return array();
+    }
+
+    $policy = ultracache_get_query_cache_policy($settings);
+    $generic_enabled = !empty($policy['enabled']);
+    $generic_lookup = array_fill_keys((array) ($policy['allowlist'] ?? array()), true);
+
+    $wpml_contract = function_exists('ultracache_wpml_get_parameter_cache_contract')
+        ? ultracache_wpml_get_parameter_cache_contract()
+        : array();
+    if (function_exists('ultracache_wpml_normalize_parameter_cache_contract')) {
+        $wpml_contract = ultracache_wpml_normalize_parameter_cache_contract($wpml_contract);
+    }
+    $wpml_contract = is_array($wpml_contract) ? $wpml_contract : array();
+    $wpml_enabled = !empty($wpml_contract['enabled']);
+    $wpml_key = $wpml_enabled ? (string) ($wpml_contract['query_key'] ?? 'lang') : '';
+    $wpml_languages = $wpml_enabled && is_array($wpml_contract['languages'] ?? null)
+        ? array_values($wpml_contract['languages'])
+        : array();
+
+    $normalized = array();
+    foreach ($query_vars as $query_key => $query_value) {
+        $raw_key = (string) $query_key;
+        $normalized_key = ultracache_normalize_query_policy_key($raw_key);
+        if ('' === $normalized_key) {
+            continue;
+        }
+
+        if ($wpml_enabled && $raw_key === $wpml_key) {
+            if (is_string($query_value) && in_array($query_value, $wpml_languages, true)) {
+                $normalized[$wpml_key] = $query_value;
+            }
+            continue;
+        }
+
+        if (!$generic_enabled || !isset($generic_lookup[$normalized_key])) {
+            continue;
+        }
+
+        $normalized[$normalized_key] = ultracache_sort_query_policy_value($query_value);
+    }
+
+    if (empty($normalized)) {
+        return array();
+    }
+
+    ksort($normalized);
+    return $normalized;
+}
+
+/**
+ * Normalize one public page URL to the logical cache-significant identity used
+ * by media affected-page tracking.
+ *
+ * Query arguments that UltraCache would not use as a public HTML cache-key
+ * dimension are collapsed to the queryless page. Valid allowlisted query
+ * dimensions and WPML parameter-language values remain present in canonical
+ * key/value order so legitimate variants keep distinct purge targets.
+ *
+ * @param string $url      Absolute public page URL.
+ * @param array  $settings UltraCache settings.
+ * @return string
+ */
+function ultracache_normalize_cache_significant_page_url($url, array $settings = array())
+{
+    $url = trim((string) $url);
+    if ('' === $url) {
+        return '';
+    }
+
+    $parts = wp_parse_url($url);
+    if (!is_array($parts) || empty($parts['host'])) {
+        return '';
+    }
+
+    $scheme = isset($parts['scheme']) ? strtolower((string) $parts['scheme']) : '';
+    if (!in_array($scheme, array('http', 'https'), true)) {
+        return '';
+    }
+
+    $host = strtolower((string) $parts['host']);
+    $port = isset($parts['port']) ? ':' . absint($parts['port']) : '';
+    $path = isset($parts['path']) && '' !== (string) $parts['path'] ? (string) $parts['path'] : '/';
+    $base_url = $scheme . '://' . $host . $port . $path;
+
+    $normalized_vars = ultracache_get_cache_significant_query_vars(
+        isset($parts['query']) ? (string) $parts['query'] : '',
+        $settings
+    );
+    if (!empty($normalized_vars)) {
+        $base_url .= '?' . http_build_query($normalized_vars, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    return esc_url_raw($base_url);
 }
 
 /**

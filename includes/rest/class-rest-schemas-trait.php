@@ -176,6 +176,18 @@ trait Ultra_Cache_Rest_Schemas_Trait
         return in_array(strtolower(trim((string) $value)), array('full', 'menu'), true);
     }
 
+    public function sanitize_manual_warm_operation_param($value)
+    {
+        $value = sanitize_key((string) $value);
+        return in_array($value, array('menu', 'full_site'), true) ? $value : '';
+    }
+
+    public function validate_manual_warm_operation_param($value)
+    {
+        $value = sanitize_key((string) $value);
+        return in_array($value, array('', 'menu', 'full_site'), true);
+    }
+
     public function sanitize_url_param($value)
     {
         return esc_url_raw((string) $value);
@@ -304,6 +316,8 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'objectCacheEnabled'                   => array('type' => 'boolean', 'required' => false),
             'objectCacheBackend'                   => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_object_cache_backend_param'), 'validate_callback' => array($this, 'validate_object_cache_backend_param')),
             'objectCacheFallbackBackend'           => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_object_cache_fallback_backend_param'), 'validate_callback' => array($this, 'validate_object_cache_fallback_backend_param')),
+            'preserveConfiguredInfrastructure'     => array('type' => 'boolean', 'required' => false),
+            'runtimeJsScanDecision'                 => array('type' => 'string', 'required' => false),
             'sqliteDatabaseSizeMb'                   => array('type' => 'integer', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_sqlite_database_size_mb_param'), 'validate_callback' => array($this, 'validate_sqlite_database_size_mb_param')),
             'redisHost'                            => array('type' => 'string', 'required' => false),
             'redisPort'                            => array('type' => 'integer', 'required' => false),
@@ -352,6 +366,7 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'thirdPartyJsParallelExecutionEnabled' => array('type' => 'boolean', 'required' => false),
             'delayedLocalJsAutoStart'            => array('type' => 'string', 'required' => false),
             'delayedLocalJsAutoStartSeconds'     => array('type' => 'number', 'required' => false),
+            'delayedJsMinimumReleaseSeconds'      => array('type' => 'integer', 'required' => false, 'minimum' => 0, 'maximum' => 4),
             'delayedJsAutostartAfterLoadEnabled' => array('type' => 'boolean', 'required' => false),
             'delayedJsAutostartMousemoveEnabled' => array('type' => 'boolean', 'required' => false),
             'delayedJsAutostartScrollEnabled' => array('type' => 'boolean', 'required' => false),
@@ -385,10 +400,17 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'clsDimensionsEnabled'                 => array('type' => 'boolean', 'required' => false),
             'asyncCssEnabled'                      => array('type' => 'boolean', 'required' => false),
             'asyncExternalCssEnabled'              => array('type' => 'boolean', 'required' => false),
+            'asyncConsentCssEnabled'                => array('type' => 'boolean', 'required' => false),
+            'asyncConsentCssAutoEnabled'            => array('type' => 'boolean', 'required' => false),
             'asyncCssExcludeList'                  => array('type' => 'string', 'required' => false),
             'asyncExternalCssExcludeList'          => array('type' => 'string', 'required' => false),
             'aggressiveAsyncCssEnabled'            => array('type' => 'boolean', 'required' => false),
             'delayNonCriticalJsEnabled'            => array('type' => 'boolean', 'required' => false),
+            'protectWpBakeryAnimationsEnabled'      => array('type' => 'boolean', 'required' => false),
+            'protectElementorCompatibilityEnabled'   => array('type' => 'boolean', 'required' => false),
+            'realCookieBannerCompatibilityEnabled' => array('type' => 'boolean', 'required' => false),
+            'complianzCompatibilityEnabled' => array('type' => 'boolean', 'required' => false),
+            'woocommerceVariableProductCompatibilityEnabled' => array('type' => 'boolean', 'required' => false),
             'delayNonCriticalJsExcludeList'        => array('type' => 'string', 'required' => false),
             'lcpImagePriorityEnabled'              => array('type' => 'boolean', 'required' => false),
             'lcpFrontendDiscoveryEnabled'           => array('type' => 'boolean', 'required' => false),
@@ -424,13 +446,6 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'browserCacheRulesEnabled'             => array('type' => 'boolean', 'required' => false),
             'apacheStaticHtmlDeliveryEnabled'      => array('type' => 'boolean', 'required' => false),
             'liteSpeedCacheEnabled'                => array('type' => 'boolean', 'required' => false),
-            'liteSpeedRefillAfterTargetedInvalidation' => array('type' => 'boolean', 'required' => false),
-            'liteSpeedWarmDuringSiteWarmup'         => array('type' => 'boolean', 'required' => false),
-            'liteSpeedStalePurgeEnabled'             => array('type' => 'boolean', 'required' => false),
-            'liteSpeedRefreshAheadEnabled'           => array('type' => 'boolean', 'required' => false),
-            'liteSpeedRefreshAheadThresholdPercent'  => array('type' => 'integer', 'required' => false, 'minimum' => 50, 'maximum' => 95),
-            'liteSpeedRefreshAheadMaxPages'          => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 10),
-            'liteSpeedRefreshAheadPinnedUrls'        => array('type' => 'string', 'required' => false),
             'varnishCliEnabled'                  => array('type' => 'boolean', 'required' => false),
             'configureVarnishConnection'          => array('type' => 'boolean', 'required' => false),
             'varnishCliMode'                       => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_mode_param'), 'validate_callback' => array($this, 'validate_varnish_mode_param')),
@@ -443,6 +458,8 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'varnishInvalidationStrategy'              => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_invalidation_strategy_param'), 'validate_callback' => array($this, 'validate_varnish_invalidation_strategy_param')),
             'varnishFlushScope'                    => array('type' => 'string', 'required' => false, 'sanitize_callback' => array($this, 'sanitize_varnish_flush_scope_param'), 'validate_callback' => array($this, 'validate_varnish_flush_scope_param')),
             'preRenderOnSave'                      => array('type' => 'boolean', 'required' => false),
+            'alsoWarmTranslationPagesEnabled'      => array('type' => 'boolean', 'required' => false),
+            'multilingualWarmPolicyV1'              => array('type' => 'object', 'required' => false),
             'woocommerceSafeModeEnabled'           => array('type' => 'boolean', 'required' => false),
             'cacheCleanupEnabled'                  => array('type' => 'boolean', 'required' => false),
             'apcuFlushOnScheduledCleanup'          => array('type' => 'boolean', 'required' => false),
@@ -457,6 +474,7 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'cronWarmStartAfterCleanup'            => array('type' => 'boolean', 'required' => false),
             'cronWarmStartAfterManualPurge'        => array('type' => 'boolean', 'required' => false),
             'warmUncachedUrlsOnFirstVisit'          => array('type' => 'boolean', 'required' => false),
+            'warmCssBundlesEnabled'                    => array('type' => 'boolean', 'required' => false),
             'cacheCleanupIntervalHours'            => array('type' => 'integer', 'required' => false),
             'cssBundleCleanupGraceHours'       => array('type' => 'integer', 'required' => false),
             'cssBundleCleanupDeleteLimit'      => array('type' => 'integer', 'required' => false),
@@ -469,10 +487,12 @@ trait Ultra_Cache_Rest_Schemas_Trait
             'cacheFreshTtlMinutes'                 => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 525600),
             'cacheMaxStaleMinutes'                 => array('type' => 'integer', 'required' => false, 'minimum' => 1, 'maximum' => 525600),
             'debugHeadersEnabled'                  => array('type' => 'boolean', 'required' => false),
+            'openBrowserScannerInNewWindowEnabled' => array('type' => 'boolean', 'required' => false),
             'cacheExceptionPaths'                  => array('type' => 'string', 'required' => false),
             'cacheExceptionQueryArgs'              => array('type' => 'string', 'required' => false),
             'cacheQueryStringsEnabled'             => array('type' => 'boolean', 'required' => false),
             'cacheQueryStringAllowlist'            => array('type' => 'string', 'required' => false),
+            'cacheQueryCombinationLevel'           => array('type' => 'string', 'required' => false, 'enum' => array('1', '2', '3', '4', 'all')),
             'cacheSafeTrackingCookiesEnabled'      => array('type' => 'boolean', 'required' => false),
             'safeTrackingCookieList'               => array('type' => 'string', 'required' => false),
             'unsafeCacheCookieList'                => array('type' => 'string', 'required' => false),

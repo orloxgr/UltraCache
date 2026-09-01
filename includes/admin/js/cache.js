@@ -23,6 +23,7 @@
 	const {
 		Card,
 		IntegrationAccordionCard,
+		AccordionBox,
 		Button,
 		ToggleField,
 		ToggleRow,
@@ -223,18 +224,19 @@
 	}
 
 
-	function LiteSpeedCard({ layer, diagnostics, settings, busy, onSettingChange, onRedetect, onFlush, onTest }) {
+	function LiteSpeedCard({ layer, diagnostics, settings, busy, onSettingChange, onRedetect, onFlush }) {
 		layer = layer || {};
 		diagnostics = diagnostics || {};
 		settings = settings || {};
 
-		const behavior = layer.behaviorTest && typeof layer.behaviorTest === 'object' ? layer.behaviorTest : {};
 		const metrics = layer.metrics && typeof layer.metrics === 'object' ? layer.metrics : {};
-		const refreshAhead = layer.refreshAhead && typeof layer.refreshAhead === 'object' ? layer.refreshAhead : {};
-		const refreshState = refreshAhead.state && typeof refreshAhead.state === 'object' ? refreshAhead.state : {};
 		const operations = metrics.operations && typeof metrics.operations === 'object' ? metrics.operations : {};
 		const history = Array.isArray(metrics.history) ? metrics.history.slice(0, 10) : [];
-		const reverseProxy = diagnostics.reverseProxy && typeof diagnostics.reverseProxy === 'object' ? diagnostics.reverseProxy : {};
+		const originProbe = layer.originProbe && typeof layer.originProbe === 'object' ? layer.originProbe : {};
+		const originProbeRequest = originProbe.request && typeof originProbe.request === 'object' ? originProbe.request : {};
+		const originProbeRequestHeaders = originProbeRequest.headers && typeof originProbeRequest.headers === 'object' ? originProbeRequest.headers : {};
+		const originProbeResponseHeaders = originProbe.responseHeaders && typeof originProbe.responseHeaders === 'object' ? originProbe.responseHeaders : {};
+		const hasOriginProbe = !!(originProbe.time || originProbe.requestedUrl || originProbe.resolvedUrl || originProbe.httpCode || originProbe.errorCode);
 		const pageCacheEnabled = !!settings.pageCacheEnabled;
 		const nativeSettingEnabled = !!settings.liteSpeedCacheEnabled;
 		const apacheStaticActive = !!settings.apacheStaticHtmlDeliveryEnabled;
@@ -245,9 +247,6 @@
 			}
 			return null;
 		};
-		const testStatus = String(behavior.status || 'not-run').toLowerCase();
-		const testTone = testStatus === 'pass' ? 'success' : (testStatus === 'fail' || testStatus === 'configuration-incomplete' ? 'warning' : 'neutral');
-		const testLabel = testStatus === 'pass' ? 'PASS' : (testStatus === 'fail' ? 'FAIL' : (testStatus === 'inconclusive' ? 'INCONCLUSIVE' : (testStatus === 'configuration-incomplete' ? 'INCOMPLETE' : 'NOT RUN')));
 		const activeBuckets = Array.isArray(layer.activeBuckets) && layer.activeBuckets.length ? layer.activeBuckets.map((bucket) => String(bucket).toUpperCase()).join(', ') : '—';
 		const queryKeyProof = layer.queryKeyProof && typeof layer.queryKeyProof === 'object' ? layer.queryKeyProof : {};
 		const queryOperations = queryKeyProof.operationContract && typeof queryKeyProof.operationContract === 'object' ? queryKeyProof.operationContract : {};
@@ -255,19 +254,50 @@
 		const queryOperationLabel = queryOperations.exactPurge === 'skip' && queryOperations.publicRefill === 'skip'
 			? 'Bypass; native purge/refill skipped'
 			: 'Not confirmed';
+		const rulesState = layer.rulesState && typeof layer.rulesState === 'object' ? layer.rulesState : {};
+		const rulesStateLabel = String(rulesState.status || (layer.rulesActive ? 'applied' : 'unknown')).replace(/_/g, ' ');
 		const detectionRows = [
 			['Origin', layer.detected ? 'LiteSpeed detected' : 'Not confirmed'],
-			['Native HTML cache', layer.nativeEnabled ? 'Enabled' : (nativeSettingEnabled ? 'Configured / awaiting confirmation' : 'Disabled')],
+			['Server', layer.server || 'Not observed'],
+			['Native HTML cache', layer.nativeEnabled ? 'Enabled' : (nativeSettingEnabled ? 'Configured' : 'Disabled')],
 			['Managed rules', layer.rulesActive ? 'Active' : (nativeSettingEnabled ? 'Not active' : 'Disabled')],
+			['Managed rules state', rulesStateLabel],
 			['Purge transport', layer.method || '—'],
-			['X-LiteSpeed-Cache', reverseProxy.x_litespeed_cache || 'Not observed'],
-			['X-QC-Cache', reverseProxy.x_qc_cache || 'Not observed'],
+		];
+		const esiStatus = layer.esi && typeof layer.esi === 'object' ? layer.esi : {};
+		const esiCapability = esiStatus.capability && typeof esiStatus.capability === 'object' ? esiStatus.capability : {};
+		const esiCapabilityLabel = String(esiCapability.status || 'not_tested').replace(/_/g, ' ');
+		const behaviorRows = [
+			['Native ESI', esiStatus.enabled ? 'Enabled' : 'Disabled'],
+			['ESI capability', esiCapabilityLabel],
 			['Active buckets', activeBuckets],
 			['Safe-query cache-key proof', queryKeyProofStatus],
 			['Safe-query retrieval', queryKeyProof.safeQueryRetrievalEnabled ? 'Enabled' : 'Disabled'],
 			['Query URL operations', queryOperationLabel],
 			['Stale exact purge', layer.stalePurgeEnabled ? 'Enabled' : 'Disabled'],
-			['Refresh ahead', refreshAhead.active ? 'Active' : (refreshAhead.available ? 'Available' : 'Inactive')],
+		];
+		const originProbeRequestRows = [
+			['Method', originProbeRequest.method || '—'],
+			['Requested URL', originProbe.requestedUrl || '—'],
+			['Resolved URL', originProbe.resolvedUrl || originProbeRequest.url || '—'],
+			['User-Agent', originProbeRequest.userAgent || '—'],
+			['Accept', originProbeRequestHeaders.accept || '—'],
+			['PageSpeed', originProbeRequestHeaders.pageSpeed || '—'],
+			['ModPagespeed', originProbeRequestHeaders.modPagespeed || '—'],
+		];
+		const originProbeResponseRows = [
+			['HTTP', originProbe.httpCode ? String(originProbe.httpCode) : '—'],
+			['Duration', originProbe.durationMs ? String(originProbe.durationMs) + ' ms' : '—'],
+			['Server', originProbeResponseHeaders.server || originProbe.server || 'Not observed'],
+			['Cache-Control', originProbeResponseHeaders.cacheControl || 'Not observed'],
+			['X-LiteSpeed-Cache', originProbeResponseHeaders.xLiteSpeedCache || originProbe.xLiteSpeedCache || 'Not observed'],
+			['X-LiteSpeed-Cache-Control', originProbeResponseHeaders.xLiteSpeedCacheControl || 'Not observed'],
+			['X-LiteSpeed-Vary', originProbeResponseHeaders.xLiteSpeedVary || 'Not observed'],
+			['X-QC-Cache', originProbeResponseHeaders.xQcCache || originProbe.xQcCache || 'Not observed'],
+			['X-Ultra-Cache', originProbeResponseHeaders.ultraCache || 'Not observed'],
+			['X-Ultra-Cache-Reason', originProbeResponseHeaders.ultraCacheReason || 'Not observed'],
+			['X-Ultra-Cache-Source', originProbeResponseHeaders.ultraCacheSource || 'Not observed'],
+			['X-Ultra-Cache-Variant', originProbeResponseHeaders.ultraCacheVariant || 'Not observed'],
 		];
 		const metricRows = [
 			['Site purges', formatNumber(operations.sitePurgeSuccesses || 0) + ' successful / ' + formatNumber(operations.sitePurgeFailures || 0) + ' failed'],
@@ -293,15 +323,6 @@
 			if (entry.path) parts.push(String(entry.path));
 			return parts.join(' · ') || (entry.message || '—');
 		};
-		let testDisabledMessage = '';
-		if (!pageCacheEnabled) {
-			testDisabledMessage = __('Enable UltraCache Page Cache first, then enable native LiteSpeed HTML Cache in this card.', 'ultracache');
-		} else if (!nativeSettingEnabled) {
-			testDisabledMessage = __('Enable native LiteSpeed HTML Cache above before running the behavior test.', 'ultracache');
-		} else if (!layer.testable) {
-			testDisabledMessage = __('Native LiteSpeed HTML Cache is configured, but the LiteSpeed origin or managed cache rules are not yet confirmed. Review the status below and reload or redetect after the server begins returning LiteSpeed cache signals.', 'ultracache');
-		}
-
 		const mainSwitchDescription = __('Publish eligible UltraCache HTML to native LSCache with the existing Fresh TTL, conservative anonymous-page bypass rules, site/URL tags, and separate orig/WebP/AVIF cache keys.', 'ultracache');
 		const liteSpeedSwitchDisabledReason = !pageCacheEnabled
 			? __('Enable UltraCache Page Cache first.', 'ultracache')
@@ -311,7 +332,7 @@
 
 		return h(IntegrationAccordionCard, {
 			title: __('LiteSpeed Cache', 'ultracache'),
-			description: __('Configure, test, purge, refill, monitor, and diagnose the complete native LiteSpeed integration from this card.', 'ultracache'),
+			description: __('Configure, purge, refill, monitor, and diagnose the native LiteSpeed integration from this card.', 'ultracache'),
 			mainLabel: __('Enable native LiteSpeed HTML Cache', 'ultracache') + ' (.htaccess)',
 			mainDescription: mainSwitchDescription,
 			enabled: nativeSettingEnabled,
@@ -323,74 +344,8 @@
 			h('div', { className: 'uc-diagnostic-group mt-4', key: 'configuration' }, [
 				h('div', { className: 'uc-section-title' }, __('LiteSpeed settings', 'ultracache')),
 				h(ToggleRow, {
-					label: __('Refill LiteSpeed after targeted invalidation', 'ultracache'),
-					description: __('After an exact affected-URL purge, use the existing shared warm queue to rebuild UltraCache HTML/CSS, hard-purge LiteSpeed immediately before refill, and populate every active HTML bucket.', 'ultracache'),
-					checked: !!settings.liteSpeedRefillAfterTargetedInvalidation,
-					onChange: (value) => changeSetting('liteSpeedRefillAfterTargetedInvalidation', value),
-					disabled: busy || !pageCacheEnabled || !nativeSettingEnabled,
-					key: 'litespeed-refill-after-targeted-invalidation',
-				}),
-				h(ToggleRow, {
-					label: __('Warm LiteSpeed with site warm-up', 'ultracache'),
-					description: __('Include LiteSpeed in homepage, menu, full-site, cron, CLI, and warm-after-flush page pipelines after UltraCache HTML and CSS work completes.', 'ultracache'),
-					checked: !!settings.liteSpeedWarmDuringSiteWarmup,
-					onChange: (value) => changeSetting('liteSpeedWarmDuringSiteWarmup', value),
-					disabled: busy || !pageCacheEnabled || !nativeSettingEnabled,
-					key: 'litespeed-warm-during-site-warmup',
-				}),
-				h(ToggleRow, {
-					label: __('Serve stale LiteSpeed HTML during regeneration', 'ultracache'),
-					description: __('Use stale exact-tag purge for affected-page invalidation while retaining a final hard purge immediately before controlled refill.', 'ultracache'),
-					checked: !!settings.liteSpeedStalePurgeEnabled,
-					onChange: (value) => changeSetting('liteSpeedStalePurgeEnabled', value),
-					disabled: busy || !pageCacheEnabled || !nativeSettingEnabled,
-					key: 'litespeed-stale-purge',
-				}),
-				h(ToggleRow, {
-					label: __('Refresh hot LiteSpeed pages before expiry', 'ultracache'),
-					description: __('Use UltraCache HTML freshness markers and the bounded candidate registry to queue hot pages near Fresh TTL through the existing warm worker.', 'ultracache'),
-					checked: !!settings.liteSpeedRefreshAheadEnabled,
-					onChange: (value) => changeSetting('liteSpeedRefreshAheadEnabled', value),
-					disabled: busy || !pageCacheEnabled || !nativeSettingEnabled || !settings.liteSpeedStalePurgeEnabled,
-					key: 'litespeed-refresh-ahead',
-				}),
-				h('div', { className: 'grid grid-cols-1 md:grid-cols-2 gap-4', key: 'litespeed-refresh-ahead-fields' }, [
-					h(NumberRow, {
-						label: __('Refresh threshold (% of Fresh TTL)', 'ultracache'),
-						description: __('Queue a candidate when the oldest active UltraCache HTML bucket reaches this percentage of Fresh TTL, or when a required bucket is missing.', 'ultracache'),
-						value: Math.max(50, Math.min(95, Number(settings.liteSpeedRefreshAheadThresholdPercent || 85))),
-						onChange: (value) => changeSetting('liteSpeedRefreshAheadThresholdPercent', value),
-						disabled: busy || !settings.liteSpeedRefreshAheadEnabled,
-						min: 50,
-						max: 95,
-						step: 1,
-						key: 'litespeed-refresh-ahead-threshold',
-					}),
-					h(NumberRow, {
-						label: __('Maximum pages per scan', 'ultracache'),
-						description: __('Bound the number of due candidates checked and possibly queued by one LiteSpeed refresh-ahead scan.', 'ultracache'),
-						value: Math.max(1, Math.min(10, Number(settings.liteSpeedRefreshAheadMaxPages || 5))),
-						onChange: (value) => changeSetting('liteSpeedRefreshAheadMaxPages', value),
-						disabled: busy || !settings.liteSpeedRefreshAheadEnabled,
-						min: 1,
-						max: 10,
-						step: 1,
-						key: 'litespeed-refresh-ahead-max-pages',
-					}),
-				]),
-				h(SaveableTextAreaField, {
-					label: __('Pinned LiteSpeed refresh URLs', 'ultracache'),
-					description: __('Optional local URLs or paths, one per line. Pinned pages receive the highest candidate priority; the list is limited to 25 entries.', 'ultracache'),
-					value: settings.liteSpeedRefreshAheadPinnedUrls || '',
-					onSave: (value) => changeSetting('liteSpeedRefreshAheadPinnedUrls', value),
-					disabled: busy || !nativeSettingEnabled,
-					placeholder: '/\n/news/\nhttps://example.com/critical-page/',
-					saveLabel: __('Save LiteSpeed Pinned URLs', 'ultracache'),
-					key: 'litespeed-refresh-ahead-pinned-urls',
-				}),
-				h(ToggleRow, {
 					label: __('Include LiteSpeed in Flush All Cache', 'ultracache'),
-					description: __('Also purge LiteSpeed when the main Flush All Cache action runs. Native mode purges the UltraCache site tag; otherwise a confirmed LiteSpeed WordPress purge transport is used.', 'ultracache'),
+					description: __('Also purge LiteSpeed when the main Flush All Cache action runs. Native mode purges the LiteSpeed public site cache; otherwise a confirmed LiteSpeed WordPress purge transport is used.', 'ultracache'),
 					checked: !!settings.flushAllIncludeLiteSpeed,
 					onChange: (value) => changeSetting('flushAllIncludeLiteSpeed', value),
 					disabled: busy || (!layer.flushable && !nativeSettingEnabled),
@@ -398,11 +353,9 @@
 				}),
 			]),
 			h('div', { className: 'mt-4 flex flex-wrap gap-3', key: 'actions' }, [
-				h(Button, { onClick: onTest, disabled: busy || !layer.testable || typeof onTest !== 'function', variant: 'primary' }, busy ? __('Working…', 'ultracache') : __('Test LiteSpeed Behavior', 'ultracache')),
 				h(Button, { onClick: onFlush, disabled: busy || !layer.flushable || typeof onFlush !== 'function' }, busy ? __('Working…', 'ultracache') : __('Flush LiteSpeed Cache', 'ultracache')),
 				h(Button, { onClick: onRedetect, disabled: busy || typeof onRedetect !== 'function', variant: 'light' }, busy ? __('Working…', 'ultracache') : __('Redetect LiteSpeed', 'ultracache')),
 			]),
-			testDisabledMessage ? h('div', { className: 'text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 mt-3', key: 'test-disabled' }, testDisabledMessage) : null,
 			h('div', { className: 'uc-diagnostic-group mt-5', key: 'detection' }, [
 				h('div', { className: 'uc-section-title' }, __('Detection and transport', 'ultracache')),
 				h('div', { className: 'space-y-3' }, detectionRows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
@@ -410,27 +363,36 @@
 					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
 				]))),
 				layer.message ? h('div', { className: 'text-xs text-zinc-500 mt-4' }, layer.message) : null,
-				refreshAhead.message ? h('div', { className: 'text-xs text-zinc-500 mt-2' }, refreshAhead.message) : null,
-				refreshState.lastScanAt ? h('div', { className: 'text-xs text-zinc-400 mt-2' }, __('Last refresh-ahead scan: ', 'ultracache') + formatNumber(refreshState.checkedCount || 0) + ' checked · ' + formatNumber(refreshState.eligibleCount || 0) + ' eligible · ' + formatNumber(refreshState.queuedCount || 0) + ' queued') : null,
 			]),
 			h('div', { className: 'uc-diagnostic-group mt-5', key: 'behavior' }, [
-				h('div', { className: 'uc-section-title flex items-center justify-between gap-3' }, [
-					h('span', {}, __('Behavior test', 'ultracache')),
-					h(StatusPill, { ok: testStatus === 'pass', text: testLabel, tone: testTone }),
-				]),
-				behavior.message ? h('div', { className: 'text-sm text-zinc-300 mt-3' }, behavior.message) : h('div', { className: 'text-xs text-zinc-500 mt-3' }, __('No LiteSpeed behavior test has been run yet.', 'ultracache')),
-				behavior.timeHuman ? h('div', { className: 'text-xs text-zinc-500 mt-2' }, __('Last test: ', 'ultracache') + behavior.timeHuman) : null,
-				Array.isArray(behavior.buckets) && behavior.buckets.length ? h('div', { className: 'space-y-2 mt-4' }, behavior.buckets.map((bucket) => {
-					const status = String(bucket.status || 'inconclusive').toLowerCase();
-					return h('div', { className: 'flex items-start justify-between gap-4 py-2', key: bucket.bucket }, [
-						h('div', {}, [
-							h('div', { className: 'text-sm text-white' }, String(bucket.bucket || 'orig').toUpperCase()),
-							h('div', { className: 'text-xs text-zinc-500 mt-1' }, bucket.message || ''),
-						]),
-						h(StatusPill, { ok: status === 'pass', text: status.toUpperCase(), tone: status === 'pass' ? 'success' : (status === 'fail' ? 'warning' : 'neutral') }),
-					]);
-				})) : null,
+				h('div', { className: 'uc-section-title' }, __('Cache behavior', 'ultracache')),
+				h('div', { className: 'space-y-3' }, behaviorRows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
+					h('div', { className: 'text-sm text-white' }, row[0]),
+					h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
+				]))),
 			]),
+			hasOriginProbe ? AccordionBox({
+				title: __('Last LiteSpeed Detection', 'ultracache'),
+				description: originProbe.timeHuman || '',
+				keyName: 'litespeed-origin-probe',
+				children: [
+					h('div', { className: 'uc-diagnostic-group', key: 'request' }, [
+						h('div', { className: 'uc-section-title' }, __('Request', 'ultracache')),
+						h('div', { className: 'space-y-3' }, originProbeRequestRows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
+							h('div', { className: 'text-sm text-white' }, row[0]),
+							h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
+						]))),
+					]),
+					h('div', { className: 'uc-diagnostic-group', key: 'response' }, [
+						h('div', { className: 'uc-section-title' }, __('Response', 'ultracache')),
+						h('div', { className: 'space-y-3' }, originProbeResponseRows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
+							h('div', { className: 'text-sm text-white' }, row[0]),
+							h('div', { className: 'text-sm text-zinc-300 text-right break-all' }, row[1]),
+						]))),
+						originProbe.errorCode || originProbe.message ? h('div', { className: 'text-xs text-zinc-500 mt-4 break-all' }, [originProbe.errorCode || '', originProbe.message || ''].filter(Boolean).join(' · ')) : null,
+					]),
+				],
+			}) : null,
 			h('div', { className: 'uc-diagnostic-group mt-5', key: 'metrics' }, [
 				h('div', { className: 'uc-section-title' }, __('Production counters', 'ultracache')),
 				h('div', { className: 'space-y-3' }, metricRows.map((row) => h('div', { className: 'flex items-center justify-between gap-4 py-2', key: row[0] }, [
@@ -521,6 +483,15 @@
 		]);
 	}
 
+	function getObjectCacheBackendChoices() {
+		return [
+			{ value: 'redis', label: 'Redis', description: __("Recommended production backend. Fallback behavior is controlled by the Object Cache Fallback dropdown below.", 'ultracache') },
+			{ value: 'apcu', label: 'APCu', description: __("Local memory backend for single-server sites. APCu is cleared on PHP-FPM restart.", 'ultracache') },
+			{ value: 'sqlite', label: 'SQLite', description: __("Persistent local database backend for WordPress object caching.", 'ultracache') },
+			{ value: 'disk', label: 'Disk', description: __("Advanced/debug only. Not recommended for production because it can create many small files.", 'ultracache') },
+		];
+	}
+
 	function RedisCard({ form, diagnostics, busy, canManageInfrastructure, objectCacheEnabled, onObjectCacheEnabledChange, onFieldChange, onSave, onTest, onFlush, onRemoveConflictingDropins, onRecheckConflicts }) {
 		const objectCache = diagnostics.objectCache || {};
 		const infrastructureLocked = !canManageInfrastructure;
@@ -586,12 +557,7 @@
 		const payloadBackendStatus = manualPayloadProbe && manualPayloadProbe.backendStatus && typeof manualPayloadProbe.backendStatus === 'object' ? manualPayloadProbe.backendStatus : {};
 		const payloadProbeBackend = String(payloadBackendStatus.active || objectCache.activationProbeBackend || activeBackend || selectedBackend).toLowerCase();
 		const payloadProbeLabel = backendLabel(payloadProbeBackend) + ((fallbackActive && payloadProbeBackend === String(activeBackend).toLowerCase()) ? ' fallback' : '') + ' payload probe';
-		const backendChoices = [
-			{ value: 'redis', label: 'Redis', description: __("Recommended production backend. Fallback behavior is controlled by the Object Cache Fallback dropdown below.", 'ultracache') },
-			{ value: 'apcu', label: 'APCu', description: __("Local memory backend for single-server sites. APCu is cleared on PHP-FPM restart.", 'ultracache') },
-			{ value: 'sqlite', label: 'SQLite', description: __("Persistent local database backend for WordPress object caching.", 'ultracache') },
-			{ value: 'disk', label: 'Disk', description: __("Advanced/debug only. Not recommended for production because it can create many small files.", 'ultracache') },
-		];
+		const backendChoices = getObjectCacheBackendChoices();
 		const renderBackendChoice = (choice) => {
 			const selected = backend === choice.value;
 			const infrastructureChoiceLocked = infrastructureLocked && ('redis' === choice.value || 'redis' === backend);
@@ -723,7 +689,8 @@
 						disabled: busy || infrastructureLocked || secretExternal,
 						placeholder: secretExternal ? 'Externally configured' : (form.redisPasswordConfigured ? 'Leave blank to keep current value' : 'Enter Redis password'),
 						type: 'password',
-						autoComplete: 'new-password',
+						name: 'ultracache_redis_secret',
+						autoComplete: 'off',
 						key: 'redis-password-input',
 					}),
 					secretManaged ? h('div', { className: 'pb-4 flex justify-end', key: 'redis-password-clear-wrap' }, [
@@ -1124,27 +1091,6 @@
 
 
 
-		async function runLiteSpeedTest() {
-			return enqueueUiOperation('litespeed_behavior_test', 'Test LiteSpeed Behavior', async () => {
-				const response = await apiRequest('litespeed_behavior_test', {});
-				applyDashboardPayload(response || {});
-				if (response && response.externalCaches) {
-					stageDashboardPayloadForQueue({ stats: Object.assign({}, stats || {}, { externalCaches: response.externalCaches }) });
-				}
-				try { await refreshStats(); } catch (error) {
-					reportNonFatalAdminError('cache.stats-refresh', error, { severity: 'debug', dedupeKey: 'cache.stats-refresh', dedupeWindowMs: 30000 });
-				}
-				if (response && response.success === false) {
-					const testError = new Error(response.message || 'LiteSpeed behavior test failed.');
-					testError.data = response;
-					throw testError;
-				}
-				return response;
-			}, { processingText: 'Testing LiteSpeed GET, exact purge, MISS, and HIT behavior…', successText: (result) => {
-				return result && result.message ? String(result.message) : 'LiteSpeed behavior test completed.';
-			}, failedText: 'LiteSpeed behavior test failed.' });
-		}
-
 		async function flushLiteSpeed() {
 			return enqueueUiOperation('litespeed_flush', 'Flush LiteSpeed Cache', async () => {
 				const response = await apiRequest('litespeed_flush', {});
@@ -1208,7 +1154,6 @@
 			runVarnishFlushEntireHost,
 			flushOpcache,
 			flushApcu,
-			runLiteSpeedTest,
 			flushLiteSpeed,
 			flushNginx,
 			redetectExternalCaches,
@@ -1230,6 +1175,7 @@
 		LiteSpeedCard,
 		ExternalCacheFlushSettingsCard,
 		RedisCard,
+		getObjectCacheBackendChoices,
 		createController,
 	});
 })(window);

@@ -231,12 +231,32 @@ function ultracache_is_cli_context()
     return (defined('WP_CLI') && WP_CLI) || 'cli' === PHP_SAPI;
 }
 
+function ultracache_get_php_max_execution_time_seconds()
+{
+    return max(0, (int) ini_get('max_execution_time'));
+}
+
 function ultracache_get_safe_operation_budget($context = 'rest', $requested = null, $hard_cap = null)
 {
     $context = sanitize_key((string) $context);
     $is_cli = ultracache_is_cli_context();
-    $max_execution = (int) ini_get('max_execution_time');
+    $max_execution = function_exists('ultracache_get_php_max_execution_time_seconds')
+        ? ultracache_get_php_max_execution_time_seconds()
+        : max(0, (int) ini_get('max_execution_time'));
     $memory_limit = ultracache_parse_size_to_bytes((string) ini_get('memory_limit'));
+
+    // A page warm must never invent a shorter execution deadline than PHP itself.
+    // max_execution_time=0 means unlimited, represented by a zero-second budget.
+    if (0 === strpos($context, 'warm_url_') || 'cron_warm' === $context) {
+        return array(
+            'context' => $context,
+            'started_at' => microtime(true),
+            'seconds' => $max_execution > 0 ? $max_execution : 0,
+            'max_execution_time' => $max_execution,
+            'memory_limit_bytes' => $memory_limit,
+            'memory_stop_bytes' => $memory_limit > 0 ? (int) floor($memory_limit * 0.80) : 0,
+        );
+    }
 
     $default_requested = $is_cli ? 120 : 20;
     if ('cron' === $context || false !== strpos($context, 'warm')) {

@@ -125,11 +125,17 @@ function ultracache_get_locks_schema_install_lock_option_key()
  */
 function ultracache_locks_table_schema_ready($table)
 {
+    static $ready_tables = array();
+
     global $wpdb;
 
     $table = (string) $table;
     if ('' === $table || !($wpdb instanceof wpdb)) {
         return false;
+    }
+
+    if (!empty($ready_tables[$table])) {
+        return true;
     }
 
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only verification of one validated UltraCache-owned schema.
@@ -173,10 +179,16 @@ function ultracache_locks_table_schema_ready($table)
         $indexes[$key_name] = array_values($columns_by_sequence);
     }
 
-    return isset($indexes['PRIMARY'], $indexes['expires_at'], $indexes['type_expires'])
+    $ready = isset($indexes['PRIMARY'], $indexes['expires_at'], $indexes['type_expires'])
         && array('lock_name') === $indexes['PRIMARY']
         && array('expires_at') === $indexes['expires_at']
         && array('record_type', 'expires_at') === $indexes['type_expires'];
+
+    if ($ready) {
+        $ready_tables[$table] = true;
+    }
+
+    return $ready;
 }
 
 /**
@@ -256,20 +268,9 @@ function ultracache_locks_table_read_ready()
         return false;
     }
 
-    if (ultracache_get_locks_db_version() !== (string) get_option(ultracache_get_locks_db_version_option_key(), '')) {
-        $ready = false;
-        return false;
-    }
-
-    $table = ultracache_get_locks_table_name();
-    if ('' === $table) {
-        $ready = false;
-        return false;
-    }
-
-    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Read-only schema existence check; deliberately avoids dbDelta and cache writes.
-    $existing = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
-    $ready = (string) $existing === $table && ultracache_locks_table_schema_ready($table);
+    // Runtime reads trust UltraCache's stored schema version. Structural
+    // verification belongs to activation/version-mismatch repair, not lock reads.
+    $ready = ultracache_get_locks_db_version() === (string) get_option(ultracache_get_locks_db_version_option_key(), '');
     return $ready;
 }
 
@@ -282,11 +283,13 @@ function ultracache_locks_table_read_ready()
  *
  * @return bool
  */
-function ultracache_ensure_locks_table()
+function ultracache_ensure_locks_table($force_schema_verify = false)
 {
     static $ready = false;
+    static $schema_verified = false;
+    $force_schema_verify = (bool) $force_schema_verify;
 
-    if ($ready) {
+    if ($ready && (!$force_schema_verify || $schema_verified)) {
         return true;
     }
 
@@ -306,6 +309,13 @@ function ultracache_ensure_locks_table()
 
     $expected_version = ultracache_get_locks_db_version();
     $stored_version = (string) get_option(ultracache_get_locks_db_version_option_key(), '');
+
+    if (!$force_schema_verify && $expected_version === $stored_version) {
+        $ready = true;
+        return true;
+    }
+
+    // Forced lifecycle verification or a schema-version mismatch may introspect.
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- One schema-existence check for the validated UltraCache-owned lock table.
     $existing = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
     if ((string) $existing === $table && ultracache_locks_table_schema_ready($table)) {
@@ -313,6 +323,7 @@ function ultracache_ensure_locks_table()
             update_option(ultracache_get_locks_db_version_option_key(), $expected_version, false);
         }
         $ready = true;
+        $schema_verified = true;
         return true;
     }
 
@@ -325,6 +336,7 @@ function ultracache_ensure_locks_table()
             if ((string) $existing === $table && ultracache_locks_table_schema_ready($table)) {
                 update_option(ultracache_get_locks_db_version_option_key(), $expected_version, false);
                 $ready = true;
+                $schema_verified = true;
                 return true;
             }
         }
@@ -340,6 +352,7 @@ function ultracache_ensure_locks_table()
                 update_option(ultracache_get_locks_db_version_option_key(), $expected_version, false);
             }
             $ready = true;
+            $schema_verified = true;
             return true;
         }
 
@@ -372,6 +385,7 @@ function ultracache_ensure_locks_table()
 
         update_option(ultracache_get_locks_db_version_option_key(), $expected_version, false);
         $ready = true;
+        $schema_verified = true;
         return true;
     } finally {
         ultracache_release_locks_schema_install_lock($schema_token);

@@ -365,47 +365,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
     }
 
 
-    public function set_media_library_replacement_workflow_stage($args = array())
-    {
-        $args = is_array($args) ? $args : array();
-        $tables_ready = $this->ensure_media_replacement_tables();
-        $stage = isset($args['stage']) ? sanitize_key((string) $args['stage']) : '';
-        if (!in_array($stage, array('prepare', 'do', 'verify', 'delete', 'complete'), true)) {
-            return array(
-                'success' => false,
-                'message' => __('Invalid Media Library replacement workflow stage.', 'ultracache'),
-            );
-        }
-
-        if (!$tables_ready || !$this->media_replacement_has_registry_rows()) {
-            return array(
-                'success' => false,
-                'message' => __('Run Media Library replacement before changing workflow stage.', 'ultracache'),
-            );
-        }
-
-        $message = isset($args['message']) ? sanitize_text_field((string) $args['message']) : '';
-        if ('' === $message) {
-            if ('do' === $stage) {
-                $message = __('Prepare is complete. Run Do to switch metadata and apply matched replacements.', 'ultracache');
-            } elseif ('verify' === $stage) {
-                $message = __('Do is complete. Run Verify before deleting originals.', 'ultracache');
-            } elseif ('delete' === $stage) {
-                $message = __('Verification is clean. Delete Originals is ready.', 'ultracache');
-            } elseif ('complete' === $stage) {
-                $message = __('Media Library replacement is complete.', 'ultracache');
-            } else {
-                $message = __('Prepare builds the replacement plan and previews all matched references.', 'ultracache');
-            }
-        }
-
-        $this->persist_media_replacement_workflow_state($stage, $message);
-
-        return $this->get_media_library_replacement_workflow_status(array(
-            'respect_saved_stage' => true,
-        ));
-    }
-
     public function get_media_library_replacement_workflow_status($args = array())
     {
         global $wpdb;
@@ -432,6 +391,7 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             'doRunnerReady'       => true,
             'verifyRunnerReady'   => true,
             'deleteRunnerReady'   => true,
+            'rollbackRunnerReady' => true,
             'replacementSession'  => $this->get_media_library_replacement_session_status(),
             'runStatus'           => isset($saved['run_status']) ? (string) $saved['run_status'] : 'idle',
             'activeStep'          => isset($saved['active_step']) ? (string) $saved['active_step'] : '',
@@ -471,6 +431,7 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         $prepare_status  = $this->get_media_library_replacement_prepare_status();
         $do_status       = $this->get_media_library_replacement_do_status();
         $verify_status   = $this->get_media_library_replacement_verify_status();
+        $rollback_status = $this->get_media_library_replacement_rollback_status();
         $mapping_summary = $this->get_media_replacement_preview_summary();
         $db_summary      = $this->get_media_replacement_database_preview_summary();
         $theme_summary   = $this->get_media_replacement_theme_css_summary();
@@ -624,9 +585,12 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         } elseif ('delete_complete' === $active_step) {
             $stage = 'complete';
             $message = __('Media Library replacement is complete.', 'ultracache');
+        } elseif (in_array($active_step, array('rollback_database', 'rollback_theme_css', 'rollback_metadata', 'rollback_files', 'rollback_failed', 'rollback_complete'), true)) {
+            $stage = 'rollback';
+            $message = (string) ($rollback_status['message'] ?? __('Rollback Replacement is restoring the current replacement workflow.', 'ultracache'));
         }
 
-        if (empty($prepare_status['prepareComplete']) && !in_array($active_step, array('delete_originals', 'delete_failed', 'delete_complete'), true)) {
+        if (empty($prepare_status['prepareComplete']) && !in_array($active_step, array('delete_originals', 'delete_failed', 'delete_complete', 'rollback_database', 'rollback_theme_css', 'rollback_metadata', 'rollback_files', 'rollback_failed', 'rollback_complete'), true)) {
             $stage = 'prepare';
             $message = !empty($prepare_status['prepareFailed'])
                 ? ((string) ($prepare_status['message'] ?? __('Prepare failed.', 'ultracache')))
@@ -654,12 +618,15 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         $response['do']                  = $do_status;
         $response['verify']              = $verify_status;
         $response['delete']              = $this->get_media_library_replacement_delete_status();
+        $response['rollback']            = $rollback_status;
         $response['recovery']            = $this->get_media_replacement_recovery_status($saved);
         $response['runStatus']           = isset($saved['run_status']) ? (string) $saved['run_status'] : 'idle';
         $response['activeStep']          = isset($saved['active_step']) ? (string) $saved['active_step'] : '';
         $response['workflowStage']       = $stage;
-        $response['message']             = __('Replacement readiness, Prepare, Do, Verify, and Delete Originals use the shared resumable dashboard runner.', 'ultracache');
-        $response['workflowMessage']     = __('Complete readiness, Prepare, Do, and Verify, then run or resume Delete Originals for the verified JPG/PNG rows.', 'ultracache');
+        $response['message']             = __('Replacement readiness, Prepare, Do, Verify, Delete Originals, and Rollback Replacement use the shared resumable dashboard runner.', 'ultracache');
+        $response['workflowMessage']     = 'rollback' === $stage
+            ? (string) ($rollback_status['message'] ?? __('Rollback Replacement is restoring the current replacement workflow.', 'ultracache'))
+            : __('Complete readiness, Prepare, Do, and Verify, then run or resume Delete Originals for the verified JPG/PNG rows.', 'ultracache');
         $response['workflowUpdatedAt']   = current_time('mysql', true);
         $response['workflowVerifyCompleted'] = !empty($saved['workflow_verified_at']);
         $response['workflowVerifiedAt']   = isset($saved['workflow_verified_at']) ? (string) $saved['workflow_verified_at'] : '';
@@ -1228,18 +1195,12 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         }
 
         $limit = max(1, min(250, absint($args['limit'] ?? 50)));
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $deadline = microtime(true) + $time_budget;
         $rows = $this->get_media_replacement_pre_do_validation_rows($state['pre_do_validation_cursor_item_id'], $limit);
         $validated = 0;
         $failed = 0;
         $last_id = $state['pre_do_validation_cursor_item_id'];
 
         foreach ($rows as $row) {
-            if (($validated + $failed) > 0 && microtime(true) >= $deadline) {
-                break;
-            }
             $item_id = absint($row['id'] ?? 0);
             $result = $this->validate_media_replacement_destination_row($row);
             if (empty($result['valid'])) {
@@ -1545,9 +1506,7 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             return $session_check;
         }
 
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $chunk_lock = $this->acquire_media_replacement_prepare_chunk_lock((int) ceil($time_budget) + 15);
+        $chunk_lock = $this->acquire_media_replacement_prepare_chunk_lock();
         if ('' === $chunk_lock) {
             return array(
                 'success' => false,
@@ -1583,38 +1542,31 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                 $step_result = $this->scan_media_library_replacement_eligible_items(array(
                     'reset'                => true,
                     'limit'                => absint($args['limit'] ?? 50),
-                    'time_budget'          => $time_budget,
                     'collision_policy'     => sanitize_key((string) ($args['collision_policy'] ?? $args['collisionPolicy'] ?? 'block')),
                 ));
             } elseif ('registry_scan' === $active_step) {
                 $step_result = $this->scan_media_library_replacement_eligible_items(array(
                     'limit'       => absint($args['limit'] ?? 50),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('copy' === $active_step) {
                 $step_result = $this->copy_media_library_replacement_files(array(
                     'limit'       => absint($args['limit'] ?? 50),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('validate' === $active_step) {
                 $step_result = $this->validate_media_library_replacement_destination_files(array(
                     'limit'       => absint($args['limit'] ?? 50),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('metadata_plan' === $active_step) {
                 $step_result = $this->prepare_media_library_replacement_metadata_updates(array(
                     'limit'       => absint($args['limit'] ?? 50),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_scan' === $active_step) {
                 $step_result = $this->scan_media_library_replacement_database_references(array(
                     'limit'       => max(1000, absint($args['limit'] ?? 1000)),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_match' === $active_step) {
                 $step_result = $this->match_media_library_replacement_database_references(array(
                     'limit'       => max(50, absint($args['limit'] ?? 250)),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_preview' === $active_step) {
                 $step_result = $this->get_media_library_replacement_database_replacement_preview(array(
@@ -1625,7 +1577,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             } elseif ('theme_css_scan' === $active_step) {
                 $step_result = $this->scan_media_library_replacement_theme_css_references(array(
                     'limit'       => min(50, max(1, absint($args['limit'] ?? 20))),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('theme_css_preview' === $active_step) {
                 $step_result = $this->get_media_library_replacement_theme_css_replacement_preview(array(
@@ -1636,7 +1587,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             } elseif ('pre_do_validate' === $active_step) {
                 $step_result = $this->validate_media_library_replacement_pre_do_files(array(
                     'limit'       => absint($args['limit'] ?? 50),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('prepare_complete' === $active_step) {
                 $step_result = array('success' => true, 'message' => __('Prepare is already complete.', 'ultracache'), 'batchProcessed' => 0);
@@ -2224,9 +2174,7 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             return $session;
         }
 
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
-        $chunk_lock = $this->acquire_media_replacement_do_chunk_lock((int) ceil($time_budget) + 15);
+        $chunk_lock = $this->acquire_media_replacement_do_chunk_lock();
         if ('' === $chunk_lock) {
             return array(
                 'success' => false,
@@ -2304,17 +2252,14 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             if ('metadata_apply' === $active_step) {
                 $step_result = $this->apply_media_library_replacement_metadata_updates(array(
                     'limit'       => $limit,
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_recovery_scan' === $active_step) {
                 $step_result = $this->scan_media_library_replacement_database_references(array(
                     'limit'       => max(50, $limit),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_recovery_match' === $active_step) {
                 $step_result = $this->match_media_library_replacement_database_references(array(
                     'limit'       => max(50, $limit),
-                    'time_budget' => $time_budget,
                 ));
             } elseif ('database_recovery_preview' === $active_step) {
                 $step_result = $this->get_media_library_replacement_database_replacement_preview(array(
@@ -2330,7 +2275,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                         'database_apply',
                         array(
                             'limit'       => $limit,
-                            'time_budget' => $time_budget,
                         )
                     );
                     $step_result = $this->apply_media_library_replacement_database_replacements($database_args);
@@ -2349,7 +2293,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                         'theme_css_apply',
                         array(
                             'limit'       => min(100, $limit),
-                            'time_budget' => $time_budget,
                         )
                     );
                     $step_result = $this->apply_media_library_replacement_theme_css_replacements($theme_css_args);
@@ -2787,10 +2730,8 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             return $session;
         }
 
-        $time_budget = isset($args['time_budget']) && (float) $args['time_budget'] > 0 ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(30.0, $time_budget));
         $limit = max(1, min(250, absint($args['limit'] ?? 50)));
-        $chunk_lock = $this->acquire_media_replacement_verify_chunk_lock((int) ceil($time_budget) + 15);
+        $chunk_lock = $this->acquire_media_replacement_verify_chunk_lock();
         if ('' === $chunk_lock) {
             return array(
                 'success' => false,
@@ -2860,7 +2801,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                 $state = $this->update_media_replacement_workflow_state($state);
             }
 
-            $deadline = microtime(true) + $time_budget;
             $batch_processed = 0;
             $step_result = array();
 
@@ -2870,9 +2810,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                 $checked = 0;
                 $failed = 0;
                 foreach ($rows as $row) {
-                    if ($checked > 0 && microtime(true) >= $deadline) {
-                        break;
-                    }
                     $result = $this->validate_media_replacement_destination_row($row);
                     $checked++;
                     if (empty($result['valid'])) {
@@ -2905,9 +2842,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
                 $checked = 0;
                 $failed = 0;
                 foreach ($rows as $row) {
-                    if ($checked > 0 && microtime(true) >= $deadline) {
-                        break;
-                    }
                     $result = $this->verify_media_replacement_metadata_row($row);
                     $checked++;
                     if (empty($result['verified'])) {
@@ -3139,6 +3073,10 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
             $add($blockers, 'replacement_plan_missing', __('The current replacement plan is empty. Run Prepare before deleting originals.', 'ultracache'));
         }
 
+        if ('rollback_complete' === (string) $state['active_step']) {
+            $add($blockers, 'rollback_complete', __('Rollback Replacement is complete. Restart Replacement Plan before deleting original files.', 'ultracache'));
+        }
+
         list($target_format, $fallback_format) = $this->get_media_replacement_current_output_policy();
         if ($state['target_format'] !== $target_format || $state['fallback_format'] !== $fallback_format) {
             $add($blockers, 'policy_changed', __('The Media Library replacement policy changed after Verify.', 'ultracache'));
@@ -3346,10 +3284,9 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         ));
     }
 
-    private function apply_media_library_replacement_delete_rows($limit = 50, $time_budget = 15.0, $retry_failed = false)
+    private function apply_media_library_replacement_delete_rows($limit = 50, $retry_failed = false)
     {
         $limit = max(1, min(100, absint($limit)));
-        $time_budget = max(1.0, min(25.0, (float) $time_budget));
         if (!$this->media_replacement_has_registry_rows()) {
             return array('success' => false, 'blocked' => true, 'message' => __('No replacement registry rows are available for Delete Originals.', 'ultracache'));
         }
@@ -3384,7 +3321,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         }
 
         $rows = $this->get_media_replacement_cleanup_candidate_rows($limit);
-        $started_at = microtime(true);
         $processed = 0;
         $deleted = 0;
         $already_missing = 0;
@@ -3392,10 +3328,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         $deleted_paths = array();
 
         foreach ($rows as $row) {
-            if ($processed > 0 && (microtime(true) - $started_at) >= $time_budget) {
-                break;
-            }
-
             $item_id = absint($row['id'] ?? 0);
             $old_file = wp_normalize_path((string) ($row['old_file_path'] ?? ''));
             if ($item_id <= 0) {
@@ -3478,10 +3410,8 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
         }
 
         $limit = max(1, min(100, absint($args['limit'] ?? 50)));
-        $time_budget = isset($args['time_budget']) ? (float) $args['time_budget'] : 15.0;
-        $time_budget = max(1.0, min(25.0, $time_budget));
         $confirmation_token = $this->get_media_replacement_confirmation_token_from_args($args);
-        $chunk_lock = $this->acquire_media_replacement_delete_chunk_lock((int) ceil($time_budget) + 20);
+        $chunk_lock = $this->acquire_media_replacement_delete_chunk_lock();
         if ('' === $chunk_lock) {
             $lock_state = $this->normalize_media_replacement_workflow_state($this->get_media_replacement_workflow_state());
             if ('verify_complete' === $lock_state['active_step']) {
@@ -3546,7 +3476,6 @@ trait Ultra_Cache_Media_Replacement_Workflow_Trait
 
             $result = $this->apply_media_library_replacement_delete_rows(
                 $limit,
-                $time_budget,
                 $retry_failed_rows
             );
             if (empty($result['success'])) {

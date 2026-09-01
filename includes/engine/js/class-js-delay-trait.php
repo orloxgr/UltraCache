@@ -710,27 +710,27 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
                 'category' => 'detected-component-protection',
                 'label' => __('Detected component protections', 'ultracache'),
                 'confidence' => 'recommended',
-                'appendable' => true,
-                'markers' => array('complianz', 'cmplz', 'complianz-gdpr', 'complianz-gdpr-premium'),
-                'suggestions' => array('complianz', 'cmplz', 'complianz-gdpr/cookiebanner/js/complianz.min.js', 'complianz-gdpr-premium/cookiebanner/js/complianz.min.js', 'complianz-gdpr-premium/pro/tcf/build/index.js', 'complianz-gdpr-premium/pro/tcf-stub/build/index.js'),
-                'reason' => __('Complianz consent assets were detected on this page. Consent/cookie scripts should stay out of Delay JS to avoid banner or consent-state issues.', 'ultracache'),
+                'appendable' => false,
+                'markers' => array('complianz', 'cmplz', 'complianz-gdpr', 'complianz-gdpr-premium', 'real-cookie-banner', 'real-cookie-banner-pro', 'devowl', 'rcb-', 'wp-consent-api', 'wp_consent'),
+                'suggestions' => array('complianz', 'cmplz', 'real-cookie-banner', 'devowl', 'wp-consent-api'),
+                'reason' => __('Consent-management assets were detected on this page. They follow the configured JavaScript strategy; use the visible Defer Instead of Delay or Do Not Defer or Delay lists if compatibility testing requires an exception.', 'ultracache'),
             ),
             array(
                 'category' => 'detected-component-protection',
                 'label' => __('Detected component protections', 'ultracache'),
                 'confidence' => 'recommended',
-                'appendable' => true,
+                'appendable' => false,
                 'markers' => array('cookieyes', 'cookielawinfo', 'cky-', 'cookiebot', 'uc.js', 'iubenda', 'onetrust', 'optanon'),
                 'suggestions' => array('cookieyes', 'cookielawinfo', 'cky-', 'cookiebot', 'iubenda', 'onetrust', 'optanon'),
-                'reason' => __('Cookie/consent-management assets were detected on this page. Consent scripts are safer when excluded from Delay JS.', 'ultracache'),
+                'reason' => __('Cookie/consent-management assets were detected on this page. They follow the configured JavaScript strategy; use the visible Defer Instead of Delay or Do Not Defer or Delay lists if compatibility testing requires an exception.', 'ultracache'),
             ),
             array(
                 'category' => 'detected-component-protection',
                 'label' => __('Detected component protections', 'ultracache'),
                 'confidence' => 'recommended',
                 'appendable' => true,
-                'markers' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'hcaptcha.com', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
-                'suggestions' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'turnstile', 'challenges.cloudflare.com', 'cf-turnstile'),
+                'markers' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'hcaptcha.com', 'turnstile', 'challenges.cloudflare', 'cf-turnstile'),
+                'suggestions' => array('google.com/recaptcha', 'grecaptcha', 'hcaptcha', 'turnstile', 'challenges.cloudflare', 'cf-turnstile'),
                 'reason' => __('Captcha/anti-bot assets were detected on this page. These are commonly unsafe to delay because forms may need them immediately.', 'ultracache'),
             ),
             array(
@@ -1039,32 +1039,14 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
 
 
 
-    private function matches_non_critical_delay_patterns($handle, $src, $tag = '')
+    private function get_non_critical_delay_patterns()
     {
-        $haystack = strtolower((string) $handle . ' ' . $src . ' ' . $tag);
-        $patterns = array(
-            'cmplz',
-            'complianz',
-            'googlesitekit-events-provider',
-            'google-site-kit',
-            'sitekit',
-            'mailerlite',
-            'mc4wp',
-            'sourcebuster',
-            'order-attribution',
-            'tooltipster',
-            'magnific-popup',
-            'perfect-scrollbar',
-            'plainoverlay',
-            'ion.range',
-            'icheck',
-            'easy-autocomplete',
-            'jarallax',
-            'tweenmax',
-            'gsap',
-            'sticky-kit',
-            'slick',
-            'swiper',
+        /*
+         * Generic semantic candidates only. Vendor/plugin/library identities
+         * are forbidden here: provider-specific behavior belongs in visible
+         * lists, explicit integrations, or diagnostics recommendations.
+         */
+        return array(
             'carousel',
             'slider',
             'popup',
@@ -1078,6 +1060,13 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
             'animation',
             'animate',
         );
+    }
+
+
+    private function matches_non_critical_delay_patterns($handle, $src, $tag = '')
+    {
+        $haystack = strtolower((string) $handle . ' ' . $src . ' ' . $tag);
+        $patterns = $this->get_non_critical_delay_patterns();
 
         foreach ($patterns as $pattern) {
             if (false !== strpos($haystack, strtolower($pattern))) {
@@ -1090,86 +1079,274 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
 
 
 
-    private function should_delay_non_critical_script($handle, $src, $tag, array $settings = array())
+    private function should_protect_wpbakery_animation_script($handle, $src, $tag = '', array $settings = array())
     {
-        $src = trim((string) $src);
-        if ('' === $src || false === stripos((string) $tag, '<script')) {
+        if (empty($settings['protect_wpbakery_animations'])) {
             return false;
         }
 
-        if (!$this->is_delayable_external_script_tag($tag)) {
-            return false;
-        }
+        $handle_lc = strtolower(trim((string) $handle));
+        $src_lc = strtolower(trim((string) $src));
+        $tag_lc = strtolower((string) $tag);
 
-        if (!$this->is_same_host_public_url($src)) {
-            return false;
-        }
-
-        if ($this->should_native_defer_all_local_script($src, $settings)) {
-            return false;
-        }
-
-        if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
-            return false;
-        }
-
-        if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
-            return false;
-        }
-
-        if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
-            return false;
-        }
-
-        if ($this->is_script_force_blocking($handle, $src, $tag, $settings)) {
-            return false;
-        }
-
-        if ($this->script_handle_has_enqueued_dependents($handle)) {
-            return false;
-        }
-
-        $handle_lc = strtolower((string) $handle);
-        $src_lc    = strtolower((string) $src);
-
-        $forced_blocking_handles = array(
-            'elementor-webpack-runtime',
-            'elementor-pro-webpack-runtime',
-            'elementor-frontend-js',
-            'elementor-pro-frontend-js',
-            'contact-form-7-js',
-            'author-arc-handler-js',
+        $protected_handles = array(
+            'vc_waypoints',
+            'vc_waypoints-js',
+            'vc_carousel_js',
+            'vc_carousel_js-js',
+            'wpb_flexslider',
+            'wpb_flexslider-js',
+            'nivo-slider',
+            'nivo-slider-js',
+            'isotope',
+            'isotope-js',
+            'jquery-ui-tabs',
+            'jquery-ui-tabs-js',
+            'jquery-ui-accordion',
+            'jquery-ui-accordion-js',
         );
 
-        if (in_array($handle_lc, $forced_blocking_handles, true)) {
-            return false;
-        }
-
-        $woocommerce_path = function_exists('ultracache_plugins_public_path') ? ultracache_plugins_public_path('woocommerce') : '';
-        if (('' !== $woocommerce_path && function_exists('ultracache_public_path_contains') && ultracache_public_path_contains($src_lc, $woocommerce_path)) || false !== strpos($src_lc, '/woocommerce/assets/')) {
-            return false;
-        }
-
-        if (!empty($settings['critical_request_chain_relief']) && $this->script_matches_fragment_list($handle, $src, $this->get_critical_request_chain_delay_fragments($settings))) {
+        if (in_array($handle_lc, $protected_handles, true)) {
             return true;
         }
 
-        if ($this->matches_non_critical_delay_patterns($handle, $src, $tag)) {
-            return true;
-        }
+        $haystack = $src_lc . ' ' . $tag_lc;
+        $is_wpbakery_asset = false !== strpos($haystack, '/js_composer/') || false !== strpos($haystack, 'wpbakery');
+        $is_waypoints_asset = false !== strpos($haystack, '/vc_waypoints/') || false !== strpos($haystack, 'vc-waypoints') || false !== strpos($haystack, 'vc_waypoints');
+        $is_carousel_asset = false !== strpos($haystack, '/vc_carousel/') || false !== strpos($haystack, 'vc-carousel') || false !== strpos($haystack, 'vc_carousel');
+        $is_flexslider_asset = false !== strpos($haystack, '/flexslider/') || false !== strpos($haystack, 'jquery.flexslider');
+        $is_nivo_asset = false !== strpos($haystack, '/nivo-slider/') || false !== strpos($haystack, 'jquery.nivo.slider');
+        $is_isotope_asset = false !== strpos($haystack, '/isotope-layout/') || false !== strpos($haystack, 'isotope.pkgd');
 
-        if (empty($settings['delay_non_critical_js_aggressive'])) {
-            return false;
-        }
-
-        if (!$this->is_local_wp_content_script_url($src)) {
-            return false;
-        }
-
-        return $this->script_handle_is_footer_group($handle);
+        return $is_wpbakery_asset && ($is_waypoints_asset || $is_carousel_asset || $is_flexslider_asset || $is_nivo_asset || $is_isotope_asset);
     }
 
 
+
+    /**
+     * Return whether the current per-page Elementor compatibility resolver has
+     * proven that this script must stay out of UltraCache Delay/parallel paths.
+     *
+     * No Elementor handles are hard-coded here. The protected set is generated
+     * from rendered widgets, Elementor's live dependency API, and the installed
+     * handler sources for the current response.
+     */
+    private function should_protect_elementor_compatibility_script($handle, $src, $tag = '', array $settings = array())
+    {
+        if (empty($settings['protect_elementor_compatibility'])) {
+            return false;
+        }
+
+        $protected_handles = isset($settings['_elementor_compatibility_protected_handles']) && is_array($settings['_elementor_compatibility_protected_handles'])
+            ? $settings['_elementor_compatibility_protected_handles']
+            : array();
+        $protected_handle_map = array();
+        foreach ($protected_handles as $protected_handle) {
+            $protected_handle = sanitize_key((string) $protected_handle);
+            if ('' !== $protected_handle) {
+                $protected_handle_map[$protected_handle] = true;
+                $protected_handle_map[$protected_handle . '-js'] = true;
+            }
+        }
+
+        $handle_lc = sanitize_key((string) $handle);
+        if ('' !== $handle_lc && isset($protected_handle_map[$handle_lc])) {
+            return true;
+        }
+        if ('' !== $handle_lc && substr($handle_lc, -3) === '-js') {
+            $base_handle = substr($handle_lc, 0, -3);
+            if (isset($protected_handle_map[$base_handle])) {
+                return true;
+            }
+        }
+
+        $protected_paths = isset($settings['_elementor_compatibility_protected_src_paths']) && is_array($settings['_elementor_compatibility_protected_src_paths'])
+            ? $settings['_elementor_compatibility_protected_src_paths']
+            : array();
+        if (empty($protected_paths)) {
+            return false;
+        }
+
+        $src_path = strtolower((string) wp_parse_url((string) $src, PHP_URL_PATH));
+        if ('' === $src_path && '' !== (string) $tag) {
+            $tag_src = (string) $this->extract_attribute_from_html_tag((string) $tag, 'src');
+            if ('' === $tag_src) {
+                $tag_src = (string) $this->extract_attribute_from_html_tag((string) $tag, 'data-ultracache-src');
+            }
+            $src_path = strtolower((string) wp_parse_url(html_entity_decode($tag_src, ENT_QUOTES | ENT_HTML5, 'UTF-8'), PHP_URL_PATH));
+        }
+
+        if ('' === $src_path) {
+            return false;
+        }
+
+        foreach ($protected_paths as $protected_path) {
+            $protected_path = strtolower(trim((string) $protected_path));
+            if ('' !== $protected_path && $src_path === $protected_path) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+
+    /**
+     * Whether the current frontend request is a variable WooCommerce product.
+     *
+     * @return bool
+     */
+    private function is_runtime_woocommerce_variable_product_context()
+    {
+        if (!function_exists('is_product') || !is_product() || !function_exists('wc_get_product')) {
+            return false;
+        }
+
+        $product_id = function_exists('get_queried_object_id') ? absint(get_queried_object_id()) : 0;
+        if ($product_id <= 0) {
+            return false;
+        }
+
+        $product = wc_get_product($product_id);
+        return is_object($product) && is_callable(array($product, 'is_type')) && $product->is_type('variable');
+    }
+
+
+
+    /**
+     * Protect product-interaction scripts that may participate in resolving a
+     * WooCommerce variation. This is deliberately scoped to variable product
+     * pages so unrelated site JavaScript remains eligible for Delay JS.
+     *
+     * @param string $handle Script handle.
+     * @param string $src    Script URL.
+     * @param string $tag    Script tag.
+     * @return bool
+     */
+    private function should_protect_woocommerce_variable_product_interaction_script($handle, $src, $tag = '', array $settings = array())
+    {
+        if (empty($settings['protect_woocommerce_variable_product_compatibility'])
+            || !$this->is_runtime_woocommerce_variable_product_context()) {
+            return false;
+        }
+
+        $haystack = strtolower((string) $handle . ' ' . (string) $src . ' ' . (string) $tag);
+        foreach (array('variation', 'swatch', 'single-product', 'single_product') as $marker) {
+            if (false !== strpos($haystack, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+
+    /**
+     * Add early browser discovery for the core variable-product runtime that is
+     * otherwise emitted late in the WooCommerce footer dependency chain.
+     *
+     * @param array $preloads WordPress preload resource definitions.
+     * @return array
+     */
+    public function filter_woocommerce_variable_product_preloads($preloads)
+    {
+        $preloads = is_array($preloads) ? $preloads : array();
+        $settings = $this->get_settings();
+        if (empty($settings['protect_woocommerce_variable_product_compatibility'])
+            || !$this->is_runtime_woocommerce_variable_product_context()
+            || !function_exists('wp_scripts')) {
+            return $preloads;
+        }
+
+        $scripts = wp_scripts();
+        if (!is_object($scripts) || empty($scripts->registered)) {
+            return $preloads;
+        }
+
+        $existing = array();
+        foreach ($preloads as $resource) {
+            if (is_array($resource) && !empty($resource['href'])) {
+                $existing[(string) $resource['href']] = true;
+            }
+        }
+
+        foreach (array('underscore', 'wp-util', 'wc-add-to-cart-variation') as $handle) {
+            if (empty($scripts->registered[$handle]) || empty($scripts->registered[$handle]->src)) {
+                continue;
+            }
+
+            $dependency = $scripts->registered[$handle];
+            $src = (string) $dependency->src;
+            if (0 === strpos($src, '//')) {
+                $src = (is_ssl() ? 'https:' : 'http:') . $src;
+            } elseif (!preg_match('#^https?://#i', $src)) {
+                $src = trailingslashit((string) $scripts->base_url) . ltrim($src, '/');
+            }
+
+            // A false/empty version means WordPress has not finalized the exact
+            // script URL yet. Do not emit a speculative `?ver` preload that can
+            // differ from the URL printed later by the script loader.
+            $dependency_version = $dependency->ver;
+            if ((false === $dependency_version || '' === (string) $dependency_version) && false === strpos($src, 'ver=')) {
+                continue;
+            }
+            if (null !== $dependency_version && false === strpos($src, 'ver=')) {
+                $src = add_query_arg('ver', (string) $dependency_version, $src);
+            }
+
+            $src = esc_url($src);
+            if ('' === $src || isset($existing[$src])) {
+                continue;
+            }
+
+            $preloads[] = array(
+                'href' => $src,
+                'as'   => 'script',
+            );
+            $existing[$src] = true;
+        }
+
+        return $preloads;
+    }
+
+
+
+    /**
+     * Enqueue the small pre-submit race guard before footer variation scripts.
+     *
+     * @return void
+     */
+    public function enqueue_woocommerce_variable_product_interaction_guard()
+    {
+        $settings = $this->get_settings();
+        if (empty($settings['protect_woocommerce_variable_product_compatibility'])
+            || !$this->is_runtime_woocommerce_variable_product_context()
+            || !method_exists($this, 'ultracache_enqueue_frontend_js_helper')) {
+            return;
+        }
+
+        $this->ultracache_enqueue_frontend_js_helper(
+            'ultracache-woocommerce-variable-product-guard',
+            'woocommerce-variable-product-guard.js',
+            array('jquery'),
+            false
+        );
+    }
+
+
+
+    private function should_delay_non_critical_script($handle, $src, $tag, array $settings = array())
+    {
+        $policy = $this->ultracache_build_unified_js_execution_policy($settings);
+        $facts = $this->ultracache_build_registered_script_policy_facts($tag, $handle, $src, $settings, $policy);
+        $route = $this->ultracache_evaluate_unified_js_execution_policy($policy, $facts);
+        $reason = isset($route['reason']) ? (string) $route['reason'] : '';
+
+        return 'delay' === (string) ($route['lane'] ?? '')
+            && in_array($reason, array('non-critical-first-party', 'non-critical-first-party-aggressive'), true);
+    }
 
     private function should_delay_script($handle, $src, $tag, array $settings = array())
     {
@@ -1183,138 +1360,111 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
     {
         $src = trim((string) $src);
         $tag = (string) $tag;
-
-        if ('' === $src || false === stripos($tag, '<script')) {
+        if ('' === $src || false === stripos($tag, '<script') || !$this->is_delayable_external_script_tag($tag)) {
+            return array('matched' => false);
+        }
+        if (false !== stripos($tag, 'type="text/ultracache-delayed-js"')
+            || false !== stripos($tag, "type='text/ultracache-delayed-js'")
+            || false !== stripos($tag, 'data-ultracache-src=')) {
             return array('matched' => false);
         }
 
-        if (!$this->is_delayable_external_script_tag($tag)) {
-            return array('matched' => false);
+        $policy = $this->ultracache_build_unified_js_execution_policy($settings);
+        $patterns = isset($policy['patterns']) && is_array($policy['patterns']) ? $policy['patterns'] : array();
+        $visible_native = $this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings);
+        $visible_defer = $this->is_script_user_force_deferred($handle, $src, $tag, $settings);
+        $elementor_protected = $this->should_protect_elementor_compatibility_script($handle, $src, $tag, $settings);
+        $wpbakery_protected = $this->should_protect_wpbakery_animation_script($handle, $src, $tag, $settings);
+        $woocommerce_protected = $this->should_protect_woocommerce_variable_product_interaction_script($handle, $src, $tag, $settings);
+
+        $integration_route = array();
+        if ($elementor_protected) {
+            $integration_route = array('lane' => 'defer', 'reason' => 'explicit-elementor-compatibility', 'action' => 'defer-native', 'interactionEligible' => true);
+        } elseif ($wpbakery_protected) {
+            $integration_route = array('lane' => 'defer', 'reason' => 'explicit-wpbakery-compatibility', 'action' => 'defer-force-ordered', 'interactionEligible' => true);
+        } elseif ($woocommerce_protected) {
+            $integration_route = array('lane' => 'defer', 'reason' => 'explicit-woocommerce-variable-product-compatibility', 'action' => 'defer-force-ordered', 'interactionEligible' => true);
         }
 
-        if (false !== stripos($tag, 'type="text/ultracache-delayed-js"') || false !== stripos($tag, "type='text/ultracache-delayed-js'") || false !== stripos($tag, 'data-ultracache-src=')) {
-            return array('matched' => false);
-        }
-        if ($this->is_js_excluded_by_user_patterns($handle, $src, $tag, '', $settings)) {
-            return array('matched' => false, 'reason' => 'excluded');
-        }
-
-        if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
-            return array('matched' => false, 'reason' => 'force-defer');
-        }
-
-        if ($this->should_native_defer_all_local_script($src, $settings)) {
-            return array('matched' => false, 'reason' => 'native-defer-all-local');
-        }
-
-        if (!empty($settings['delay_safe_third_party_js'])) {
-            $safe_pattern = $this->get_matching_third_party_delay_pattern($handle, $src, $tag, $this->get_safe_third_party_delay_patterns($settings));
-            if ('' !== $safe_pattern) {
-                return array(
-                    'matched' => true,
-                    'category' => 'safe-third-party',
-                    'reason' => 'safe-third-party',
-                    'matched_pattern' => $safe_pattern,
-                );
-            }
+        $facts = array(
+            'visibleNativePattern' => $visible_native ? 'registered-visible-native' : '',
+            'visibleDeferPattern' => $visible_defer ? 'registered-visible-defer' : '',
+            'explicitIntegrationRoute' => $integration_route,
+            // This adapter answers only third-party Delay policy. Delay All and
+            // first-party non-critical routing are owned by their dedicated passes.
+            'delayAllCandidate' => false,
+            'safePattern' => $this->get_matching_third_party_delay_pattern($handle, $src, $tag, isset($patterns['safe']) && is_array($patterns['safe']) ? $patterns['safe'] : array()),
+            'functionalPattern' => $this->get_matching_third_party_delay_pattern($handle, $src, $tag, isset($patterns['functional']) && is_array($patterns['functional']) ? $patterns['functional'] : array()),
+            'isThirdParty' => $this->is_external_third_party_script_url($src),
+            'nonCriticalPattern' => '',
+            'aggressiveNonCriticalCandidate' => false,
+            'asyncRoute' => array(),
+        );
+        $route = $this->ultracache_evaluate_unified_js_execution_policy($policy, $facts);
+        $reason = isset($route['reason']) ? (string) $route['reason'] : '';
+        if ('delay' !== (string) ($route['lane'] ?? '') || !in_array($reason, array('safe-third-party', 'functional-third-party', 'all-third-party'), true)) {
+            return array('matched' => false, 'reason' => $reason);
         }
 
-        if (!empty($settings['delay_functional_third_party_js'])) {
-            $functional_pattern = $this->get_matching_third_party_delay_pattern($handle, $src, $tag, $this->get_functional_third_party_delay_patterns($settings));
-            if ('' !== $functional_pattern) {
-                return array(
-                    'matched' => true,
-                    'category' => 'functional-third-party',
-                    'reason' => 'functional-third-party',
-                    'matched_pattern' => $functional_pattern,
-                );
-            }
-        }
-
-        if (!empty($settings['delay_all_third_party_js']) && $this->is_external_third_party_script_url($src)) {
-            return array(
-                'matched' => true,
-                'category' => 'all-third-party',
-                'reason' => 'all-third-party',
-                'matched_pattern' => 'third-party-origin',
-            );
-        }
-
-        return array('matched' => false);
+        return array(
+            'matched' => true,
+            'category' => $reason,
+            'reason' => $reason,
+            'matched_pattern' => isset($route['matched_pattern']) ? (string) $route['matched_pattern'] : '',
+        );
     }
-
-
 
     private function get_inline_third_party_delay_match($handle, $tag, array $settings = array())
     {
         $tag = (string) $tag;
-        if ('' === $tag || false === stripos($tag, '<script')) {
-            return array('matched' => false);
-        }
-
-        $handle = trim((string) $handle);
-        $id = trim((string) $this->extract_attribute_from_html_tag($tag, 'id'));
-        if ('' === $handle || '' === $id || !preg_match('/-js(?:-extra|-before|-after|-translations)?$/i', $id)) {
-            return array('matched' => false, 'reason' => 'anonymous-inline');
-        }
-
-        if (!$this->is_delayable_inline_script_tag($tag)) {
+        if ('' === $tag || false === stripos($tag, '<script') || !$this->is_delayable_inline_script_tag($tag)) {
             return array('matched' => false);
         }
 
         $inline_code = (string) $this->get_inline_script_code_from_tag($tag);
-        if ($this->is_js_excluded_by_user_patterns($handle, '', $tag, $inline_code, $settings)) {
-            return array('matched' => false, 'reason' => 'excluded');
-        }
+        $policy = $this->ultracache_build_unified_js_execution_policy($settings);
+        $patterns = isset($policy['patterns']) && is_array($policy['patterns']) ? $policy['patterns'] : array();
+        $haystacks = array(strtolower(trim((string) $handle)), strtolower($tag), strtolower($inline_code));
+        $first_match = function (array $candidates) use ($haystacks) {
+            foreach ($candidates as $pattern) {
+                $pattern = strtolower(trim((string) $pattern));
+                if ('' === $pattern) {
+                    continue;
+                }
+                foreach ($haystacks as $haystack) {
+                    if ($this->third_party_delay_pattern_matches_haystack($haystack, $pattern)) {
+                        return $pattern;
+                    }
+                }
+            }
+            return '';
+        };
 
-        $haystacks = array(
-            strtolower(trim($handle)),
-            strtolower($tag),
+        $facts = array(
+            'visibleNativePattern' => $this->is_js_excluded_by_user_patterns($handle, '', $tag, $inline_code, $settings) ? 'inline-visible-native' : '',
+            'visibleDeferPattern' => $this->is_script_user_force_deferred($handle, '', $tag, $settings) ? 'inline-visible-defer' : '',
+            'explicitIntegrationRoute' => array(),
+            'delayAllCandidate' => false,
+            'safePattern' => $first_match(isset($patterns['safe']) && is_array($patterns['safe']) ? $patterns['safe'] : array()),
+            'functionalPattern' => $first_match(isset($patterns['functional']) && is_array($patterns['functional']) ? $patterns['functional'] : array()),
+            'isThirdParty' => false,
+            'nonCriticalPattern' => '',
+            'aggressiveNonCriticalCandidate' => false,
+            'asyncRoute' => array(),
         );
-
-        if (!empty($settings['delay_safe_third_party_js'])) {
-            foreach ($this->get_safe_third_party_delay_patterns($settings) as $pattern) {
-                $pattern = strtolower(trim((string) $pattern));
-                if ('' === $pattern) {
-                    continue;
-                }
-                foreach ($haystacks as $haystack) {
-                    if ('' !== $haystack && false !== strpos($haystack, $pattern)) {
-                        return array(
-                            'matched' => true,
-                            'category' => 'safe-third-party',
-                            'reason' => 'safe-third-party',
-                            'matched_pattern' => $pattern,
-                        );
-                    }
-                }
-            }
-
+        $route = $this->ultracache_evaluate_unified_js_execution_policy($policy, $facts);
+        $reason = isset($route['reason']) ? (string) $route['reason'] : '';
+        if ('delay' !== (string) ($route['lane'] ?? '') || !in_array($reason, array('safe-third-party', 'functional-third-party'), true)) {
+            return array('matched' => false, 'reason' => $reason);
         }
 
-        if (!empty($settings['delay_functional_third_party_js'])) {
-            foreach ($this->get_functional_third_party_delay_patterns($settings) as $pattern) {
-                $pattern = strtolower(trim((string) $pattern));
-                if ('' === $pattern) {
-                    continue;
-                }
-                foreach ($haystacks as $haystack) {
-                    if ('' !== $haystack && false !== strpos($haystack, $pattern)) {
-                        return array(
-                            'matched' => true,
-                            'category' => 'functional-third-party',
-                            'reason' => 'functional-third-party',
-                            'matched_pattern' => $pattern,
-                        );
-                    }
-                }
-            }
-        }
-
-        return array('matched' => false);
+        return array(
+            'matched' => true,
+            'category' => $reason,
+            'reason' => $reason,
+            'matched_pattern' => isset($route['matched_pattern']) ? (string) $route['matched_pattern'] : '',
+        );
     }
-
-
 
     private function get_safe_third_party_delay_patterns(array $settings = array())
     {
@@ -1342,6 +1492,43 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
 
 
 
+    private function third_party_delay_pattern_matches_haystack($haystack, $pattern)
+    {
+        $haystack = strtolower((string) $haystack);
+        $pattern = strtolower(trim((string) $pattern));
+        if ('' === $haystack || '' === $pattern) {
+            return false;
+        }
+
+        /*
+         * Visible third-party patterns are fragments, but prefix-style token
+         * markers ending in '-' or '_' must start at an identifier boundary.
+         * This keeps values such as "foo-" matching "foo-banner" without
+         * accidentally matching the suffix inside an unrelated identifier.
+         * URL/domain/code fragments retain normal substring
+         * semantics, as do simple words such as "recaptcha" so established
+         * matches like "grecaptcha" are not changed.
+         */
+        $requires_left_boundary = 1 === preg_match('/^[a-z0-9_-]+[-_]$/', $pattern);
+        $offset = 0;
+        while (false !== ($position = strpos($haystack, $pattern, $offset))) {
+            if (!$requires_left_boundary || 0 === $position) {
+                return true;
+            }
+
+            $previous = substr($haystack, $position - 1, 1);
+            if (1 !== preg_match('/[a-z0-9_]/', $previous)) {
+                return true;
+            }
+
+            $offset = $position + 1;
+        }
+
+        return false;
+    }
+
+
+
     private function get_matching_third_party_delay_pattern($handle, $src, $tag, array $patterns)
     {
         $haystacks = array(
@@ -1359,7 +1546,7 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
             }
 
             foreach ($haystacks as $haystack) {
-                if ('' !== $haystack && false !== strpos($haystack, $pattern)) {
+                if ($this->third_party_delay_pattern_matches_haystack($haystack, $pattern)) {
                     return $pattern;
                 }
             }
@@ -1372,16 +1559,13 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
     public function enqueue_delayed_script_loader()
     {
         $settings = $this->get_settings();
-        if ((empty($settings['delay_safe_third_party_js']) && empty($settings['delay_functional_third_party_js']) && empty($settings['delay_all_third_party_js']) && empty($settings['delay_non_critical_js']) && empty($settings['lcp_boundary_defer']) && empty($settings['delay_all_js'])) || is_admin()) {
+        if ((empty($settings['delay_safe_third_party_js']) && empty($settings['delay_functional_third_party_js']) && empty($settings['delay_all_third_party_js']) && empty($settings['delay_non_critical_js']) && empty($settings['lcp_boundary_defer']) && empty($settings['delay_all_js'])) || is_admin() || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 
         $auto_events = array();
         if (!empty($settings['delayed_js_autostart_mousemove'])) {
             $auto_events[] = 'mousemove';
-        }
-        if (!empty($settings['delayed_js_autostart_scroll'])) {
-            $auto_events[] = 'scroll';
         }
         if (!empty($settings['delayed_js_autostart_click'])) {
             $auto_events[] = 'click';
@@ -1395,22 +1579,88 @@ trait Ultra_Cache_Engine_JS_Delay_Trait
         }
 
         $auto_events = array_values(array_unique(array_map('sanitize_key', $auto_events)));
+        $auto_timer_enabled = 'infinite' !== (string) ($settings['delayed_local_js_auto_start'] ?? 'custom');
         $auto_seconds = isset($settings['delayed_local_js_auto_start_seconds']) ? (float) $settings['delayed_local_js_auto_start_seconds'] : 0.05;
         $auto_seconds = max(0.05, min(5.0, $auto_seconds));
+        $minimum_release_seconds = isset($settings['delayed_js_minimum_release_seconds']) ? (float) $settings['delayed_js_minimum_release_seconds'] : 0.0;
+        $minimum_release_seconds = max(0.0, min(4.0, $minimum_release_seconds));
+
+        /*
+         * 3.12.11 Unified Routing. The browser receives the exact same
+         * declarative policy snapshot (ordered rules + flags + visible pattern
+         * sets) used by the registered-script router. The native bootstrap gets
+         * only the visible NATIVE patterns required for parser-early bypass;
+         * the full rule interpreter remains inside the deferred loader.
+         */
+        $dynamic_policy = $this->ultracache_build_unified_js_execution_policy($settings);
+        $dynamic_policy_json = wp_json_encode($dynamic_policy, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+        $dynamic_policy_encoded = is_string($dynamic_policy_json) && '' !== $dynamic_policy_json
+            ? rtrim(strtr(base64_encode($dynamic_policy_json), '+/', '-_'), '=')
+            : '';
+
+        $dynamic_finder_handle = 'ultracache-dynamic-script-finder-bootstrap';
+        if ($this->ultracache_enqueue_frontend_js_helper($dynamic_finder_handle, 'dynamic-script-finder-bootstrap.js', array(), false)) {
+            $native_policy_json = wp_json_encode(array(
+                'nativePatterns' => isset($dynamic_policy['patterns']['native']) && is_array($dynamic_policy['patterns']['native']) ? $dynamic_policy['patterns']['native'] : array(),
+                'realCookieBannerCompatibility' => !empty($dynamic_policy['flags']['realCookieBannerCompatibility']),
+                'realCookieBannerInfrastructurePatterns' => isset($dynamic_policy['patterns']['realCookieBannerInfrastructure']) && is_array($dynamic_policy['patterns']['realCookieBannerInfrastructure']) ? $dynamic_policy['patterns']['realCookieBannerInfrastructure'] : array(),
+                'complianzCompatibility' => !empty($dynamic_policy['flags']['complianzCompatibility']),
+                'complianzInfrastructurePatterns' => isset($dynamic_policy['patterns']['complianzInfrastructure']) && is_array($dynamic_policy['patterns']['complianzInfrastructure']) ? $dynamic_policy['patterns']['complianzInfrastructure'] : array(),
+            ), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+            if (is_string($native_policy_json) && '' !== $native_policy_json) {
+                $native_policy_encoded = rtrim(strtr(base64_encode($native_policy_json), '+/', '-_'), '=');
+                $this->ultracache_add_frontend_js_helper_data($dynamic_finder_handle, 'ultracacheDynamicScriptFinderConfig', array(
+                    'encodedPolicy' => $native_policy_encoded,
+                ));
+            }
+        }
+
+        /*
+         * Parser-early interaction capture is infrastructure, not scheduling
+         * policy. It records only the configured visitor events that could be
+         * lost before the deferred Delay executor is available. No vendor,
+         * tracker, CMP, or consent classification is performed here.
+         */
+        if (!empty($auto_events)) {
+            $interaction_bootstrap_handle = 'ultracache-delayed-js-interaction-bootstrap';
+            if ($this->ultracache_enqueue_frontend_js_helper($interaction_bootstrap_handle, 'delayed-js-interaction-bootstrap.js', array(), false)) {
+                $bootstrap_config = array(
+                    'autoEvents' => $auto_events,
+                );
+                $bootstrap_json = wp_json_encode($bootstrap_config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+                if (is_string($bootstrap_json) && '' !== $bootstrap_json && function_exists('wp_script_add_data')) {
+                    $bootstrap_encoded = rtrim(strtr(base64_encode($bootstrap_json), '+/', '-_'), '=');
+                    $this->ultracache_add_frontend_js_helper_script_data($interaction_bootstrap_handle, 'ultracache_opaque_config', $bootstrap_encoded);
+                }
+            }
+        }
 
         $handle = 'ultracache-delayed-js-loader';
         if (!$this->ultracache_enqueue_frontend_js_helper($handle, 'delayed-js-loader.js', array(), false)) {
             return;
         }
+        $this->ultracache_add_frontend_js_helper_script_data($handle, 'strategy', 'defer');
+
+        $runtime_scan_infinite_trigger_ms = (!$auto_timer_enabled && method_exists($this, 'is_runtime_js_scan_request') && $this->is_runtime_js_scan_request())
+            ? 10000
+            : 0;
 
         $this->ultracache_add_frontend_js_helper_data($handle, 'ultracacheDelayedJsLoaderConfig', array(
             'relief'          => !empty($settings['main_thread_relief']),
-            'autoEvents'      => $auto_events,
-            'autoAfterLoad'   => !empty($settings['delayed_js_autostart_after_load']),
-            'autoDelayMs'     => (int) round(1000 * $auto_seconds),
+            'autoEvents'       => $auto_events,
+            'autoAfterLoad'    => !empty($settings['delayed_js_autostart_after_load']),
+            'autoTimerEnabled' => $auto_timer_enabled,
+            'autoDelayMs'      => (int) round(1000 * $auto_seconds),
+            'minimumReleaseMs'  => (int) round(1000 * $minimum_release_seconds),
+            'dynamicPolicyEncoded' => $dynamic_policy_encoded,
+            'runtimeScanInfiniteTriggerMs' => $runtime_scan_infinite_trigger_ms,
             'scriptTimeoutMs' => 8000,
             'firstPartyParallelExecution' => !empty($settings['first_party_js_parallel_execution']),
             'thirdPartyParallelExecution' => !empty($settings['third_party_js_parallel_execution']),
+            // 3.10.03 benchmark tuning: fetch up to four eligible same-origin delayed scripts in parallel
+            // while keeping JavaScript execution strictly ordered. Keep this explicit so 2/4/6 can be A/B tested later.
+            'orderedFetchEnabled' => true,
+            'orderedFetchConcurrency' => 4,
         ));
     }
 

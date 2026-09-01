@@ -114,8 +114,6 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
             $message = self::maybe_translate('Every configured HTTP Varnish endpoint has current authenticated origin-revalidation proof.');
         } elseif (empty($diagnostic['configurationChanged']) && '' !== (string) ($diagnostic['message'] ?? '')) {
             $message = self::sanitize_varnish_string((string) $diagnostic['message']);
-        } elseif ('proof-expired' === $status) {
-            $message = self::maybe_translate('The authenticated origin-revalidation proof has expired and must be verified again.');
         } elseif ('configuration-changed' === $status) {
             $message = self::maybe_translate('The soft-purge or public-refill contract changed. Origin revalidation must be verified again.');
         } else {
@@ -241,7 +239,6 @@ trait Ultra_Cache_WP_Varnish_Origin_Refill_Trait
                 'force_refresh' => true,
                 'ignore_runtime_bypass' => true,
                 'skip_css_bundle' => true,
-                'time_budget' => 20,
                 'source' => 'varnish-origin-refill',
             )
         );

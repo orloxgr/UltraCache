@@ -27,6 +27,19 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         return 'ultracache_flush_affected_url_batch';
     }
 
+    /** Normalize persisted object-language metadata only for translated-object providers. */
+    private function normalize_affected_url_object_language($language_code)
+    {
+        $provider = function_exists('ultracache_multilingual_get_provider')
+            ? ultracache_multilingual_get_provider()
+            : 'none';
+        if ('wpml' !== $provider || !function_exists('ultracache_wpml_normalize_language_code')) {
+            return '';
+        }
+
+        return ultracache_wpml_normalize_language_code($language_code);
+    }
+
     private function get_empty_affected_url_batch()
     {
         return array(
@@ -52,9 +65,11 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
                 continue;
             }
             $entry = is_array($entry) ? $entry : array();
+            $language = $this->normalize_affected_url_object_language($entry['language'] ?? '');
             $normalized['posts'][(string) $post_id] = array(
                 'seenAt' => max(0, (int) ($entry['seenAt'] ?? 0)),
                 'warm' => !empty($entry['warm']),
+                'language' => $language,
             );
         }
 
@@ -66,11 +81,13 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
                 continue;
             }
             $term_key = $taxonomy . ':' . $term_id;
+            $language = $this->normalize_affected_url_object_language($entry['language'] ?? '');
             $normalized['terms'][$term_key] = array(
                 'taxonomy' => $taxonomy,
                 'termId' => $term_id,
                 'seenAt' => max(0, (int) ($entry['seenAt'] ?? 0)),
                 'warm' => !empty($entry['warm']),
+                'language' => $language,
             );
         }
 
@@ -112,6 +129,9 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             $base['posts'][$post_id] = array(
                 'seenAt' => max((int) ($existing['seenAt'] ?? 0), (int) ($entry['seenAt'] ?? 0)),
                 'warm' => !empty($existing['warm']) || !empty($entry['warm']),
+                'language' => '' !== (string) ($entry['language'] ?? '')
+                    ? (string) $entry['language']
+                    : (string) ($existing['language'] ?? ''),
             );
         }
 
@@ -124,6 +144,9 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
                 'termId' => (int) $entry['termId'],
                 'seenAt' => max((int) ($existing['seenAt'] ?? 0), (int) ($entry['seenAt'] ?? 0)),
                 'warm' => !empty($existing['warm']) || !empty($entry['warm']),
+                'language' => '' !== (string) ($entry['language'] ?? '')
+                    ? (string) $entry['language']
+                    : (string) ($existing['language'] ?? ''),
             );
         }
 
@@ -165,11 +188,21 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         $batch['reasons'][$reason] = max(0, (int) ($batch['reasons'][$reason] ?? 0)) + 1;
     }
 
-    private function record_affected_post_change($post_id, $reason, $warm = true)
+    private function record_affected_post_change($post_id, $reason, $warm = true, $language_code = '')
     {
         $post_id = absint($post_id);
         if ($post_id < 1) {
             return false;
+        }
+
+        $language_code = $this->normalize_affected_url_object_language($language_code);
+        if (
+            '' === $language_code
+            && function_exists('ultracache_multilingual_get_provider')
+            && 'wpml' === ultracache_multilingual_get_provider()
+            && method_exists($this, 'get_wpml_post_language_code')
+        ) {
+            $language_code = $this->get_wpml_post_language_code($post_id);
         }
 
         $now = time();
@@ -181,6 +214,7 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         $batch['posts'][$key] = array(
             'seenAt' => $now,
             'warm' => !empty($existing['warm']) || (bool) $warm,
+            'language' => '' !== $language_code ? $language_code : (string) ($existing['language'] ?? ''),
         );
         $this->record_affected_batch_reason($batch, $reason);
         $batch['firstSeenAt'] = $batch['firstSeenAt'] > 0 ? $batch['firstSeenAt'] : $now;
@@ -190,12 +224,22 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         return true;
     }
 
-    private function record_affected_term_change($term_id, $taxonomy, $reason, $warm = true)
+    private function record_affected_term_change($term_id, $taxonomy, $reason, $warm = true, $language_code = '')
     {
         $term_id = absint($term_id);
         $taxonomy = sanitize_key((string) $taxonomy);
         if ($term_id < 1 || '' === $taxonomy) {
             return false;
+        }
+
+        $language_code = $this->normalize_affected_url_object_language($language_code);
+        if (
+            '' === $language_code
+            && function_exists('ultracache_multilingual_get_provider')
+            && 'wpml' === ultracache_multilingual_get_provider()
+            && method_exists($this, 'get_wpml_term_language_code')
+        ) {
+            $language_code = $this->get_wpml_term_language_code($term_id, $taxonomy);
         }
 
         $now = time();
@@ -209,6 +253,7 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             'termId' => $term_id,
             'seenAt' => $now,
             'warm' => !empty($existing['warm']) || (bool) $warm,
+            'language' => '' !== $language_code ? $language_code : (string) ($existing['language'] ?? ''),
         );
         $this->record_affected_batch_reason($batch, $reason);
         $batch['firstSeenAt'] = $batch['firstSeenAt'] > 0 ? $batch['firstSeenAt'] : $now;
@@ -259,6 +304,103 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         }
 
         return true;
+    }
+
+    /** Build the semantic LiteSpeed dependency tags invalidated by one post change. */
+    private function get_litespeed_semantic_invalidation_tags_for_post($post_id)
+    {
+        $post_id = absint($post_id);
+        $post = $post_id > 0 ? get_post($post_id) : null;
+        if (!$post || 'revision' === $post->post_type || 'auto-draft' === $post->post_status) {
+            return array();
+        }
+
+        $tags = array();
+        if (function_exists('ultracache_get_litespeed_post_tag')) {
+            $tags[] = ultracache_get_litespeed_post_tag($post_id);
+        }
+        if (function_exists('ultracache_get_litespeed_post_type_archive_tag')) {
+            $tags[] = ultracache_get_litespeed_post_type_archive_tag($post->post_type);
+        }
+        if (function_exists('ultracache_get_litespeed_front_tag')) {
+            $tags[] = ultracache_get_litespeed_front_tag();
+        }
+        if ('post' === $post->post_type && function_exists('ultracache_get_litespeed_posts_index_tag')) {
+            $tags[] = ultracache_get_litespeed_posts_index_tag();
+        }
+        if (!empty($post->post_author) && function_exists('ultracache_get_litespeed_author_tag')) {
+            $tags[] = ultracache_get_litespeed_author_tag($post->post_author);
+        }
+        if (function_exists('ultracache_get_litespeed_date_archive_tag')) {
+            $tags[] = ultracache_get_litespeed_date_archive_tag();
+        }
+        if ('product' === $post->post_type && function_exists('ultracache_get_litespeed_shop_tag')) {
+            $tags[] = ultracache_get_litespeed_shop_tag();
+        }
+
+        $taxonomies = get_object_taxonomies($post->post_type, 'objects');
+        foreach ((array) $taxonomies as $taxonomy => $taxonomy_object) {
+            if (!is_object($taxonomy_object) || empty($taxonomy_object->public)) {
+                continue;
+            }
+            $term_ids = wp_get_object_terms($post_id, (string) $taxonomy, array('fields' => 'ids'));
+            if (is_wp_error($term_ids)) {
+                continue;
+            }
+            foreach ((array) $term_ids as $term_id) {
+                if (function_exists('ultracache_get_litespeed_term_tag')) {
+                    $tags[] = ultracache_get_litespeed_term_tag($term_id);
+                }
+            }
+        }
+
+        $front_page_id = absint(get_option('page_on_front', 0));
+        if ($front_page_id > 0 && $front_page_id === $post_id && function_exists('ultracache_get_litespeed_front_tag')) {
+            $tags[] = ultracache_get_litespeed_front_tag();
+        }
+        $posts_page_id = absint(get_option('page_for_posts', 0));
+        if ($posts_page_id > 0 && $posts_page_id === $post_id && function_exists('ultracache_get_litespeed_posts_index_tag')) {
+            $tags[] = ultracache_get_litespeed_posts_index_tag();
+        }
+
+        $tags = apply_filters('ultracache_litespeed_post_invalidation_tags', $tags, $post_id, $post);
+        return function_exists('ultracache_normalize_litespeed_cache_tags')
+            ? ultracache_normalize_litespeed_cache_tags((array) $tags, 64)
+            : array_values(array_unique(array_filter(array_map('strval', (array) $tags))));
+    }
+
+    /** Build the semantic LiteSpeed dependency tags invalidated by one term change. */
+    private function get_litespeed_semantic_invalidation_tags_for_term($term_id, $taxonomy)
+    {
+        $term_id = absint($term_id);
+        $taxonomy = sanitize_key((string) $taxonomy);
+        if ($term_id < 1 || '' === $taxonomy) {
+            return array();
+        }
+        $tags = array();
+        if (function_exists('ultracache_get_litespeed_term_tag')) {
+            $tags[] = ultracache_get_litespeed_term_tag($term_id);
+        }
+        if (function_exists('ultracache_get_litespeed_front_tag')) {
+            $tags[] = ultracache_get_litespeed_front_tag();
+        }
+        $tags = apply_filters('ultracache_litespeed_term_invalidation_tags', $tags, $term_id, $taxonomy);
+        return function_exists('ultracache_normalize_litespeed_cache_tags')
+            ? ultracache_normalize_litespeed_cache_tags((array) $tags, 64)
+            : array_values(array_unique(array_filter(array_map('strval', (array) $tags))));
+    }
+
+    /** Queue semantic tags using the same durable LiteSpeed invalidation worker. */
+    private function queue_litespeed_semantic_invalidation_tags(array $tags, $reason)
+    {
+        if (empty($tags) || !class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'enqueue_litespeed_invalidation_tags')) {
+            return array('success' => true, 'queued' => false, 'queuedTagCount' => 0);
+        }
+        $settings = $this->get_settings();
+        $stale = class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'is_litespeed_stale_invalidation_enabled')
+            ? Ultra_Cache_WP::is_litespeed_stale_invalidation_enabled($settings)
+            : !empty($settings['staleWhileRevalidateEnabled']);
+        return Ultra_Cache_WP::enqueue_litespeed_invalidation_tags($tags, $stale, sanitize_key((string) $reason));
     }
 
     private function get_affected_url_batch_lock_name()
@@ -610,6 +752,7 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
         $batch = $this->normalize_affected_url_batch($batch);
         $purge_plans = array();
         $warm_plans = array();
+        $semantic_tags = array();
         $post_count = 0;
         $term_count = 0;
 
@@ -619,12 +762,19 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             if (!$post || 'revision' === $post->post_type || 'auto-draft' === $post->post_status) {
                 continue;
             }
-            $plan = $this->get_affected_url_plan_for_post($post_id);
+            $plan = $this->get_affected_url_plan_for_post($post_id, (string) ($entry['language'] ?? ''));
             $purge_plans[] = $plan;
+            foreach ($this->get_litespeed_semantic_invalidation_tags_for_post($post_id) as $semantic_tag) {
+                $semantic_tags[$semantic_tag] = $semantic_tag;
+            }
             if (!empty($entry['warm'])) {
                 $warm_plans[] = 'publish' === $post->post_status
                     ? $plan
-                    : $this->exclude_post_permalink_from_affected_url_plan($plan, $post_id);
+                    : $this->exclude_post_permalink_from_affected_url_plan(
+                        $plan,
+                        $post_id,
+                        (string) ($entry['language'] ?? '')
+                    );
             }
             ++$post_count;
         }
@@ -635,8 +785,11 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             if ($term_id < 1 || '' === $taxonomy) {
                 continue;
             }
-            $plan = $this->get_affected_url_plan_for_term($term_id, $taxonomy);
+            $plan = $this->get_affected_url_plan_for_term($term_id, $taxonomy, (string) ($entry['language'] ?? ''));
             $purge_plans[] = $plan;
+            foreach ($this->get_litespeed_semantic_invalidation_tags_for_term($term_id, $taxonomy) as $semantic_tag) {
+                $semantic_tags[$semantic_tag] = $semantic_tag;
+            }
             if (!empty($entry['warm'])) {
                 $warm_plans[] = $plan;
             }
@@ -645,6 +798,11 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
 
         $purge_plan = $this->merge_affected_url_plans($purge_plans);
         $warm_plan = $this->merge_affected_url_plans($warm_plans);
+        $settings = $this->get_settings();
+        $shared_warm_owns_litespeed_refill = !empty($warm_plan['warmUrls'])
+            && !empty($settings['preload_on_save'])
+            && class_exists('Ultra_Cache_WP')
+            && method_exists('Ultra_Cache_WP', 'enqueue_targeted_warm_pipeline_urls');
         $purged = empty($purge_plan['purgeUrls'])
             ? false
             : $this->purge_urls(
@@ -655,6 +813,7 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
                     'term_count' => $term_count,
                     'reason' => sanitize_key((string) $reason),
                     'warm_url_count' => count($warm_plan['warmUrls']),
+                    'litespeed_refill_managed_by_shared_warm' => $shared_warm_owns_litespeed_refill,
                 )
             );
 
@@ -666,7 +825,26 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             $reason
         );
 
-        $queue_success = empty($warm_plan['warmUrls']) || !empty($queue_result['success']);
+        $litespeed_refill_fallback = array('success' => true, 'queued' => false, 'queuedUrlCount' => 0);
+        if (
+            $shared_warm_owns_litespeed_refill
+            && (empty($queue_result['success']) || empty($queue_result['queued']) || max(0, (int) ($queue_result['queuedUrlCount'] ?? 0)) < 1)
+            && class_exists('Ultra_Cache_WP')
+            && method_exists('Ultra_Cache_WP', 'enqueue_litespeed_invalidation_urls')
+        ) {
+            $litespeed_refill_fallback = Ultra_Cache_WP::enqueue_litespeed_invalidation_urls(
+                (array) $purge_plan['purgeUrls'],
+                class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'is_litespeed_stale_invalidation_enabled')
+                    ? Ultra_Cache_WP::is_litespeed_stale_invalidation_enabled($settings)
+                    : !empty($settings['staleWhileRevalidateEnabled']),
+                'affected-warm-fallback',
+                true
+            );
+        }
+
+        $semantic_queue = $this->queue_litespeed_semantic_invalidation_tags(array_values($semantic_tags), 'semantic-' . sanitize_key((string) $reason));
+        $queue_success = (empty($warm_plan['warmUrls']) || !empty($queue_result['success']))
+            && (empty($semantic_tags) || !empty($semantic_queue['success']));
 
         return array(
             'success' => $queue_success,
@@ -675,7 +853,10 @@ trait Ultra_Cache_Engine_Affected_URL_Coalescing_Trait
             'termCount' => $term_count,
             'purgeUrlCount' => count($purge_plan['purgeUrls']),
             'warmUrlCount' => count($warm_plan['warmUrls']),
+            'semanticTagCount' => count($semantic_tags),
+            'semanticQueue' => $semantic_queue,
             'queue' => $queue_result,
+            'liteSpeedRefillFallback' => $litespeed_refill_fallback,
         );
     }
 }

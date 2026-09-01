@@ -57,13 +57,6 @@
 			varnishCliMethod: source.varnishCliMethod || 'BAN',
 			varnishInvalidationStrategy: source.varnishInvalidationStrategy || String(source.varnishCliMethod || 'BAN').toLowerCase(),
 			varnishFlushScope: source.varnishFlushScope || 'auto',
-			liteSpeedRefillAfterTargetedInvalidation: !!source.liteSpeedRefillAfterTargetedInvalidation,
-			liteSpeedWarmDuringSiteWarmup: !!source.liteSpeedWarmDuringSiteWarmup,
-			liteSpeedStalePurgeEnabled: !!source.liteSpeedStalePurgeEnabled,
-			liteSpeedRefreshAheadEnabled: !!source.liteSpeedRefreshAheadEnabled,
-			liteSpeedRefreshAheadThresholdPercent: Number(source.liteSpeedRefreshAheadThresholdPercent || 85),
-			liteSpeedRefreshAheadMaxPages: Number(source.liteSpeedRefreshAheadMaxPages || 5),
-			liteSpeedRefreshAheadPinnedUrls: source.liteSpeedRefreshAheadPinnedUrls || '',
 			varnishCliKey: '',
 			clearVarnishCliKey: false,
 			varnishCliKeyConfigured: !!source.varnishCliKeyConfigured,
@@ -137,8 +130,6 @@
 		const [isMobile, setIsMobile] = useState(mobileViewport());
 		const [supportModalOpen, setSupportModalOpen] = useState(false);
 		const [infoAccordionsOpen, setInfoAccordionsOpen] = useState(false);
-		const [safeDelayAppendRequest, setSafeDelayAppendRequest] = useState(null);
-		const scannerAppendSequenceRef = useRef(0);
 		const [advancedForm, setAdvancedForm] = useState(buildAdvancedForm(initialSettings, config.getDefaultScheduledWarmLimit));
 		const [varnishForm, setVarnishForm] = useState(buildVarnishForm(initialSettings, config.getDefaultVarnishServersForMode));
 		const [redisForm, setRedisForm] = useState(buildRedisForm(initialSettings));
@@ -218,8 +209,6 @@
 			isMobile, setIsMobile,
 			supportModalOpen, setSupportModalOpen,
 			infoAccordionsOpen, setInfoAccordionsOpen,
-			safeDelayAppendRequest, setSafeDelayAppendRequest,
-			scannerAppendSequenceRef,
 			advancedForm, setAdvancedForm,
 			varnishForm, setVarnishForm,
 			redisForm, setRedisForm,
@@ -560,13 +549,6 @@
 			settings.varnishCliMethod,
 			settings.varnishInvalidationStrategy,
 			settings.varnishFlushScope,
-			settings.liteSpeedRefillAfterTargetedInvalidation,
-			settings.liteSpeedWarmDuringSiteWarmup,
-			settings.liteSpeedStalePurgeEnabled,
-			settings.liteSpeedRefreshAheadEnabled,
-			settings.liteSpeedRefreshAheadThresholdPercent,
-			settings.liteSpeedRefreshAheadMaxPages,
-			settings.liteSpeedRefreshAheadPinnedUrls,
 			settings.varnishCliKeyConfigured,
 			settings.varnishCliKeyManaged,
 			settings.varnishCliKeyExternal,

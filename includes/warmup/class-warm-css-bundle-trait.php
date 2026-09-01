@@ -92,7 +92,8 @@ trait Ultra_Cache_Engine_Warm_CSS_Bundle_Trait
             $after_purge_payload = array();
             try {
                 if (class_exists('Ultra_Cache_WP') && method_exists('Ultra_Cache_WP', 'reset_cron_warmup_queue_after_cache_flush')) {
-                    $queue_reset = Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush($reason);
+                    $preserve_foreground_token = sanitize_text_field((string) ($context['preserve_foreground_warm_token'] ?? ''));
+                    $queue_reset = Ultra_Cache_WP::reset_cron_warmup_queue_after_cache_flush($reason, $preserve_foreground_token);
                     if (is_array($queue_reset) && empty($queue_reset['queueResetSuccess'])) {
                         return false;
                     }

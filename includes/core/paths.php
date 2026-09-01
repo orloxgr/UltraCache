@@ -808,6 +808,128 @@ function ultracache_revslider_optimized_uploads_public_path($relative = '')
 }
 
 /**
+ * Normalize one configured WordPress base URL without request-aware URL filters.
+ *
+ * The configured path is preserved because WordPress can legitimately be served
+ * from a subdirectory. Query strings, fragments, and credentials are not part of
+ * the configured public base identity.
+ *
+ * @param string $candidate Configured home/site URL candidate.
+ * @return string
+ */
+function ultracache_normalize_configured_site_base($candidate)
+{
+    $candidate = trim((string) $candidate);
+    if ('' === $candidate) {
+        return '';
+    }
+
+    $parts = wp_parse_url($candidate);
+    if (!is_array($parts)) {
+        return '';
+    }
+
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if (!in_array($scheme, array('http', 'https'), true) || '' === $host) {
+        return '';
+    }
+    if (!empty($parts['user']) || !empty($parts['pass'])) {
+        return '';
+    }
+
+    $base = $scheme . '://' . $host;
+    if (!empty($parts['port'])) {
+        $port = (int) $parts['port'];
+        if ($port <= 0 || $port > 65535) {
+            return '';
+        }
+        $base .= ':' . $port;
+    }
+
+    $path = isset($parts['path']) ? trim((string) $parts['path']) : '';
+    if ('' !== $path && '/' !== $path) {
+        $path = '/' . trim(str_replace('\\', '/', $path), '/');
+        if ('/' !== $path) {
+            $base .= $path;
+        }
+    }
+
+    return trailingslashit($base);
+}
+
+/**
+ * Return the stable configured WordPress public base URL.
+ *
+ * This is intentionally different from home_url(): multilingual/proxy code can
+ * filter home_url() for the current request language or apparent scheme. Use this
+ * helper only when UltraCache needs the installation's configured public identity.
+ * Frontend targets should continue to use home_url() or language-aware APIs.
+ *
+ * @return string
+ */
+function ultracache_get_configured_site_base()
+{
+    $candidates = array();
+    if (defined('WP_HOME')) {
+        $candidates[] = (string) WP_HOME;
+    }
+    if (function_exists('get_option')) {
+        $candidates[] = (string) get_option('home');
+    }
+    if (defined('WP_SITEURL')) {
+        $candidates[] = (string) WP_SITEURL;
+    }
+    if (function_exists('get_option')) {
+        $candidates[] = (string) get_option('siteurl');
+    }
+
+    foreach ($candidates as $candidate) {
+        $base = ultracache_normalize_configured_site_base($candidate);
+        if ('' !== $base) {
+            return $base;
+        }
+    }
+
+    return '';
+}
+
+/**
+ * Return the stable configured WordPress public origin.
+ *
+ * The origin is derived only from stable configured WordPress values. It does
+ * not fall back to request-aware home_url()/site_url() values because doing so
+ * would break the helper's stable-identity contract on multilingual sites.
+ *
+ * @return string
+ */
+function ultracache_get_configured_site_origin()
+{
+    $base = ultracache_get_configured_site_base();
+    if ('' === $base) {
+        return '';
+    }
+
+    $parts = wp_parse_url($base);
+    if (!is_array($parts)) {
+        return '';
+    }
+
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if (!in_array($scheme, array('http', 'https'), true) || '' === $host) {
+        return '';
+    }
+
+    $origin = $scheme . '://' . $host;
+    if (!empty($parts['port'])) {
+        $origin .= ':' . (int) $parts['port'];
+    }
+
+    return $origin;
+}
+
+/**
  * Normalize a public URL for local comparisons without changing its resource identity.
  *
  * Query strings are preserved by default because WordPress-enqueued assets often use
@@ -904,12 +1026,21 @@ function ultracache_is_local_site_url($url)
         return false;
     }
 
-    $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-    $site_host = strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST));
-    $allowed = array_filter(array_unique(array($home_host, $site_host)));
+    if (function_exists('ultracache_is_public_site_url') && ultracache_is_public_site_url($url)) {
+        return true;
+    }
+
+    // Preserve the legacy www/non-www equivalence for local filesystem mapping,
+    // while expanding the candidate set to every configured/WPML public host.
+    $allowed = function_exists('ultracache_get_trusted_hosts')
+        ? (array) ultracache_get_trusted_hosts()
+        : array_filter(array_unique(array(
+            strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST)),
+            strtolower((string) wp_parse_url(site_url('/'), PHP_URL_HOST)),
+        )));
     $host = preg_replace('/^www\./', '', $host);
     $allowed = array_map(static function ($candidate) {
-        return preg_replace('/^www\./', '', (string) $candidate);
+        return preg_replace('/^www\./', '', strtolower((string) $candidate));
     }, $allowed);
 
     return in_array($host, $allowed, true);
@@ -1119,6 +1250,150 @@ function ultracache_local_path_from_public_url($url, array $allowed_exts = array
     return ultracache_public_path_to_local_path($path, $allowed_exts);
 }
 
+
+/**
+ * Resolve a canonical local public source identity without touching the filesystem.
+ *
+ * This is intentionally weaker than ultracache_local_public_source_descriptor(): it
+ * only maps a local public URL to the WordPress-owned public root that would own it.
+ * It exists for frontend terminal-state lookups where the media queue/unit tables are
+ * authoritative and source integrity must not be re-scanned by visitors.
+ *
+ * @param string $url          Public URL or root-relative URL.
+ * @param array  $allowed_exts Optional extension allow-list without dots.
+ * @return array{public_url:string,public_path:string,source_scope:string,source_owner:string,source_relative_path:string,source_extension:string,source_identity:string}|array{}
+ */
+function ultracache_local_public_source_identity_descriptor($url, array $allowed_exts = array())
+{
+    $normalized_url = ultracache_normalize_public_url(
+        $url,
+        array(
+            'strip_query'    => true,
+            'strip_fragment' => true,
+        )
+    );
+    if ('' === $normalized_url || !ultracache_is_local_site_url($normalized_url)) {
+        return array();
+    }
+
+    $public_path = (string) wp_parse_url($normalized_url, PHP_URL_PATH);
+    $public_path = '' !== $public_path ? '/' . ltrim(str_replace('\\', '/', rawurldecode($public_path)), '/') : '';
+    if ('' === $public_path) {
+        return array();
+    }
+
+    $extension = strtolower((string) pathinfo($public_path, PATHINFO_EXTENSION));
+    $allowed_exts = array_values(array_unique(array_filter(array_map('strtolower', array_map('strval', $allowed_exts)))));
+    if (!empty($allowed_exts) && !in_array($extension, $allowed_exts, true)) {
+        return array();
+    }
+
+    // Generated UltraCache outputs can never become conversion sources.
+    $cache_root_url = function_exists('ultracache_content_cache_storage_url') ? (string) ultracache_content_cache_storage_url() : '';
+    $cache_root_path = '' !== $cache_root_url ? (string) wp_parse_url($cache_root_url, PHP_URL_PATH) : '';
+    $cache_root_path = '' !== $cache_root_path ? trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode($cache_root_path)), '/')) : '';
+    if ('' !== $cache_root_path && 0 === strpos(trailingslashit($public_path), $cache_root_path)) {
+        return array();
+    }
+    foreach (array('avif', 'webp') as $generated_format) {
+        $generated_root = function_exists('ultracache_optimized_images_storage_url_path')
+            ? (string) ultracache_optimized_images_storage_url_path($generated_format)
+            : '';
+        $local_asset_root = function_exists('ultracache_local_asset_optimized_images_storage_url_path')
+            ? (string) ultracache_local_asset_optimized_images_storage_url_path($generated_format)
+            : '';
+        foreach (array($generated_root, $local_asset_root) as $root) {
+            $root = trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode((string) $root)), '/'));
+            if ('/' !== $root && 0 === strpos(trailingslashit($public_path), $root)) {
+                return array();
+            }
+        }
+    }
+
+    $candidates = array();
+    $uploads = ultracache_uploads_base_info();
+    if (!empty($uploads['baseurl'])) {
+        $uploads_path = ultracache_public_path_from_url((string) $uploads['baseurl']);
+        if ('' !== $uploads_path) {
+            $candidates[] = array('scope' => 'uploads', 'owner' => 'uploads', 'public_path' => $uploads_path);
+        }
+    }
+
+    $plugins_path = ultracache_plugins_public_path();
+    if ('' !== $plugins_path) {
+        $candidates[] = array('scope' => 'plugin', 'owner' => '', 'public_path' => $plugins_path);
+    }
+    $mu_plugins_path = ultracache_mu_plugins_public_path();
+    if ('' !== $mu_plugins_path) {
+        $candidates[] = array('scope' => 'mu-plugin', 'owner' => '', 'public_path' => $mu_plugins_path);
+    }
+    foreach (ultracache_theme_public_root_mappings() as $theme_mapping) {
+        $candidates[] = array(
+            'scope' => 'theme',
+            'owner' => (string) ($theme_mapping['owner'] ?? ''),
+            'public_path' => (string) ($theme_mapping['public_path'] ?? ''),
+        );
+    }
+    $includes_path = ultracache_wordpress_includes_public_path();
+    if ('' !== $includes_path) {
+        $candidates[] = array('scope' => 'wordpress-includes', 'owner' => 'wp-includes', 'public_path' => $includes_path);
+    }
+
+    usort($candidates, static function ($left, $right) {
+        return strlen((string) ($right['public_path'] ?? '')) <=> strlen((string) ($left['public_path'] ?? ''));
+    });
+
+    foreach ($candidates as $candidate) {
+        $root = trailingslashit('/' . ltrim(str_replace('\\', '/', rawurldecode((string) ($candidate['public_path'] ?? ''))), '/'));
+        if ('/' === $root || 0 !== strpos(trailingslashit($public_path), $root)) {
+            continue;
+        }
+
+        $relative = ltrim(substr($public_path, strlen(untrailingslashit($root))), '/');
+        if ('' === $relative) {
+            continue;
+        }
+        foreach (explode('/', $relative) as $segment) {
+            if ('' === $segment || '.' === $segment || '..' === $segment) {
+                continue 2;
+            }
+        }
+
+        $scope = (string) ($candidate['scope'] ?? '');
+        $owner = sanitize_key((string) ($candidate['owner'] ?? ''));
+        if (in_array($scope, array('plugin', 'mu-plugin', 'theme'), true) && '' === $owner) {
+            $parts = explode('/', $relative, 2);
+            $owner = sanitize_key((string) $parts[0]);
+            if ('' === $owner || empty($parts[1])) {
+                continue;
+            }
+            $relative = (string) $parts[1];
+        }
+
+        $relative = function_exists('ultracache_normalize_media_source_relative_path')
+            ? ultracache_normalize_media_source_relative_path($relative)
+            : ltrim(str_replace('\\', '/', $relative), '/');
+        if (!$relative) {
+            continue;
+        }
+
+        $identity = 'uploads' === $scope
+            ? ''
+            : hash('sha256', $scope . '|' . $owner . '|' . str_replace('\\', '/', $relative));
+
+        return array(
+            'public_url'           => $normalized_url,
+            'public_path'          => $public_path,
+            'source_scope'         => $scope,
+            'source_owner'         => $owner,
+            'source_relative_path' => str_replace('\\', '/', $relative),
+            'source_extension'     => $extension,
+            'source_identity'      => $identity,
+        );
+    }
+
+    return array();
+}
 
 /**
  * Resolve a canonical local public source descriptor through WordPress-derived roots.

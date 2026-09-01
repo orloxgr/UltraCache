@@ -92,6 +92,17 @@ trait Ultra_Cache_Engine_Storage_Trait
         return false;
     }
 
+    private function is_warm_raw_source_loopback_request()
+    {
+        $source_contract = strtolower(trim((string) ultracache_server_value('HTTP_X_ULTRACACHE_WARM_SOURCE')));
+        if ('raw-v1' !== $source_contract) {
+            return false;
+        }
+
+        return function_exists('ultracache_is_authenticated_internal_request')
+            && ultracache_is_authenticated_internal_request('warm');
+    }
+
     private function is_force_refresh_loopback_request()
     {
         $force_refresh = sanitize_text_field(ultracache_server_value('HTTP_X_ULTRACACHE_FORCE_REFRESH'));
@@ -114,6 +125,13 @@ trait Ultra_Cache_Engine_Storage_Trait
 
     private function maybe_serve_cached_file_during_wp_boot($reason = 'early-hit')
     {
+        if ($this->is_warm_raw_source_loopback_request()) {
+            if (!headers_sent()) {
+                header('X-UltraCache-Warm-Source-Origin: wp-engine');
+            }
+            return false;
+        }
+
         if ($this->is_force_refresh_loopback_request()) {
             if (!headers_sent()) {
                 header('X-Ultra-Cache-Force-Refresh: wp-engine');
@@ -125,6 +143,21 @@ trait Ultra_Cache_Engine_Storage_Trait
             if (!headers_sent()) {
                 header('X-Ultra-Cache-Profile-Bypass: wp-engine');
             }
+            return false;
+        }
+
+        /*
+         * A WooCommerce session routed into the native LiteSpeed ESI vary bucket
+         * must never reuse UltraCache's anonymous early-hit object. The request
+         * needs to continue through the normal render/store pipeline so the
+         * shared Woo ESI bucket is first-filled with a verified ESI parent and
+         * the private mini-cart is rendered for the current Woo session.
+         *
+         * This flag is set only by the LiteSpeed Woo ESI provisional contract;
+         * Varnish and ordinary anonymous/page-cache early hits are unchanged.
+         */
+        if (!empty($this->litespeed_woocommerce_esi_provisional_request)) {
+            $this->profile_request_checkpoint('early_hit_skipped_litespeed_woo_esi_provisional');
             return false;
         }
 
@@ -184,7 +217,7 @@ trait Ultra_Cache_Engine_Storage_Trait
         return null === $wildcard_quality ? 0.0 : (float) $wildcard_quality;
     }
 
-    private function select_cached_html_encoding_variant($file_path, $cache_root, $esi_parent = false)
+    private function select_cached_html_encoding_variant($file_path, $cache_root, $esi_parent = false, $litespeed_esi_parent = false)
     {
         $selection = array(
             'file'     => (string) $file_path,
@@ -197,7 +230,7 @@ trait Ultra_Cache_Engine_Storage_Trait
         $gzip_quality = $this->get_accept_encoding_quality($accept_encoding, 'gzip');
         $candidates = array();
 
-        if (!$esi_parent && $brotli_quality > 0.0) {
+        if (!$esi_parent && !$litespeed_esi_parent && $brotli_quality > 0.0) {
             $candidates[] = array(
                 'file'     => (string) $file_path . '.br',
                 'encoding' => 'brotli',
@@ -207,7 +240,7 @@ trait Ultra_Cache_Engine_Storage_Trait
             );
         }
 
-        if ($gzip_quality > 0.0) {
+        if (!$litespeed_esi_parent && $gzip_quality > 0.0) {
             $candidates[] = array(
                 'file'     => (string) $file_path . '.gz',
                 'encoding' => 'gzip',
@@ -272,16 +305,30 @@ trait Ultra_Cache_Engine_Storage_Trait
 
         $base_file_path = $resolved_file;
         $esi_metadata = $this->get_page_cache_esi_metadata($base_file_path);
-        $variant = $this->select_cached_html_encoding_variant($base_file_path, $cache_root, !empty($esi_metadata));
+        $litespeed_esi_metadata = (
+            function_exists('ultracache_litespeed_esi_is_enabled')
+            && ultracache_litespeed_esi_is_enabled()
+        ) ? $this->get_page_cache_litespeed_esi_metadata($base_file_path) : array();
+        $is_litespeed_esi_parent = !empty($litespeed_esi_metadata);
+        if ($is_litespeed_esi_parent) {
+            $this->litespeed_esi_parent_response_enabled = true;
+        }
+        $variant = $this->select_cached_html_encoding_variant(
+            $base_file_path,
+            $cache_root,
+            !empty($esi_metadata),
+            $is_litespeed_esi_parent
+        );
         $serve_file_path = (string) $variant['file'];
         $encoding_bucket = (string) $variant['encoding'];
         $content_encoding = (string) $variant['header'];
         $status = strtoupper((string) $status);
         $is_esi_parent = !empty($esi_metadata);
-        $validator_metadata = $is_esi_parent
+        $is_dynamic_esi_parent = $is_esi_parent || $is_litespeed_esi_parent;
+        $validator_metadata = $is_dynamic_esi_parent
             ? array()
             : $this->get_cached_html_validator_metadata($serve_file_path, $encoding_bucket);
-        $not_modified = !$is_esi_parent
+        $not_modified = !$is_dynamic_esi_parent
             && !headers_sent()
             && 'STALE' !== $status
             && !empty($validator_metadata)
@@ -316,6 +363,9 @@ trait Ultra_Cache_Engine_Storage_Trait
             if ($is_esi_parent && $this->should_send_source_debug_header()) {
                 header('X-UltraCache-ESI-Validators: disabled');
             }
+            if ($is_litespeed_esi_parent && $this->should_send_source_debug_header()) {
+                header('X-UltraCache-LiteSpeed-ESI-Validators: disabled');
+            }
             if (!$not_modified && '' !== $content_encoding) {
                 header('Content-Encoding: ' . $content_encoding);
                 header('X-UltraCache-Encoding: ' . $encoding_bucket);
@@ -323,6 +373,13 @@ trait Ultra_Cache_Engine_Storage_Trait
                 header('X-UltraCache-Encoding: ' . $encoding_bucket);
             }
             header('X-Ultra-Cache: ' . $status);
+            $eligibility = method_exists($this, 'get_last_cache_eligibility_decision')
+                ? $this->get_last_cache_eligibility_decision()
+                : array();
+            $eligibility_state = strtoupper((string) ($eligibility['state'] ?? ''));
+            if (in_array($eligibility_state, array('CACHEABLE', 'BYPASS', 'PRIVATE'), true)) {
+                header('X-Ultra-Cache-Eligibility: ' . $eligibility_state);
+            }
             if ($this->should_send_source_debug_header()) {
                 header('X-Ultra-Cache-Source: wp-engine');
             }
@@ -379,11 +436,7 @@ trait Ultra_Cache_Engine_Storage_Trait
 
         $cache_file = (string) $cache_file;
         if ('' !== $cache_file) {
-            ultracache_safe_unlink($cache_file);
-            ultracache_safe_unlink($cache_file . '.gz');
-            ultracache_safe_unlink($cache_file . '.br');
-            ultracache_safe_unlink($cache_file . '.fresh');
-            ultracache_safe_unlink($cache_file . '.esi');
+            $this->delete_cache_variants($cache_file);
         }
 
         $this->record_cache_event('stale-generated-css-html-invalidated', array(
@@ -458,7 +511,9 @@ trait Ultra_Cache_Engine_Storage_Trait
 
                     $attr_value = isset($attr_match[3]) && '' !== $attr_match[3]
                         ? (string) $attr_match[3]
-                        : (isset($attr_match[4]) && '' !== $attr_match[4] ? (string) $attr_match[4] : (string) $attr_match[5]);
+                        : (isset($attr_match[4]) && '' !== $attr_match[4]
+                            ? (string) $attr_match[4]
+                            : (isset($attr_match[5]) ? (string) $attr_match[5] : ''));
                     $collect_generated_refs($attr_value);
                 }
             }
@@ -487,7 +542,9 @@ trait Ultra_Cache_Engine_Storage_Trait
 
                     $attr_value = isset($attr_match[3]) && '' !== $attr_match[3]
                         ? (string) $attr_match[3]
-                        : (isset($attr_match[4]) && '' !== $attr_match[4] ? (string) $attr_match[4] : (string) $attr_match[5]);
+                        : (isset($attr_match[4]) && '' !== $attr_match[4]
+                            ? (string) $attr_match[4]
+                            : (isset($attr_match[5]) ? (string) $attr_match[5] : ''));
                     $collect_generated_refs($attr_value);
                 }
             }
@@ -527,7 +584,7 @@ trait Ultra_Cache_Engine_Storage_Trait
         return array_values($missing);
     }
 
-    private function write_cache_file($file_path, $html, $url = '')
+    private function write_cache_file($file_path, $html, $url = '', $litespeed_semantic_tags = null, $force_apache_static_alias = false)
     {
         $file_path = (string) $file_path;
         $this->reset_cache_write_error();
@@ -570,14 +627,14 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
 
         try {
-            $capacity = $this->ensure_page_cache_variant_family_capacity($file_path);
+            $capacity = $this->ensure_page_cache_variant_family_capacity($file_path, $url);
             if (empty($capacity['allowed'])) {
                 $this->set_cache_write_error(
-                    'variant_cap_reached',
-                    'Page-cache variant-family cap could not be satisfied.',
+                    !empty($capacity['reason']) ? (string) $capacity['reason'] : 'query_variant_limit_reached',
+                    'Query-string cache variant limit reached; new variant bypassed.',
                     array_merge(array('file' => $file_path), is_array($capacity) ? $capacity : array())
                 );
-                $this->record_cache_event('variant-family-cap-failed', $this->get_last_cache_write_error());
+                $this->record_cache_event('query-variant-limit-bypass', $this->get_last_cache_write_error());
                 return false;
             }
 
@@ -604,11 +661,18 @@ trait Ultra_Cache_Engine_Storage_Trait
                     return false;
                 }
 
-                $esi_metadata = method_exists($this, 'get_esi_parent_metadata_from_html')
-                    ? $this->get_esi_parent_metadata_from_html($html)
+                $esi_metadata = method_exists($this, 'get_varnish_esi_parent_metadata_from_html')
+                    ? $this->get_varnish_esi_parent_metadata_from_html($html)
                     : array();
                 $is_esi_parent = !empty($esi_metadata);
+                $litespeed_esi_metadata = (
+                    function_exists('ultracache_litespeed_esi_is_enabled')
+                    && ultracache_litespeed_esi_is_enabled()
+                    && method_exists($this, 'get_litespeed_esi_parent_metadata_from_html')
+                ) ? $this->get_litespeed_esi_parent_metadata_from_html($html) : array();
+                $is_litespeed_esi_parent = !empty($litespeed_esi_metadata);
                 $previous_esi_marker = $this->get_page_cache_esi_metadata($file_path);
+                $previous_litespeed_esi_marker = $this->get_page_cache_litespeed_esi_metadata($file_path);
 
                 if ($is_esi_parent) {
                     if (!$this->write_page_cache_esi_marker($file_path, $esi_metadata)) {
@@ -628,9 +692,34 @@ trait Ultra_Cache_Engine_Storage_Trait
                     $this->delete_apache_static_html_aliases_for_cache_file($file_path, true);
                 }
 
+                if ($is_litespeed_esi_parent) {
+                    if (!$this->write_page_cache_litespeed_esi_marker($file_path, $litespeed_esi_metadata)) {
+                        if ($is_esi_parent) {
+                            $this->restore_page_cache_esi_marker($file_path, $previous_esi_marker);
+                        }
+                        $atomic_error = $this->get_last_atomic_write_error();
+                        $this->set_cache_write_error(
+                            'litespeed_esi_marker_failed',
+                            'Could not write the LiteSpeed ESI page-cache marker.',
+                            array_merge(array('file' => $file_path), is_array($atomic_error) ? $atomic_error : array())
+                        );
+                        $this->record_cache_event('store-litespeed-esi-marker-failed', $this->get_last_cache_write_error());
+                        return false;
+                    }
+
+                    // Native LiteSpeed ESI parses identity HTML. Do not publish
+                    // precompressed representations that can bypass ESI parsing.
+                    ultracache_safe_unlink($file_path . '.gz');
+                    ultracache_safe_unlink($file_path . '.br');
+                    $this->delete_apache_static_html_aliases_for_cache_file($file_path, true);
+                }
+
                 if (!$this->write_cache_variant_atomically($file_path, $html)) {
                     if ($is_esi_parent) {
                         $this->restore_page_cache_esi_marker($file_path, $previous_esi_marker);
+                    }
+                    if ($is_litespeed_esi_parent) {
+                        $this->restore_page_cache_litespeed_esi_marker($file_path, $previous_litespeed_esi_marker);
                     }
 
                     $atomic_error = $this->get_last_atomic_write_error();
@@ -646,9 +735,21 @@ trait Ultra_Cache_Engine_Storage_Trait
                 if (!$is_esi_parent) {
                     ultracache_safe_unlink($this->get_page_cache_esi_marker_path($file_path));
                 }
+                if (!$is_litespeed_esi_parent) {
+                    ultracache_safe_unlink($this->get_page_cache_litespeed_esi_marker_path($file_path));
+                }
 
                 $settings = $this->get_settings();
-                if (!empty($settings['gzip_enabled']) && function_exists('gzencode')) {
+                if ($force_apache_static_alias) {
+                    // Capability probes must be able to create the exact static
+                    // alias they are testing without persisting the administrator
+                    // setting. The override exists only for this cache write.
+                    $settings['apache_static_html_delivery'] = true;
+                    $settings['apacheStaticHtmlDeliveryEnabled'] = true;
+                    $settings['litespeed_cache_enabled'] = false;
+                    $settings['liteSpeedCacheEnabled'] = false;
+                }
+                if (!$is_litespeed_esi_parent && !empty($settings['gzip_enabled']) && function_exists('gzencode')) {
                     $compressed = gzencode($html, 9);
                     if (false === $compressed || !$this->write_cache_variant_atomically($file_path . '.gz', $compressed)) {
                         ultracache_safe_unlink($file_path . '.gz');
@@ -657,7 +758,7 @@ trait Ultra_Cache_Engine_Storage_Trait
                     ultracache_safe_unlink($file_path . '.gz');
                 }
 
-                if (!$is_esi_parent && !empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
+                if (!$is_esi_parent && !$is_litespeed_esi_parent && !empty($settings['brotli_enabled']) && function_exists('brotli_compress')) {
                     $compressed = brotli_compress($html, 5, BROTLI_TEXT);
                     if (false === $compressed || !$this->write_cache_variant_atomically($file_path . '.br', $compressed)) {
                         ultracache_safe_unlink($file_path . '.br');
@@ -670,7 +771,33 @@ trait Ultra_Cache_Engine_Storage_Trait
                     Ultra_Cache_WP::track_cache_asset_refs_for_file($file_path, $html);
                 }
 
-                if ($is_esi_parent) {
+                $can_resolve_litespeed_tags = !is_admin()
+                    && !(function_exists('wp_doing_ajax') && wp_doing_ajax())
+                    && !(function_exists('wp_doing_cron') && wp_doing_cron())
+                    && !(defined('REST_REQUEST') && REST_REQUEST);
+                if (null === $litespeed_semantic_tags && $can_resolve_litespeed_tags && method_exists($this, 'get_litespeed_semantic_tags_for_current_query')) {
+                    $litespeed_semantic_tags = $this->get_litespeed_semantic_tags_for_current_query($url);
+                }
+                if (is_array($litespeed_semantic_tags)) {
+                    $normalized_litespeed_tags = $this->normalize_page_cache_litespeed_semantic_tags($litespeed_semantic_tags);
+                    if (!empty($normalized_litespeed_tags)) {
+                        if (!$this->write_page_cache_litespeed_semantic_tags($file_path, $normalized_litespeed_tags)) {
+                            $this->record_cache_event('litespeed-semantic-tag-marker-write-failed', array('file' => $file_path));
+                        }
+                    } else {
+                        $marker_path = $this->get_page_cache_litespeed_semantic_tag_path($file_path);
+                        if ('' !== $marker_path && file_exists($marker_path)) {
+                            ultracache_safe_unlink($marker_path);
+                        }
+                    }
+                }
+
+                $litespeed_enabled = !empty($settings['litespeed_cache_enabled']) || !empty($settings['liteSpeedCacheEnabled']);
+                if ($is_esi_parent || $is_litespeed_esi_parent || $litespeed_enabled) {
+                    // When LiteSpeed owns the outer HTML cache, its MISS path must
+                    // pass through advanced-cache.php so semantic tag sidecars can
+                    // be attached to every LSCache object. Direct Apache/LiteSpeed
+                    // static aliases cannot read per-page WordPress metadata.
                     $this->delete_apache_static_html_aliases_for_cache_file($file_path, true);
                 } else {
                     $this->write_apache_static_html_alias_for_cache_file($file_path, $html, $url, $settings);
@@ -845,6 +972,126 @@ trait Ultra_Cache_Engine_Storage_Trait
     }
 
     /**
+     * Return the canonical native LiteSpeed ESI sidecar path.
+     *
+     * The LiteSpeed marker is intentionally separate from Varnish `.esi`
+     * metadata so the two frontend-cache contracts cannot affect each other.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @return string
+     */
+    private function get_page_cache_litespeed_esi_marker_path($file_path)
+    {
+        $file_path = (string) $file_path;
+        if ('' === $file_path || 1 !== preg_match('/^index-(orig|webp|avif)-[a-f0-9]{32}\.html$/', basename($file_path))) {
+            return '';
+        }
+
+        $cache_root = defined('ULTRACACHE_CACHE_DIR') ? ultracache_normalize_filesystem_path_for_guard(ULTRACACHE_CACHE_DIR) : '';
+        $resolved = ultracache_normalize_filesystem_path_for_guard($file_path);
+        if ('' === $cache_root || '' === $resolved || !ultracache_path_is_within_root($resolved, $cache_root)) {
+            return '';
+        }
+
+        return $resolved . '.lsesi';
+    }
+
+    /**
+     * Normalize native LiteSpeed ESI parent metadata.
+     *
+     * @param mixed $metadata Candidate metadata.
+     * @return array
+     */
+    private function normalize_page_cache_litespeed_esi_metadata($metadata)
+    {
+        if (!is_array($metadata) || 1 !== (int) ($metadata['version'] ?? 0)) {
+            return array();
+        }
+
+        $fragment_count = max(0, min(64, (int) ($metadata['fragmentCount'] ?? 0)));
+        if ($fragment_count <= 0) {
+            return array();
+        }
+
+        return array(
+            'version'             => 1,
+            'fragmentCount'       => $fragment_count,
+            'woocommerceMiniCart' => !empty($metadata['woocommerceMiniCart']),
+        );
+    }
+
+    /**
+     * Read native LiteSpeed ESI metadata for one cached parent.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @return array
+     */
+    private function get_page_cache_litespeed_esi_metadata($file_path)
+    {
+        $marker_path = $this->get_page_cache_litespeed_esi_marker_path($file_path);
+        if ('' === $marker_path || !is_readable($marker_path)) {
+            return array();
+        }
+
+        $size = ultracache_safe_filesize($marker_path, 'page_cache_litespeed_esi_marker_size');
+        if (false === $size || (int) $size <= 0 || (int) $size > 1024) {
+            return array();
+        }
+
+        $raw = ultracache_safe_file_get_contents($marker_path, 'page_cache_litespeed_esi_marker_read');
+        if (!is_string($raw) || '' === trim($raw)) {
+            return array();
+        }
+
+        return $this->normalize_page_cache_litespeed_esi_metadata(json_decode($raw, true));
+    }
+
+    /**
+     * Write native LiteSpeed ESI metadata before publishing the parent HTML.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @param array  $metadata  Canonical LiteSpeed ESI metadata.
+     * @return bool
+     */
+    private function write_page_cache_litespeed_esi_marker($file_path, array $metadata)
+    {
+        $marker_path = $this->get_page_cache_litespeed_esi_marker_path($file_path);
+        $metadata = $this->normalize_page_cache_litespeed_esi_metadata($metadata);
+        if ('' === $marker_path || empty($metadata)) {
+            return false;
+        }
+
+        $payload = wp_json_encode($metadata, JSON_UNESCAPED_SLASHES);
+        if (!is_string($payload) || '' === $payload) {
+            return false;
+        }
+
+        return $this->write_cache_variant_atomically($marker_path, $payload . PHP_EOL);
+    }
+
+    /**
+     * Restore the prior LiteSpeed ESI marker after an identity write failure.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @param array  $metadata  Previous normalized metadata.
+     * @return void
+     */
+    private function restore_page_cache_litespeed_esi_marker($file_path, array $metadata)
+    {
+        $marker_path = $this->get_page_cache_litespeed_esi_marker_path($file_path);
+        if ('' === $marker_path) {
+            return;
+        }
+
+        if (empty($metadata)) {
+            ultracache_safe_unlink($marker_path);
+            return;
+        }
+
+        $this->write_page_cache_litespeed_esi_marker($file_path, $metadata);
+    }
+
+    /**
      * Return cache freshness without changing representation validators.
      *
      * The HTML payload mtime represents the last content change. A separate
@@ -878,6 +1125,51 @@ trait Ultra_Cache_Engine_Storage_Trait
     }
 
     /**
+     * Return the semantic LiteSpeed tag sidecar path for one identity cache file.
+     *
+     * @param string $file_path Identity HTML cache file.
+     * @return string
+     */
+    private function get_page_cache_litespeed_semantic_tag_path($file_path)
+    {
+        $file_path = (string) $file_path;
+        if ('' === $file_path || 1 !== preg_match('/^index-(orig|webp|avif)-[a-f0-9]{32}\.html$/', basename($file_path))) {
+            return '';
+        }
+        $cache_root = defined('ULTRACACHE_CACHE_DIR') ? ultracache_normalize_filesystem_path_for_guard(ULTRACACHE_CACHE_DIR) : '';
+        $resolved = ultracache_normalize_filesystem_path_for_guard($file_path);
+        if ('' === $cache_root || '' === $resolved || !ultracache_path_is_within_root($resolved, $cache_root)) {
+            return '';
+        }
+        return $resolved . '.lstags';
+    }
+
+    /** Normalize semantic tags stored beside page-cache HTML. */
+    private function normalize_page_cache_litespeed_semantic_tags(array $tags)
+    {
+        $normalized = function_exists('ultracache_normalize_litespeed_cache_tags')
+            ? ultracache_normalize_litespeed_cache_tags($tags, 48)
+            : array_values(array_unique(array_filter(array_map('strval', $tags))));
+        return array_values(array_filter($normalized, static function ($tag) {
+            return 0 !== strpos((string) $tag, 'uc_s_') && 0 !== strpos((string) $tag, 'uc_u_');
+        }));
+    }
+
+    /** Persist semantic LiteSpeed tags atomically beside one cached HTML object. */
+    private function write_page_cache_litespeed_semantic_tags($file_path, array $tags)
+    {
+        $marker_path = $this->get_page_cache_litespeed_semantic_tag_path($file_path);
+        $tags = $this->normalize_page_cache_litespeed_semantic_tags($tags);
+        if ('' === $marker_path || empty($tags)) {
+            return false;
+        }
+        $payload = wp_json_encode(array('version' => 1, 'tags' => $tags), JSON_UNESCAPED_SLASHES);
+        return is_string($payload) && '' !== $payload
+            ? $this->write_cache_variant_atomically($marker_path, $payload . PHP_EOL)
+            : false;
+    }
+
+    /**
      * Advance the freshness marker after a complete page-cache write.
      *
      * @param string $file_path Identity HTML cache file.
@@ -898,6 +1190,9 @@ trait Ultra_Cache_Engine_Storage_Trait
     {
         $url = trim((string) $url);
         if ('' === $url || empty($settings['apache_static_html_delivery'])) {
+            return false;
+        }
+        if (!empty($settings['litespeed_cache_enabled']) || !empty($settings['liteSpeedCacheEnabled'])) {
             return false;
         }
 
@@ -996,14 +1291,54 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
     }
 
-    private function get_page_cache_variant_family_cap()
+    private function get_page_cache_query_variant_limit()
     {
-        /**
-         * Safety cap for distinct normalized URL hashes within one cache path.
-         * One family may contain orig, WebP, and AVIF HTML representations.
+        $settings = $this->get_settings();
+        $level = in_array((string) ($settings['cache_query_combination_level'] ?? '3'), array('1', '2', '3', '4', 'all'), true)
+            ? (string) ($settings['cache_query_combination_level'] ?? '3')
+            : '3';
+
+        if ('all' !== $level) {
+            $limit = 1;
+            for ($i = 0, $depth = (int) $level; $i < $depth; $i++) {
+                $limit *= 8;
+            }
+        } else {
+            $allowlist = method_exists($this, 'get_query_allowlist') ? $this->get_query_allowlist($settings) : array();
+            $depth = count(array_values(array_unique(array_filter(array_map('sanitize_key', (array) $allowlist)))));
+            $limit = 1;
+            for ($i = 0; $i < $depth; $i++) {
+                if ($limit > intdiv(PHP_INT_MAX, 8)) {
+                    $limit = PHP_INT_MAX;
+                    break;
+                }
+                $limit *= 8;
+            }
+        }
+
+        /*
+         * WPML parameter-mode language is a bounded structural dimension, not
+         * an arbitrary user query variant. Reserve one complete generic variant
+         * family per active language so valid translations cannot exhaust each
+         * other's query-variant capacity. Directory/domain modes do not add a
+         * query dimension and therefore keep the historical limit unchanged.
          */
-        $cap = (int) apply_filters('ultracache_page_cache_variant_family_cap', 8);
-        return max(3, min(50, $cap));
+        $wpml_multiplier = 1;
+        if (method_exists($this, 'get_wpml_parameter_cache_contract')) {
+            $wpml_contract = $this->get_wpml_parameter_cache_contract();
+            if (!empty($wpml_contract['enabled']) && is_array($wpml_contract['languages'] ?? null)) {
+                $wpml_multiplier = max(1, count(array_values(array_unique($wpml_contract['languages']))));
+            }
+        }
+
+        if ($wpml_multiplier > 1) {
+            if ($limit > intdiv(PHP_INT_MAX, $wpml_multiplier)) {
+                return PHP_INT_MAX;
+            }
+            $limit *= $wpml_multiplier;
+        }
+
+        return max(1, $limit);
     }
 
     private function parse_page_cache_variant_file($file_path)
@@ -1072,12 +1407,53 @@ trait Ultra_Cache_Engine_Storage_Trait
         ultracache_release_lock((string) $lock['name'], (string) $lock['token']);
     }
 
-    private function collect_page_cache_variant_families($dir)
+    private function page_cache_variant_hash_exists($dir, $hash)
     {
         $dir = wp_normalize_path((string) $dir);
-        $families = array();
+        $hash = strtolower((string) $hash);
+        if ('' === $dir || 1 !== preg_match('/^[a-f0-9]{32}$/', $hash)) {
+            return false;
+        }
+
+        foreach (array('orig', 'webp', 'avif') as $bucket) {
+            $file = trailingslashit($dir) . 'index-' . $bucket . '-' . $hash . '.html';
+            clearstatcache(true, $file);
+            if (is_readable($file) && filesize($file) > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function get_page_cache_query_variant_cap_marker($dir, $cap)
+    {
+        $dir = wp_normalize_path((string) $dir);
+        $cap = max(1, (int) $cap);
+        return '' !== $dir ? trailingslashit($dir) . '.ultracache-query-variant-cap-' . $cap . '.full' : '';
+    }
+
+    private function clear_page_cache_query_variant_cap_markers($dir)
+    {
+        $dir = wp_normalize_path((string) $dir);
+        if ('' === $dir || !is_dir($dir)) {
+            return;
+        }
+
+        $markers = glob(trailingslashit($dir) . '.ultracache-query-variant-cap-*.full');
+        foreach (is_array($markers) ? $markers : array() as $marker) {
+            ultracache_safe_unlink($marker);
+        }
+    }
+
+    private function count_page_cache_query_variant_hashes($dir, $canonical_hash, $stop_at)
+    {
+        $dir = wp_normalize_path((string) $dir);
+        $canonical_hash = strtolower((string) $canonical_hash);
+        $stop_at = max(1, (int) $stop_at);
+        $hashes = array();
         if ('' === $dir || !is_dir($dir) || !is_readable($dir)) {
-            return $families;
+            return 0;
         }
 
         foreach (array('orig', 'webp', 'avif') as $bucket) {
@@ -1087,129 +1463,118 @@ trait Ultra_Cache_Engine_Storage_Trait
             }
 
             foreach ($matches as $file) {
-                $parsed = $this->parse_page_cache_variant_file($file);
-                if (empty($parsed) || (string) $parsed['dir'] !== $dir) {
+                if (1 !== preg_match('/^index-(?:orig|webp|avif)-([a-f0-9]{32})\.html$/', basename((string) $file), $match)) {
                     continue;
                 }
 
-                $hash = (string) $parsed['hash'];
-                $mtime = ultracache_safe_filemtime((string) $parsed['file'], 'page_cache_variant_family_scan');
-                if (!isset($families[$hash])) {
-                    $families[$hash] = array(
-                        'hash' => $hash,
-                        'lastModified' => 0,
-                        'files' => array(),
-                    );
+                $hash = strtolower((string) $match[1]);
+                if ('' !== $canonical_hash && $hash === $canonical_hash) {
+                    continue;
                 }
-
-                $families[$hash]['files'][(string) $parsed['bucket']] = (string) $parsed['file'];
-                $families[$hash]['lastModified'] = max(
-                    (int) $families[$hash]['lastModified'],
-                    false === $mtime ? 0 : (int) $mtime
-                );
+                $hashes[$hash] = true;
+                if (count($hashes) >= $stop_at) {
+                    return count($hashes);
+                }
             }
         }
 
-        return $families;
+        return count($hashes);
     }
 
-    private function delete_page_cache_variant_family($dir, $hash)
+    private function get_canonical_page_cache_hash_for_url($url)
     {
-        $dir = wp_normalize_path((string) $dir);
-        $hash = strtolower((string) $hash);
-        if ('' === $dir || 1 !== preg_match('/^[a-f0-9]{32}$/', $hash)) {
-            return false;
+        $normalized = $this->normalize_url($url);
+        if ('' === (string) $normalized) {
+            return '';
         }
 
-        $remaining = array();
-        foreach (array('orig', 'webp', 'avif') as $bucket) {
-            $file = trailingslashit($dir) . 'index-' . $bucket . '-' . $hash . '.html';
-            $this->delete_cache_variants($file);
-            foreach (array($file, $file . '.gz', $file . '.br', $file . '.fresh', $file . '.esi') as $variant) {
-                clearstatcache(true, $variant);
-                if (file_exists($variant)) {
-                    $remaining[] = $variant;
-                }
-            }
+        $parts = wp_parse_url($normalized);
+        if (empty($parts['host'])) {
+            return '';
         }
 
-        return empty($remaining);
+        $scheme = !empty($parts['scheme']) ? strtolower((string) $parts['scheme']) : 'https';
+        $host = strtolower((string) $parts['host']);
+        $port = !empty($parts['port']) ? ':' . absint($parts['port']) : '';
+        $path = isset($parts['path']) && '' !== (string) $parts['path'] ? (string) $parts['path'] : '/';
+        $canonical_url = $scheme . '://' . $host . $port . $path;
+        $canonical_file = $this->get_cache_path($canonical_url, 'orig');
+        $parsed = $this->parse_page_cache_variant_file($canonical_file);
+        return !empty($parsed['hash']) ? (string) $parsed['hash'] : '';
     }
 
-    private function ensure_page_cache_variant_family_capacity($file_path)
+    private function ensure_page_cache_variant_family_capacity($file_path, $url = '')
     {
         $parsed = $this->parse_page_cache_variant_file($file_path);
         if (empty($parsed)) {
-            return array('allowed' => true, 'hash' => '', 'familyExists' => false, 'rotatedFamilies' => array());
+            return array('allowed' => true, 'hash' => '', 'familyExists' => false, 'queryVariant' => false);
         }
 
-        $families = $this->collect_page_cache_variant_families((string) $parsed['dir']);
+        $normalized = $this->normalize_url($url);
+        $url_parts = '' !== (string) $normalized ? wp_parse_url($normalized) : array();
+        $is_query_variant = !empty($url_parts['query']);
         $current_hash = (string) $parsed['hash'];
-        if (isset($families[$current_hash])) {
+
+        // Canonical URLs do not consume query-variant capacity.
+        if (!$is_query_variant) {
+            return array(
+                'allowed' => true,
+                'hash' => $current_hash,
+                'familyExists' => $this->page_cache_variant_hash_exists((string) $parsed['dir'], $current_hash),
+                'queryVariant' => false,
+            );
+        }
+
+        // Existing variants remain usable even after the family reaches its configured limit.
+        if ($this->page_cache_variant_hash_exists((string) $parsed['dir'], $current_hash)) {
             return array(
                 'allowed' => true,
                 'hash' => $current_hash,
                 'familyExists' => true,
-                'familyCount' => count($families),
-                'familyCap' => $this->get_page_cache_variant_family_cap(),
-                'rotatedFamilies' => array(),
+                'queryVariant' => true,
+                'familyCap' => $this->get_page_cache_query_variant_limit(),
             );
         }
 
-        $cap = $this->get_page_cache_variant_family_cap();
-        $family_count = count($families);
-        if ($family_count < $cap) {
+        $cap = $this->get_page_cache_query_variant_limit();
+        $marker = $this->get_page_cache_query_variant_cap_marker((string) $parsed['dir'], $cap);
+        if ('' !== $marker && file_exists($marker)) {
             return array(
-                'allowed' => true,
+                'allowed' => false,
                 'hash' => $current_hash,
                 'familyExists' => false,
-                'familyCount' => $family_count,
+                'queryVariant' => true,
                 'familyCap' => $cap,
-                'rotatedFamilies' => array(),
+                'capReached' => true,
+                'reason' => 'query_variant_limit_reached',
             );
         }
 
-        uasort($families, static function ($left, $right) {
-            $left_mtime = (int) ($left['lastModified'] ?? 0);
-            $right_mtime = (int) ($right['lastModified'] ?? 0);
-            if ($left_mtime === $right_mtime) {
-                return strcmp((string) ($left['hash'] ?? ''), (string) ($right['hash'] ?? ''));
+        $canonical_hash = $this->get_canonical_page_cache_hash_for_url($normalized);
+        $family_count = $this->count_page_cache_query_variant_hashes((string) $parsed['dir'], $canonical_hash, $cap);
+        if ($family_count >= $cap) {
+            if ('' !== $marker) {
+                ultracache_safe_file_put_contents($marker, (string) $cap . "\n", LOCK_EX, 'query_variant_cap_marker');
             }
-            return $left_mtime <=> $right_mtime;
-        });
-
-        $victim_count = max(1, $family_count - $cap + 1);
-        $rotated = array();
-        foreach (array_slice(array_keys($families), 0, $victim_count) as $victim_hash) {
-            if (!$this->delete_page_cache_variant_family((string) $parsed['dir'], (string) $victim_hash)) {
-                return array(
-                    'allowed' => false,
-                    'hash' => $current_hash,
-                    'familyExists' => false,
-                    'familyCount' => $family_count,
-                    'familyCap' => $cap,
-                    'rotationFailedHash' => (string) $victim_hash,
-                    'rotatedFamilies' => $rotated,
-                );
-            }
-            $rotated[] = (string) $victim_hash;
+            return array(
+                'allowed' => false,
+                'hash' => $current_hash,
+                'familyExists' => false,
+                'queryVariant' => true,
+                'familyCount' => $family_count,
+                'familyCap' => $cap,
+                'capReached' => true,
+                'reason' => 'query_variant_limit_reached',
+            );
         }
-
-        $this->record_cache_event('variant-family-rotated', array(
-            'dir' => (string) $parsed['dir'],
-            'new_hash' => $current_hash,
-            'rotated_families' => $rotated,
-            'family_count_before' => $family_count,
-            'family_cap' => $cap,
-        ));
 
         return array(
             'allowed' => true,
             'hash' => $current_hash,
             'familyExists' => false,
+            'queryVariant' => true,
             'familyCount' => $family_count,
             'familyCap' => $cap,
-            'rotatedFamilies' => $rotated,
         );
     }
 
@@ -1343,11 +1708,13 @@ trait Ultra_Cache_Engine_Storage_Trait
         }
         $this->delete_apache_static_html_aliases_for_cache_file($file);
 
-        foreach (array($file, $file . '.gz', $file . '.br', $file . '.fresh', $file . '.esi') as $variant) {
+        foreach (array($file, $file . '.gz', $file . '.br', $file . '.fresh', $file . '.esi', $file . '.lsesi', $file . '.lstags') as $variant) {
             if (file_exists($variant)) {
                 ultracache_safe_unlink($variant);
             }
         }
+
+        $this->clear_page_cache_query_variant_cap_markers(dirname((string) $file));
     }
 
     public function get_cache_path($url, $bucket = null)

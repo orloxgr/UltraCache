@@ -45,6 +45,14 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
                 'staleUrlPurgeFailures' => 0,
                 'staleInvalidatedUrls' => 0,
                 'invalidatedUrls' => 0,
+                'semanticTagPurgeOperations' => 0,
+                'semanticTagPurgeSuccesses' => 0,
+                'semanticTagPurgeFailures' => 0,
+                'staleSemanticTagPurgeOperations' => 0,
+                'staleSemanticTagPurgeSuccesses' => 0,
+                'staleSemanticTagPurgeFailures' => 0,
+                'invalidatedSemanticTags' => 0,
+                'staleInvalidatedSemanticTags' => 0,
                 'refillRequests' => 0,
                 'refillSuccesses' => 0,
                 'refillFailures' => 0,
@@ -63,7 +71,7 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
             return array();
         }
 
-        $allowed_types = array('site-purge', 'url-purge', 'refill');
+        $allowed_types = array('site-purge', 'url-purge', 'tag-purge', 'refill');
         $type = sanitize_key((string) ($entry['type'] ?? ''));
         if (!in_array($type, $allowed_types, true)) {
             return array();
@@ -187,9 +195,9 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
     }
 
     /**
-     * Record one production site or exact-URL purge operation.
+     * Record one production site, exact-URL, or semantic-tag purge operation.
      *
-     * @param string $operation    site or urls.
+     * @param string $operation    site, urls, or tags.
      * @param array  $result       Purge result.
      * @param int    $target_count Requested target count.
      * @param string $context      Operation source.
@@ -202,7 +210,7 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
         }
 
         $operation = sanitize_key((string) $operation);
-        if (!in_array($operation, array('site', 'urls'), true)) {
+        if (!in_array($operation, array('site', 'urls', 'tags'), true)) {
             return;
         }
 
@@ -215,6 +223,15 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
         if ('site' === $operation) {
             $operations['sitePurgeAttempts']++;
             $operations[$success ? 'sitePurgeSuccesses' : 'sitePurgeFailures']++;
+        } elseif ('tags' === $operation) {
+            $operations['semanticTagPurgeOperations']++;
+            $operations[$success ? 'semanticTagPurgeSuccesses' : 'semanticTagPurgeFailures']++;
+            $operations['invalidatedSemanticTags'] += $processed_count;
+            if (!empty($result['stale'])) {
+                $operations['staleSemanticTagPurgeOperations']++;
+                $operations[$success ? 'staleSemanticTagPurgeSuccesses' : 'staleSemanticTagPurgeFailures']++;
+                $operations['staleInvalidatedSemanticTags'] += $processed_count;
+            }
         } else {
             $operations['urlPurgeOperations']++;
             $operations[$success ? 'urlPurgeSuccesses' : 'urlPurgeFailures']++;
@@ -229,7 +246,7 @@ trait Ultra_Cache_WP_LiteSpeed_Metrics_Trait
         $state['operations'] = $operations;
         self::append_litespeed_operation_history($state, array(
             'time' => time(),
-            'type' => 'site' === $operation ? 'site-purge' : 'url-purge',
+            'type' => 'site' === $operation ? 'site-purge' : ('tags' === $operation ? 'tag-purge' : 'url-purge'),
             'success' => $success,
             'context' => $context,
             'targetCount' => 'site' === $operation ? 1 : $target_count,

@@ -13,6 +13,7 @@ require_once ultracache_plugin_dir('includes/media/class-media-conversion-trait.
 require_once ultracache_plugin_dir('includes/media/class-media-replacement-facade-trait.php');
 require_once ultracache_plugin_dir('includes/media/class-media-path-url-trait.php');
 require_once ultracache_plugin_dir('includes/media/class-media-html-rewrite-trait.php');
+require_once ultracache_plugin_dir('includes/media/class-media-slider-revolution-trait.php');
 
 
 final class Ultra_Cache_Media_Converter {
@@ -25,6 +26,7 @@ final class Ultra_Cache_Media_Converter {
 	use Ultra_Cache_Media_Replacement_Facade_Trait;
 	use Ultra_Cache_Media_Path_Url_Trait;
 	use Ultra_Cache_Media_Html_Rewrite_Trait;
+	use Ultra_Cache_Media_Slider_Revolution_Trait;
 
 	/**
 	 * Singleton instance.
@@ -80,6 +82,13 @@ final class Ultra_Cache_Media_Converter {
 	private $optimized_public_url_lookup_memo = array();
 
 	/**
+	 * Per-request DB-authoritative terminal media lookups by public URL/format.
+	 *
+	 * @var array<string,array<string,mixed>>
+	 */
+	private $terminal_public_media_lookup_memo = array();
+
+	/**
 	 * Per-request memo from upload source file paths to attachment IDs for
 	 * lightweight on-demand queue synchronization.
 	 *
@@ -95,7 +104,20 @@ final class Ultra_Cache_Media_Converter {
 	private $on_demand_queue_discovery_seen = array();
 
 	/**
-	 * Number of missing media items queued from lookup-only rewrites.
+	 * Per-request memo for existing on-demand media queue states.
+	 *
+	 * Only positive queue-row lookups are cached so a newly inserted row cannot
+	 * be hidden by an earlier negative lookup in the same request.
+	 *
+	 * @var array<string,string>
+	 */
+	private $on_demand_queue_existing_status_memo = array();
+
+	/**
+	 * Number of on-demand discovery candidates attempted in this PHP request.
+	 *
+	 * This is a work budget: rejected, duplicate, locked and already-known
+	 * candidates consume budget just like candidates that create queue work.
 	 *
 	 * @var int
 	 */
@@ -107,6 +129,13 @@ final class Ultra_Cache_Media_Converter {
 	 * @var array<string,bool>
 	 */
 	private $on_demand_affected_page_seen = array();
+
+	/**
+	 * Number of unique affected-page relation write attempts in this PHP request.
+	 *
+	 * @var int
+	 */
+	private $on_demand_affected_page_write_count = 0;
 
 	/**
 	 * Current safe generation context: frontend, warm, cron, stale, or manual.
@@ -148,6 +177,18 @@ final class Ultra_Cache_Media_Converter {
 	 * @var string|null
 	 */
 	private $media_rewrite_accept_context = null;
+
+	/**
+	 * Whether the current full-document media rewrite is preparing public cache storage.
+	 *
+	 * Warm/admin workers may themselves be authenticated even though the HTML being
+	 * finalized is anonymous public cache output. Keep that execution context scoped
+	 * separately from the current WordPress user so frontend logged-in bypass policy
+	 * cannot accidentally disable cache-bucket reconciliation.
+	 *
+	 * @var bool
+	 */
+	private $media_rewrite_cache_storage_context = false;
 
 	/**
 	 * Bounded request-local exact media-type support memo by Accept context.
@@ -241,7 +282,7 @@ final class Ultra_Cache_Media_Converter {
 	const MEDIA_QUEUE_DB_VERSION_OPTION = 'ultracache_media_queue_db_version';
 
 	/** Persistent physical media conversion unit table version. */
-	const MEDIA_QUEUE_UNITS_DB_VERSION = '2';
+	const MEDIA_QUEUE_UNITS_DB_VERSION = '3';
 
 	/** Persistent physical media conversion unit database version option. */
 	const MEDIA_QUEUE_UNITS_DB_VERSION_OPTION = 'ultracache_media_queue_units_db_version';
@@ -273,8 +314,14 @@ final class Ultra_Cache_Media_Converter {
 	/** Exclusive dashboard media-conversion session lock. */
 	const MEDIA_MANUAL_CONVERSION_LOCK = 'ultracache_media_manual_conversion_lock_v1';
 
-	/** Persistent administrator pause for all media generation work. */
-	const MEDIA_BACKGROUND_PAUSED_OPTION = 'ultracache_media_background_paused_v1';
+	/** Authoritative persistent administrator pause for all media generation work. */
+	const MEDIA_BACKGROUND_PAUSED_OPTION = 'ultracache_media_background_paused_v2';
+
+	/** Legacy pause state retired because it did not record authoritative action provenance. */
+	const MEDIA_BACKGROUND_PAUSED_LEGACY_OPTION = 'ultracache_media_background_paused_v1';
+
+	/** Schema version for an explicit administrator media-generation pause. */
+	const MEDIA_BACKGROUND_PAUSE_SCHEMA_VERSION = 2;
 
 	/** Rolling stale-worker incidents and temporary cooldown state. */
 	const MEDIA_STALE_WORKER_STATE_OPTION = 'ultracache_media_stale_worker_state_v1';
@@ -313,6 +360,7 @@ final class Ultra_Cache_Media_Converter {
 		add_filter('post_thumbnail_html', array($this, 'rewrite_filtered_content_image_urls'), 999);
 		add_filter('widget_text_content', array($this, 'rewrite_filtered_content_image_urls'), 999);
 		add_filter('render_block', array($this, 'rewrite_filtered_content_image_urls'), 999);
+		add_filter('sr_get_image_lists', array($this, 'filter_slider_revolution_image_lists'), 20, 2);
 		add_action('template_redirect', array($this, 'maybe_start_final_html_buffer'), 999);
 	}
 

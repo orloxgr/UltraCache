@@ -32,11 +32,13 @@ trait Ultra_Cache_Media_Queue_Runner_Trait
 				$unit_migration = $this->run_media_queue_units_migration_maintenance(max(25, min(100, $limit)), 1.0);
 				$status = $this->get_media_queue_status($format);
 			}
-			$repair = array('repaired' => false, 'requeued' => 0);
-			if ($auto_rebuild && !empty($status['needsRepair'])) {
-				$repair = $this->repair_media_queue_if_optimized_storage_missing($format);
-				$status = $this->get_media_queue_status($format);
-			}
+			// Completed media repair is explicit-only. A normal queue fetch/worker must
+			// never resurrect DONE/SKIPPED rows because storage health changed.
+			$repair = array(
+				'repaired' => false,
+				'requeued' => 0,
+				'reason' => !empty($status['needsRepair']) ? 'explicit_repair_required' : 'not_needed',
+			);
 			$build_chunk = array('scanned' => 0, 'queued' => 0, 'complete' => !empty($status['buildComplete']));
 			$queue_wait_reason = '';
 			$needs_auto_build = $auto_rebuild && empty($status['buildComplete']);
@@ -1109,22 +1111,13 @@ trait Ultra_Cache_Media_Queue_Runner_Trait
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
 			$now = current_time('mysql');
-			$recovered_interrupted = false;
 			$retried_failed = false;
 			$retried_units = 0;
 			try {
-				// Owning the exclusive process lease proves that these processing rows
-				// no longer belong to a live worker. Recover them immediately instead
-				// of waiting for the stale TTL.
-				$recovered_interrupted = $wpdb->query(
-					$wpdb->prepare(
-						"UPDATE %i SET status = 'pending', consecutive_failures = 0, stale_recoveries = 0, last_error = CASE WHEN last_error LIKE %s THEN last_error ELSE '' END, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status = 'processing'",
-						$table,
-						$wpdb->esc_like('__ultracache_force_regenerate__:') . '%',
-						$now,
-						$format
-					)
-				);
+				// Retry Failed is intentionally strict: only terminal failed rows are
+				// reset here. Interrupted/stale processing claims belong exclusively
+				// to the normal worker-recovery path and must never be stolen by this
+				// explicit failed-media action.
 				$retried_failed = $wpdb->query(
 					$wpdb->prepare(
 						"UPDATE %i SET status = 'pending', consecutive_failures = 0, stale_recoveries = 0, last_error = CASE WHEN last_error LIKE %s THEN last_error ELSE '' END, updated_at = %s, started_at = NULL, completed_at = NULL WHERE format = %s AND status = 'failed'",
@@ -1139,10 +1132,9 @@ trait Ultra_Cache_Media_Queue_Runner_Trait
 				$this->release_media_queue_process_lock($lock_token);
 			}
 
-			$query_failed = false === $recovered_interrupted || false === $retried_failed;
-			$recovered_interrupted = is_numeric($recovered_interrupted) ? max(0, (int) $recovered_interrupted) : 0;
+			$query_failed = false === $retried_failed;
 			$retried_failed = is_numeric($retried_failed) ? max(0, (int) $retried_failed) : 0;
-			$retried = $recovered_interrupted + $retried_failed;
+			$retried = $retried_failed;
 			if (($retried + $retried_units) > 0) {
 				$this->clear_media_stale_worker_state();
 				$this->invalidate_media_work_summary_cache();
@@ -1156,12 +1148,13 @@ trait Ultra_Cache_Media_Queue_Runner_Trait
 			return array_merge(
 				array(
 					'success' => !$query_failed,
-					'message' => $query_failed ? __('UltraCache could not update every retryable media queue row.', 'ultracache') : '',
+					'message' => $query_failed ? __('UltraCache could not update every failed media queue row.', 'ultracache') : '',
 					'retried' => $retried,
 					'retriedUnits' => $retried_units,
 					'retriedFailed' => $retried_failed,
-					'recoveredInterrupted' => $recovered_interrupted,
-					'hasMore' => !empty($status['failed']) || !empty($status['recoverableInterrupted']),
+					// Compatibility field: Retry Failed no longer recovers processing rows.
+					'recoveredInterrupted' => 0,
+					'hasMore' => !empty($status['failed']) || !empty($status['unitFailed']),
 				),
 				$status
 			);

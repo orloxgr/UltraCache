@@ -15,7 +15,7 @@ final class Ultra_Cache_Media_Replacement_Manager {
 	const MEDIA_REPLACEMENT_DB_VERSION = '15';
 
 	/** Media Library replacement orchestration contract version. */
-	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 8;
+	const MEDIA_REPLACEMENT_ORCHESTRATION_VERSION = 9;
 
 	/** Short-lived lock protecting readiness inventory cursor and counters from concurrent chunks. */
 	const MEDIA_REPLACEMENT_READINESS_LOCK = 'ultracache_media_replacement_readiness_lock_v1';

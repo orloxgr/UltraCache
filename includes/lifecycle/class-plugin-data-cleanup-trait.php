@@ -138,7 +138,7 @@ foreach (array('css-bundles', 'font-css', 'google-fonts', 'optimized-css', 'defe
 }
 
 if (function_exists('ultracache_uploads_storage_dir')) {
-    foreach (array('theme-css-temp', 'theme-css-backups', 'varnishtest') as $private_bucket) {
+    foreach (array('theme-css-temp', 'theme-css-backups', 'varnishtest', 'js-bundles') as $private_bucket) {
         $dir = ultracache_uploads_storage_dir('ultracache/' . $private_bucket);
         if (is_string($dir) && '' !== $dir && is_dir($dir)) {
             ultracache_safe_rmdir($dir, 'delete_all_plugin_data private runtime asset dir');
@@ -160,6 +160,7 @@ $option_names = array(
     defined('ULTRACACHE_CRAWL_SCOPE_SUMMARY_KEY') ? ULTRACACHE_CRAWL_SCOPE_SUMMARY_KEY : 'ultracache_crawl_scope_summary',
     ULTRACACHE_WP_CACHE_MANAGED_KEY,
     'ultracache_media_diagnostics_v1',
+    'ultracache_setup_wizard_state_v1',
     'ultracache_media_library_conversion_test_v1',
     'ultracache_media_library_conversion_test_sample_v1',
     'ultracache_media_replacement_workflow_state_v1',
@@ -169,20 +170,32 @@ $option_names = array(
     'ultracache_settings_google_fonts_last_scan',
     'ultracache_opcache_last_flush_at',
     'ultracache_external_cache_detection',
+    'ultracache_apache_static_capability_v1',
     'ultracache_action_queue_heavy_lock_v1',
     'ultracache_warmup_generation',
     'ultracache_warm_runtime_reset_version',
     'ultracache_warm_runtime_reset_state',
+    'ultracache_runtime_js_scan_last_javascript_strategy',
+    'ultracache_runtime_js_scan_javascript_strategy_dirty',
+    'ultracache_runtime_js_scan_owned_safeguards_v1',
     'ultracache_locks_schema_install_lock',
     'ultracache_affected_url_batch_v1',
     'ultracache_lcp_last_refresh',
     'ultracache_varnish_refresh_ahead_state_v1',
     'ultracache_varnish_refresh_candidates_v1',
     'ultracache_varnish_metrics_v1',
+    'ultracache_litespeed_detection_v1',
+    'ultracache_litespeed_esi_capability_v1',
+    'ultracache_litespeed_rules_state_v1',
+    'ultracache_woocommerce_endpoint_contract_v1',
+    'ultracache_wpml_topology_v1',
+    'ultracache_multilingual_topology_v1',
     'ultracache_litespeed_metrics_v1',
     'ultracache_litespeed_diagnostic_behavior_v1',
     'ultracache_litespeed_refresh_candidates_v1',
     'ultracache_litespeed_refresh_ahead_state_v1',
+            'ultracache_litespeed_automation_contract',
+    'ultracache_litespeed_semantic_rules_contract',
     'ultracache_varnish_diagnostic_basic_v1',
     'ultracache_varnish_endpoint_capabilities_v1',
     'ultracache_varnish_esi_capability_v1',
@@ -215,6 +228,7 @@ if (!$keep_tables) {
     $option_names[] = self::get_cache_asset_refs_db_version_option_key();
     $option_names[] = self::get_css_rewrite_map_db_version_option_key();
     $option_names[] = ultracache_get_locks_db_version_option_key();
+    $option_names[] = self::get_schema_lifecycle_contract_option_key();
     $option_names[] = 'ultracache_media_queue_build_state_v1';
 }
 
@@ -334,6 +348,222 @@ return array(
 );
 }
 
+    /**
+     * Return the schema-lifecycle contract version.
+     *
+     * Bump this only when UltraCache-owned schema lifecycle expectations change.
+     * Normal plugin releases do not need to re-verify every custom table.
+     *
+     * @return string
+     */
+    private static function get_schema_lifecycle_contract_version()
+    {
+        return '1';
+    }
+
+    /**
+     * Return the option key storing the completed schema-lifecycle contract.
+     *
+     * @return string
+     */
+    private static function get_schema_lifecycle_contract_option_key()
+    {
+        return 'ultracache_schema_lifecycle_contract_version';
+    }
+
+    /**
+     * Return the shared lock serializing UltraCache schema lifecycle work.
+     *
+     * @return string
+     */
+    private static function get_schema_lifecycle_upgrade_lock_name()
+    {
+        return 'ultracache_schema_upgrade_v1';
+    }
+
+    /**
+     * Return whether the current schema-lifecycle contract has completed.
+     *
+     * @return bool
+     */
+    private static function schema_lifecycle_contract_is_current()
+    {
+        return self::get_schema_lifecycle_contract_version()
+            === (string) get_option(self::get_schema_lifecycle_contract_option_key(), '');
+    }
+
+    /**
+     * Run the one-time schema lifecycle after a schema-contract upgrade.
+     *
+     * This hook is intentionally cheap after completion: one option read and
+     * return. Heavy SHOW/dbDelta/ALTER work is serialized behind the shared
+     * schema-upgrade lock and never runs concurrently across requests.
+     *
+     * @return array<string,mixed>
+     */
+    public static function maybe_run_schema_lifecycle_upgrade()
+    {
+        if (self::schema_lifecycle_contract_is_current()) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'schema_contract_current');
+        }
+
+        return self::run_schema_lifecycle_upgrade('plugin_upgrade', false);
+    }
+
+    /**
+     * Explicitly verify/repair the centralized UltraCache schema lifecycle.
+     *
+     * @param string $context Invocation context.
+     * @return array<string,mixed>
+     */
+    public static function repair_schema_lifecycle($context = 'repair')
+    {
+        return self::run_schema_lifecycle_upgrade($context, true);
+    }
+
+    /**
+     * Serialize schema verification/migration for runtime-critical UltraCache
+     * tables and the existing activation-owned component schemas.
+     *
+     * The lock table bootstraps itself through its narrow option lock. Once it
+     * is ready, every later custom-table ensure in this lifecycle runs under a
+     * single token-owned DB lock. Only the lock owner may execute schema DDL.
+     *
+     * @param string $context Invocation context.
+     * @param bool   $force   Force structural verification even when the
+     *                        lifecycle contract is already current.
+     * @return array<string,mixed>
+     */
+    private static function run_schema_lifecycle_upgrade($context, $force = false)
+    {
+        $context = sanitize_key((string) $context);
+        $force = (bool) $force;
+
+        if (defined('ULTRACACHE_UNINSTALL_IN_PROGRESS') && ULTRACACHE_UNINSTALL_IN_PROGRESS) {
+            return array('success' => false, 'reason' => 'uninstall_in_progress');
+        }
+
+        if (!$force && self::schema_lifecycle_contract_is_current()) {
+            return array('success' => true, 'skipped' => true, 'reason' => 'schema_contract_current');
+        }
+
+        if (!function_exists('ultracache_ensure_locks_table') || !ultracache_ensure_locks_table($force)) {
+            return array('success' => false, 'reason' => 'schema_lock_storage_unavailable');
+        }
+
+        if (!function_exists('ultracache_acquire_lock') || !function_exists('ultracache_release_lock')) {
+            return array('success' => false, 'reason' => 'schema_lock_api_unavailable');
+        }
+
+        $token = 'schema-upgrade-' . gmdate('YmdHis') . '-' . wp_generate_password(20, false, false);
+        $lock_name = self::get_schema_lifecycle_upgrade_lock_name();
+        $lock_ttl = max(60, min(600, (int) apply_filters('ultracache_schema_upgrade_lock_ttl', 180)));
+        $payload = array(
+            'context' => $context,
+            'contractVersion' => self::get_schema_lifecycle_contract_version(),
+            'pluginVersion' => defined('ULTRACACHE_VERSION') ? (string) ULTRACACHE_VERSION : '',
+        );
+
+        if (!ultracache_acquire_lock($lock_name, $token, $lock_ttl, $payload)) {
+            // During a one-time plugin/schema upgrade, let the sole owner finish
+            // before UltraCache's later bootstrap paths can observe a half-migrated
+            // schema. This wait never runs after the contract marker is current.
+            if (!$force) {
+                $wait_attempts = max(1, min(100, (int) apply_filters('ultracache_schema_upgrade_wait_attempts', 40)));
+                $wait_micros = max(10000, min(250000, (int) apply_filters('ultracache_schema_upgrade_wait_micros', 100000)));
+                for ($attempt = 0; $attempt < $wait_attempts; $attempt++) {
+                    usleep($wait_micros);
+                    if (self::schema_lifecycle_contract_is_current()) {
+                        return array('success' => true, 'skipped' => true, 'reason' => 'schema_contract_completed_by_peer');
+                    }
+                }
+            }
+            return array('success' => false, 'reason' => 'schema_upgrade_locked');
+        }
+
+        try {
+            // Another request may have completed the lifecycle while this
+            // request was acquiring the shared lock.
+            if (!$force && self::schema_lifecycle_contract_is_current()) {
+                return array('success' => true, 'skipped' => true, 'reason' => 'schema_contract_completed_by_peer');
+            }
+
+            $results = array();
+            $critical_ready = true;
+
+            $media = self::get_media_instance();
+            if ($media && method_exists($media, 'ensure_media_queue_table')) {
+                $results['mediaQueue'] = (bool) $media->ensure_media_queue_table(true);
+                $critical_ready = $critical_ready && $results['mediaQueue'];
+            } else {
+                $results['mediaQueue'] = false;
+                $critical_ready = false;
+            }
+
+            if ($media && method_exists($media, 'ensure_media_page_refs_table')) {
+                $results['mediaPageRefs'] = (bool) $media->ensure_media_page_refs_table(true);
+                $critical_ready = $critical_ready && $results['mediaPageRefs'];
+            } else {
+                $results['mediaPageRefs'] = false;
+                $critical_ready = false;
+            }
+
+            $results['cacheAssetRefs'] = (bool) self::ensure_cache_asset_refs_table(true);
+            $critical_ready = $critical_ready && $results['cacheAssetRefs'];
+
+            $results['cssRewriteMap'] = (bool) self::ensure_css_rewrite_map_table(true);
+            $critical_ready = $critical_ready && $results['cssRewriteMap'];
+
+            // These component schemas were already activation-owned. Keep them
+            // inside the same global lifecycle lock so their dbDelta work cannot
+            // overlap the runtime-critical schema upgrades above.
+            $instance = self::instance();
+            if ($instance && method_exists($instance, 'load_rest_api_dependency')) {
+                $instance->load_rest_api_dependency();
+            }
+            if (class_exists('Ultra_Cache_Rest_API') && method_exists('Ultra_Cache_Rest_API', 'get_instance')) {
+                $rest_api = Ultra_Cache_Rest_API::get_instance();
+                if ($rest_api && method_exists($rest_api, 'ensure_action_jobs_table')) {
+                    $results['actionJobs'] = (bool) $rest_api->ensure_action_jobs_table(true);
+                }
+            }
+
+            $results['cronWarmQueue'] = (bool) self::ensure_cron_warm_queue_table(true);
+
+            if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
+                $results['analytics'] = (bool) Ultra_Cache_Engine::ensure_analytics_table(true);
+            }
+            if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_lcp_observations_table')) {
+                $results['lcpObservations'] = (bool) Ultra_Cache_Engine::ensure_lcp_observations_table(true);
+            }
+
+            if (!$critical_ready) {
+                return array(
+                    'success' => false,
+                    'reason' => 'critical_schema_incomplete',
+                    'results' => $results,
+                );
+            }
+
+            // Tiny lifecycle marker is autoloaded intentionally: the normal
+            // plugins_loaded fast path must not add an individual option query to
+            // every frontend request after schema initialization has completed.
+            update_option(
+                self::get_schema_lifecycle_contract_option_key(),
+                self::get_schema_lifecycle_contract_version(),
+                true
+            );
+
+            return array(
+                'success' => true,
+                'skipped' => false,
+                'results' => $results,
+            );
+        } finally {
+            ultracache_release_lock($lock_name, $token);
+        }
+    }
+
     public static function activate()
     {
         self::maybe_run_public_warm_runtime_upgrade_reset('activation');
@@ -342,38 +572,15 @@ return array(
 
         // Do not create a full settings row on first install. Missing boolean
         // switches are treated as off at runtime; non-boolean settings use safe
-        // runtime fallbacks until the user explicitly saves settings or applies a profile.
+        // runtime fallbacks until the user explicitly saves settings or applies Optimal Settings.
         self::reset_settings_cache();
 
         self::sync_page_cache_bootstrap();
         self::sync_scheduled_events();
-        $media = self::get_media_instance();
-        if ($media && method_exists($media, 'ensure_media_queue_table')) {
-            $media->ensure_media_queue_table();
-        }
-        if ($media && method_exists($media, 'ensure_media_page_refs_table')) {
-            $media->ensure_media_page_refs_table();
-        }
-        $instance = self::instance();
-        if ($instance && method_exists($instance, 'load_rest_api_dependency')) {
-            $instance->load_rest_api_dependency();
-        }
-        if (class_exists('Ultra_Cache_Rest_API') && method_exists('Ultra_Cache_Rest_API', 'get_instance')) {
-            $rest_api = Ultra_Cache_Rest_API::get_instance();
-            if ($rest_api && method_exists($rest_api, 'ensure_action_jobs_table')) {
-                $rest_api->ensure_action_jobs_table();
-            }
-        }
-        self::ensure_cron_warm_queue_table();
-        self::ensure_cache_asset_refs_table();
-        self::ensure_css_rewrite_map_table();
-        ultracache_ensure_locks_table();
-        if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_analytics_table')) {
-            Ultra_Cache_Engine::ensure_analytics_table();
-        }
-        if (class_exists('Ultra_Cache_Engine') && method_exists('Ultra_Cache_Engine', 'ensure_lcp_observations_table')) {
-            Ultra_Cache_Engine::ensure_lcp_observations_table();
-        }
+        // Centralized schema lifecycle: the lock table bootstraps first, then
+        // all activation-owned custom-table verification runs under one shared
+        // schema-upgrade lock.
+        self::run_schema_lifecycle_upgrade('activation', true);
         $browser_cache_sync = self::sync_browser_cache_rules();
         if (false === $browser_cache_sync) {
             self::persist_admin_notice('browser_cache_rules_sync_failed', 'warning', 90);
@@ -381,6 +588,9 @@ return array(
         $apache_static_sync = self::sync_apache_static_html_delivery_rules();
         if (false === $apache_static_sync) {
             self::persist_admin_notice('apache_static_rules_sync_failed', 'warning', 90);
+        }
+        if (method_exists(__CLASS__, 'refresh_litespeed_esi_capability_from_persisted_detection')) {
+            self::refresh_litespeed_esi_capability_from_persisted_detection('ultracache-activation');
         }
         $litespeed_sync = self::sync_litespeed_cache_rules();
         if (false === $litespeed_sync) {

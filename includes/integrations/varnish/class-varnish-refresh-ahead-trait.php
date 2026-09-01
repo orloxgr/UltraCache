@@ -32,6 +32,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             'eligibleCount' => 0,
             'queuedCount' => 0,
             'skippedPendingCount' => 0,
+            'skippedExcludedCount' => 0,
             'errorCount' => 0,
             'lastMessage' => '',
             'probeBucketIndex' => 0,
@@ -157,6 +158,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
         $state['eligibleCount'] = max(0, (int) ($state['eligibleCount'] ?? 0));
         $state['queuedCount'] = max(0, (int) ($state['queuedCount'] ?? 0));
         $state['skippedPendingCount'] = max(0, (int) ($state['skippedPendingCount'] ?? 0));
+        $state['skippedExcludedCount'] = max(0, (int) ($state['skippedExcludedCount'] ?? 0));
         $state['errorCount'] = max(0, (int) ($state['errorCount'] ?? 0));
         $state['lastMessage'] = sanitize_text_field((string) ($state['lastMessage'] ?? ''));
         $state['probeBucketIndex'] = max(0, (int) ($state['probeBucketIndex'] ?? 0));
@@ -288,7 +290,9 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
 
         return array(
             'method' => 'GET',
-            'timeout' => 8,
+            'timeout' => function_exists('ultracache_get_php_max_execution_time_seconds')
+                ? ultracache_get_php_max_execution_time_seconds()
+                : max(0, (int) ini_get('max_execution_time')),
             'redirection' => 0,
             'limit_response_size' => 1024,
             'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-Refresh-Probe/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; +https://wordpress.org)',
@@ -646,6 +650,7 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
             $eligible = 0;
             $queued = 0;
             $skipped_pending = 0;
+            $skipped_excluded = 0;
             $errors = 0;
 
             foreach ($candidates as $candidate) {
@@ -662,6 +667,34 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
                     );
                     continue;
                 }
+
+                $eligibility = method_exists($engine, 'get_warm_pipeline_eligibility')
+                    ? $engine->get_warm_pipeline_eligibility($url)
+                    : array('eligible' => true, 'reason' => '', 'message' => '');
+                if (empty($eligibility['eligible'])) {
+                    ++$skipped_excluded;
+                    $exclusion_reason = sanitize_key((string) ($eligibility['reason'] ?? 'not-cacheable'));
+                    $details[] = array(
+                        'url' => $url,
+                        'status' => 'excluded',
+                        'age' => null,
+                        'thresholdSeconds' => $threshold_seconds,
+                        'bucket' => $bucket,
+                        'sources' => array_slice(array_values(array_map('sanitize_key', (array) ($candidate['sources'] ?? array()))), 0, 8),
+                        'queued' => false,
+                        'reason' => '' !== $exclusion_reason ? $exclusion_reason : 'not-cacheable',
+                        'message' => (string) ($eligibility['message'] ?? self::maybe_translate('The page cache policy excludes this URL.')),
+                    );
+                    $probe_updates[] = array(
+                        'url' => $url,
+                        'incrementProbe' => false,
+                        'lastProbeBucket' => $bucket,
+                        'lastResult' => 'excluded',
+                        'nextProbeAt' => $now + self::get_varnish_refresh_ahead_scan_interval(),
+                    );
+                    continue;
+                }
+
                 if (self::has_pending_varnish_refill_for_url($url)) {
                     ++$skipped_pending;
                     $probe_updates[] = array(
@@ -772,8 +805,9 @@ trait Ultra_Cache_WP_Varnish_Refresh_Ahead_Trait
                 'eligibleCount' => $eligible,
                 'queuedCount' => $queued,
                 'skippedPendingCount' => $skipped_pending,
+                'skippedExcludedCount' => $skipped_excluded,
                 'errorCount' => $errors,
-                'lastMessage' => self::maybe_translate_sprintf('Refresh ahead anonymously probed %1$d due candidate(s) in the %4$s bucket, found %2$d near expiry, and durably queued %3$d page job(s). No soft purge ran in the scanner.', $probed, $eligible, $queued, strtoupper($bucket)),
+                'lastMessage' => self::maybe_translate_sprintf('Refresh ahead anonymously probed %1$d due cacheable candidate(s) in the %4$s bucket, found %2$d near expiry, durably queued %3$d page job(s), and excluded %5$d non-cacheable candidate(s). No soft purge ran in the scanner.', $probed, $eligible, $queued, strtoupper($bucket), $skipped_excluded),
                 'details' => $details,
             );
             self::save_varnish_refresh_ahead_state($state);

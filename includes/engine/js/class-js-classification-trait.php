@@ -101,57 +101,41 @@ trait Ultra_Cache_Engine_JS_Classification_Trait
 
 
 
-    public function maybe_apply_runtime_js_scan_anonymous_context()
-    {
-        $data = $this->get_runtime_js_scan_request_data(false);
-        if (false === $data || empty($data['anonymous_context'])) {
-            return;
-        }
-
-        $GLOBALS['ultracache_runtime_js_scan_request_data'] = $data;
-        if (function_exists('wp_set_current_user')) {
-            wp_set_current_user(0);
-        }
-        add_filter('show_admin_bar', '__return_false', PHP_INT_MAX);
-    }
-
-
-
-
     private function get_runtime_js_scan_request_data($allow_preverified = true)
     {
         if (!empty($allow_preverified) && isset($GLOBALS['ultracache_runtime_js_scan_request_data']) && is_array($GLOBALS['ultracache_runtime_js_scan_request_data'])) {
             return $GLOBALS['ultracache_runtime_js_scan_request_data'];
         }
 
-        if (is_admin() || empty($_GET['ultracache_runtime_js_scan']) || empty($_GET['ultracache_runtime_js_scan_id']) || empty($_GET['ultracache_runtime_js_scan_nonce'])) {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only scanner markers; the short-lived scan token is verified before collector activation.
+        if (is_admin() || empty($_GET['ultracache_runtime_js_scan']) || empty($_GET['ultracache_runtime_js_scan_id']) || empty($_GET['ultracache_runtime_js_scan_token'])) {
             return false;
         }
 
-        if (!is_user_logged_in() || !current_user_can('manage_options')) {
+        if ((function_exists('is_user_logged_in') && is_user_logged_in()) || (function_exists('ultracache_runtime_js_scan_has_auth_cookie') && ultracache_runtime_js_scan_has_auth_cookie())) {
             return false;
         }
 
-        $nonce = sanitize_text_field(wp_unslash($_GET['ultracache_runtime_js_scan_nonce']));
-        if (!wp_verify_nonce($nonce, 'ultracache_runtime_js_scan')) {
-            return false;
-        }
-
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Authorization is provided by the bound short-lived scan token below.
         $scan_id = sanitize_key(wp_unslash($_GET['ultracache_runtime_js_scan_id']));
         if ('' === $scan_id || strlen($scan_id) > 64) {
             return false;
         }
 
-        $context = isset($_GET['ultracache_runtime_js_scan_context']) ? sanitize_key(wp_unslash($_GET['ultracache_runtime_js_scan_context'])) : 'anonymous';
-        $context = 'logged-in' === $context ? 'logged-in' : 'anonymous';
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This value is the scanner authorization token and is verified immediately below.
+        $token = sanitize_text_field(wp_unslash($_GET['ultracache_runtime_js_scan_token']));
+        $request_url = function_exists('ultracache_runtime_js_scan_current_request_url') ? ultracache_runtime_js_scan_current_request_url() : '';
+        if ('' === $request_url || !function_exists('ultracache_runtime_js_scan_verify_token') || !ultracache_runtime_js_scan_verify_token($token, $scan_id, $request_url)) {
+            return false;
+        }
 
-        return array(
-            'scan_id'           => $scan_id,
-            'endpoint'          => esc_url_raw(rest_url('ultracache/v1/runtime-js-scan/report')),
-            'rest_nonce'        => wp_create_nonce('wp_rest'),
-            'scan_context'      => $context,
-            'anonymous_context' => 'anonymous' === $context,
+        $data = array(
+            'scan_id'      => $scan_id,
+            'scan_context' => 'anonymous',
         );
+        $GLOBALS['ultracache_runtime_js_scan_request_data'] = $data;
+
+        return $data;
     }
 
 
@@ -338,7 +322,7 @@ private function script_handle_has_inline_before_segments($handle)
 
     private function script_handle_has_enqueued_dependents($handle)
     {
-        $handle = (string) $handle;
+        $handle = sanitize_key((string) $handle);
         if ('' === $handle) {
             return false;
         }
@@ -355,17 +339,48 @@ private function script_handle_has_inline_before_segments($handle)
             }
         }
 
-        foreach (array_unique(array_filter(array_map('strval', $candidates))) as $candidate) {
+        foreach (array_unique(array_filter(array_map('sanitize_key', array_map('strval', $candidates)))) as $candidate) {
             if ($candidate === $handle || empty($wp_scripts->registered[$candidate]) || empty($wp_scripts->registered[$candidate]->deps)) {
                 continue;
             }
 
-            if (in_array($handle, array_map('strval', (array) $wp_scripts->registered[$candidate]->deps), true)) {
+            $deps = array_values(array_filter(array_map('sanitize_key', array_map('strval', (array) $wp_scripts->registered[$candidate]->deps))));
+            if (in_array($handle, $deps, true)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+
+
+    private function script_handle_has_enqueued_dependencies($handle)
+    {
+        $handle = sanitize_key((string) $handle);
+        if ('' === $handle) {
+            return false;
+        }
+
+        global $wp_scripts;
+        if (!($wp_scripts instanceof WP_Scripts) || empty($wp_scripts->registered[$handle]) || !is_object($wp_scripts->registered[$handle])) {
+            return false;
+        }
+
+        foreach ((array) ($wp_scripts->registered[$handle]->deps ?? array()) as $dependency) {
+            if ('' !== sanitize_key((string) $dependency)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+
+    private function script_handle_has_active_dependency_edges($handle)
+    {
+        return $this->script_handle_has_enqueued_dependencies($handle) || $this->script_handle_has_enqueued_dependents($handle);
     }
 
 
@@ -378,54 +393,55 @@ private function script_handle_has_inline_before_segments($handle)
         }
 
         $src_host = (string) wp_parse_url($src, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-
-        return '' !== $src_host && '' !== $home_host && strtolower($src_host) !== strtolower($home_host);
-    }
-
-
-    private function is_ultracache_frontend_js_helper_handle($handle)
-    {
-        $handle = $this->normalize_delayed_script_group_handle($handle);
-        if ('' === $handle) {
+        if ('' === $src_host) {
             return false;
         }
 
-        return in_array($handle, array(
-            'ultracache-mailerlite-lazy-nonce',
-            'ultracache-async-css-runtime',
-            'ultracache-runtime-js-scan-collector',
-            'ultracache-delayed-js-loader',
-            'ultracache-runtime-font-css-map',
-            'ultracache-dynamic-icon-font-delay',
-            'ultracache-font-display-cssom-patch',
-            'ultracache-woocommerce-cart-fragments-delay',
-            'ultracache-woocommerce-esi-optin',
-            'ultracache-lcp-observer',
-        ), true);
+        if (function_exists('ultracache_is_trusted_public_host')) {
+            return !ultracache_is_trusted_public_host($src_host);
+        }
+
+        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+        return '' !== $home_host && strtolower($src_host) !== strtolower($home_host);
+    }
+
+
+    /**
+     * Return whether a plugin-owned frontend helper is safe to execute with
+     * native defer instead of blocking the HTML parser.
+     *
+     * Keep this whitelist deliberately narrow. Helpers that install interception
+     * hooks (Delay JS early interactions, MailerLite fetch, dynamic font/CSS,
+     * runtime scan, cart fragments, request-credentials learning) must remain
+     * parser-early. The full delayed loader can defer because the tiny dedicated
+     * interaction bootstrap captures eligible visitor input until it initializes.
+     *
+     * @param string $handle Script handle.
+     * @return bool
+     */
+    private function should_native_defer_ultracache_frontend_js_helper_handle($handle)
+    {
+        $module = $this->ultracache_get_frontend_runtime_module($handle);
+        return !empty($module) && 'defer' === (string) ($module['lane'] ?? '');
+    }
+
+    private function is_ultracache_frontend_js_helper_handle($handle)
+    {
+        return !empty($this->ultracache_get_frontend_runtime_module($handle));
     }
 
 
     private function is_ultracache_frontend_js_helper_record(array $record)
     {
-        $candidates = array(
-            isset($record['handle']) ? (string) $record['handle'] : '',
-            isset($record['id']) ? (string) $record['id'] : '',
-            isset($record['group']) ? (string) $record['group'] : '',
-        );
-
-        foreach ($candidates as $candidate) {
-            if ($this->is_ultracache_frontend_js_helper_handle($candidate)) {
+        foreach (array('handle', 'id', 'group') as $key) {
+            $candidate = isset($record[$key]) ? (string) $record[$key] : '';
+            if ('' !== $candidate && !empty($this->ultracache_get_frontend_runtime_module($candidate))) {
                 return true;
             }
         }
 
         $src = isset($record['src']) ? (string) $record['src'] : '';
-        if ('' !== $src && false !== strpos($src, '/ultracache/assets/js/')) {
-            return (false !== strpos($src, '/mailerlite-lazy-nonce.js') || false !== strpos($src, '/async-css-runtime.js') || false !== strpos($src, '/runtime-js-scan-collector.js') || false !== strpos($src, '/delayed-js-loader.js') || false !== strpos($src, '/runtime-font-css-map.js') || false !== strpos($src, '/dynamic-icon-font-delay.js') || false !== strpos($src, '/font-display-cssom-patch.js') || false !== strpos($src, '/woocommerce-cart-fragments-delay.js') || false !== strpos($src, '/woocommerce-esi-optin.js') || false !== strpos($src, '/lcp-observer.js'));
-        }
-
-        return false;
+        return '' !== $src && !empty($this->ultracache_get_frontend_runtime_module_by_src($src));
     }
 
 
@@ -443,12 +459,16 @@ private function script_handle_has_inline_before_segments($handle)
         }
 
         $src_host = (string) wp_parse_url($absolute, PHP_URL_HOST);
-        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
-        if ('' === $src_host || '' === $home_host) {
+        if ('' === $src_host) {
             return false;
         }
 
-        return strtolower($src_host) === strtolower($home_host);
+        if (function_exists('ultracache_is_public_site_url')) {
+            return ultracache_is_public_site_url($absolute);
+        }
+
+        $home_host = (string) wp_parse_url(home_url('/'), PHP_URL_HOST);
+        return '' !== $home_host && strtolower($src_host) === strtolower($home_host);
     }
 
 
@@ -508,19 +528,23 @@ private function script_handle_is_footer_group($handle)
         }
 
         $src_host = strtolower((string) wp_parse_url((string) $absolute, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
-        if ('' === $src_host || '' === $home_host) {
+        if ('' === $src_host) {
             return false;
         }
 
-        return $src_host !== $home_host;
+        if (function_exists('ultracache_is_public_site_url')) {
+            return !ultracache_is_public_site_url($absolute);
+        }
+
+        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        return '' !== $home_host && $src_host !== $home_host;
     }
 
 
 
     public function cleanup_asset_chain_enqueue_assets()
     {
-        if (is_admin()) {
+        if (is_admin() || (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations())) {
             return;
         }
 

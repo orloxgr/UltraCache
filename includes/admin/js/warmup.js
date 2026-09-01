@@ -104,6 +104,10 @@
 		return String(type || '').indexOf('warm_menu') === 0 ? 'menu' : 'full';
 	}
 
+	function getManualWarmOperation(type) {
+		return String(type || '').indexOf('warm_menu') === 0 ? 'menu' : 'full_site';
+	}
+
 	function getWarmRequestUrl(url) {
 		try {
 			const parsed = new URL(String(url || ''), window.location.origin);
@@ -164,6 +168,26 @@
 		return String(stageResult.status || '');
 	}
 
+	function buildExternalCacheVariantSummary(stageResult) {
+		const details = stageResult && stageResult.details && typeof stageResult.details === 'object' ? stageResult.details : {};
+		const rows = Array.isArray(details.refillDetails) ? details.refillDetails : [];
+		const variants = rows.map((row) => {
+			if (!row || typeof row !== 'object') {
+				return '';
+			}
+			const bucket = String(row.bucket || '').toLowerCase();
+			if (['orig', 'webp', 'avif'].indexOf(bucket) === -1) {
+				return '';
+			}
+			if (row.success) {
+				const cacheStatus = String(row.cacheStatus || row.refillStatus || '').toUpperCase();
+				return bucket + (cacheStatus === 'INCONCLUSIVE' ? ' ?' : ' ✓');
+			}
+			return bucket + ' ✗';
+		}).filter(Boolean);
+		return variants.join(' / ');
+	}
+
 	function buildWarmPipelineSummary(result) {
 		const pipeline = result && result.pipeline && typeof result.pipeline === 'object' ? result.pipeline : {};
 		const stages = pipeline.stages && typeof pipeline.stages === 'object' ? pipeline.stages : {};
@@ -178,14 +202,15 @@
 				return;
 			}
 			const label = getPipelineStageLabel(stage);
-			if ('completed' === status) {
-				const details = stageResult.details && typeof stageResult.details === 'object' ? stageResult.details : {};
-				const variantCount = Math.max(0, Number(details.refilledCount || details.variantCount || 0));
-				parts.push(label + (variantCount > 1 ? ' ' + variantCount + ' variants' : '') + ' ✓');
-				return;
-			}
-			if ('warning' === status) {
-				parts.push(label + ' warning');
+			if ('completed' === status || 'warning' === status) {
+				const variantSummary = ('varnish' === stage || 'litespeed' === stage)
+					? buildExternalCacheVariantSummary(stageResult)
+					: '';
+				if (variantSummary) {
+					parts.push(label + ' ' + variantSummary + ('warning' === status ? ' warning' : ''));
+				} else {
+					parts.push(label + ('warning' === status ? ' warning' : ' ✓'));
+				}
 				return;
 			}
 			if ('skipped' === status) {
@@ -193,7 +218,10 @@
 				return;
 			}
 			if ('failed' === status) {
-				parts.push(label + ' failed');
+				const variantSummary = ('varnish' === stage || 'litespeed' === stage)
+					? buildExternalCacheVariantSummary(stageResult)
+					: '';
+				parts.push(label + (variantSummary ? ' ' + variantSummary : ' failed'));
 			}
 		});
 		return parts.length ? parts.join(' · ') : String(result && result.message ? result.message : 'Page pipeline completed.');
@@ -205,6 +233,13 @@
 		const warmUrl = String(pipeline.url || result.url || '');
 		if (!warmUrl) {
 			return String(fallbackText || result.message || 'Homepage warm completed.');
+		}
+
+		if (result && result.skipped) {
+			return 'Skipped: ' + getWarmRequestUrl(warmUrl) + (result.message ? ' — ' + String(result.message) : ' — ' + buildWarmPipelineSummary(result));
+		}
+		if (!result || !result.success) {
+			return 'Failed: ' + getWarmRequestUrl(warmUrl) + (result && result.message ? ' — ' + String(result.message) : ' — Page pipeline failed.');
 		}
 
 		return 'Cached: ' + getWarmRequestUrl(warmUrl) + ' — ' + buildWarmPipelineSummary(result);
@@ -323,11 +358,13 @@
 		};
 	}
 
-	async function fetchJobBatch(type, cursor, limit, scope) {
+	async function fetchJobBatch(type, cursor, limit, scope, state) {
 		const response = await apiRequest('get_crawl_urls', {
 			cursor: cursor || '',
 			limit,
 			scope: scope || getWarmScopeForType(type),
+			operation: getManualWarmOperation(type),
+			language: state && state.language ? String(state.language) : '',
 		});
 		return normalizeBatchResponse(response, cursor, limit);
 	}
@@ -349,8 +386,7 @@
 		const getWarmupGeneration = typeof source.getWarmupGeneration === 'function' ? source.getWarmupGeneration : function () { return 0; };
 		const hasFullSiteWarmScope = typeof source.hasFullSiteWarmScope === 'function' ? source.hasFullSiteWarmScope : function () { return false; };
 		const hasMenuWarmScope = typeof source.hasMenuWarmScope === 'function' ? source.hasMenuWarmScope : function () { return false; };
-		const beginManualWarmPriority = typeof source.beginManualWarmPriority === 'function' ? source.beginManualWarmPriority : async function () { return ''; };
-		const endManualWarmPriority = typeof source.endManualWarmPriority === 'function' ? source.endManualWarmPriority : async function () { return true; };
+		const getManualWarmLanguages = typeof source.getManualWarmLanguages === 'function' ? source.getManualWarmLanguages : function () { return ['']; };
 		const defaultBatchSize = Math.max(1, Number(source.defaultBatchSize || 100));
 
 		function getCurrentCssBundleScope() {
@@ -358,59 +394,192 @@
 			return normalizeCssBundleScopeValue(settings && settings.cssBundleScope);
 		}
 
-		async function buildHomepageCssBundleBeforeWarm(scope, actionKey) {
+		function getOperationLanguageSequence(operation) {
+			const raw = getManualWarmLanguages(String(operation || ''));
+			const seen = {};
+			return (Array.isArray(raw) ? raw : ['']).map((language) => String(language || '').trim()).filter((language) => {
+				const key = language || '__default__';
+				if (seen[key]) {
+					return false;
+				}
+				seen[key] = true;
+				return true;
+			});
+		}
+
+		function getLanguageActionSuffix(language, index, total) {
+			if (!language || total <= 1) {
+				return '';
+			}
+			return ' [' + language + ' ' + String(index + 1) + '/' + String(total) + ']';
+		}
+
+		async function buildHomepageCssBundleBeforeWarm(scope, actionKey, language, operation, index, total) {
 			scope = normalizeCssBundleScopeValue(scope);
 			if ('per-page' === scope) {
 				return true;
 			}
 
 			const label = getCssWarmBundleLabel(scope, false);
-			const completed = await queueDashboardAction('warm_frontpage_html_css', {}, {
-				queued: label + ' build processing via dashboard…',
-				success: (job) => buildQueuedWarmPipelineSuccess(job, label + ' built and homepage HTML warmed.'),
-				failed: label + ' build failed.',
-				runningLabel: 'Building CSS…',
-			}, actionKey || ('prepare_' + scope + '_css_bundle'));
+			const suffix = getLanguageActionSuffix(language, Number(index || 0), Number(total || 1));
+			const params = {};
+			if (language) {
+				params.language = language;
+			}
+			if (['menu', 'full_site'].indexOf(String(operation || '')) !== -1) {
+				params.operation = String(operation);
+			}
+			const completed = await queueDashboardAction('warm_frontpage_html_css', params, {
+				queued: label + ' build processing via dashboard' + suffix + '…',
+				success: (job) => buildQueuedWarmPipelineSuccess(job, label + ' built and homepage HTML warmed' + suffix + '.'),
+				failed: label + ' build failed' + suffix + '.',
+				runningLabel: 'Building CSS' + suffix + '…',
+			}, (actionKey || ('prepare_' + scope + '_css_bundle')) + (language ? '_' + language : ''));
 
 			return !!(completed && completed.status === 'done');
+		}
+
+		async function runCrawlerAcrossLanguages(config, forceRestart) {
+			const sourceConfig = config && typeof config === 'object' ? config : {};
+			const type = String(sourceConfig.type || 'warm');
+			const operation = String(sourceConfig.operation || getManualWarmOperation(type));
+			const languages = getOperationLanguageSequence(operation);
+			if (!languages.length) {
+				pushToast({ type: 'warning', text: __('No multilingual language is enabled for this warm operation.', 'ultracache') });
+				return false;
+			}
+
+			const controls = getJobControls(type);
+			let startIndex = 0;
+			let resumeJob = null;
+			if (!forceRestart && controls.canResume) {
+				resumeJob = getSavedJob();
+				const savedSequence = resumeJob && Array.isArray(resumeJob.languageSequence)
+					? resumeJob.languageSequence.map((language) => String(language || ''))
+					: languages;
+				const savedLanguage = String(resumeJob && resumeJob.language || '');
+				const savedIndex = Math.max(0, Number(resumeJob && resumeJob.languageIndex || 0));
+				startIndex = savedIndex < savedSequence.length ? savedIndex : Math.max(0, savedSequence.indexOf(savedLanguage));
+				if (savedSequence.length) {
+					languages.splice(0, languages.length, ...savedSequence);
+				}
+			}
+
+			for (let index = startIndex; index < languages.length; index += 1) {
+				const language = String(languages[index] || '');
+				if (typeof sourceConfig.prepare === 'function' && !(resumeJob && index === startIndex)) {
+					const prepared = await sourceConfig.prepare(language, index, languages.length);
+					if (!prepared) {
+						return false;
+					}
+				}
+
+				const job = resumeJob && index === startIndex
+					? Object.assign({}, resumeJob, {
+						language,
+						languageSequence: languages.slice(),
+						languageIndex: index,
+					})
+					: {
+						type,
+						scope: sourceConfig.scope || getWarmScopeForType(type),
+						label: String(sourceConfig.label || 'Cache warming') + getLanguageActionSuffix(language, index, languages.length),
+						cursor: '',
+						nextCursor: '',
+						processed: 0,
+						total: 0,
+						pendingItems: [],
+						hasMore: true,
+						logs: [String(sourceConfig.startLog || 'Starting cache crawler…') + getLanguageActionSuffix(language, index, languages.length)],
+						startTime: Date.now(),
+						batchSize: defaultBatchSize,
+						warmupGeneration: Number(getWarmupGeneration() || 0),
+						language,
+						languageSequence: languages.slice(),
+						languageIndex: index,
+					};
+
+				const outcome = await runJob(job, !!forceRestart && index === startIndex);
+				resumeJob = null;
+				if (!(outcome && outcome.completed)) {
+					return false;
+				}
+			}
+			return true;
 		}
 
 		async function warmFrontpageHtml() {
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
-				return;
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
+				return false;
 			}
+			const languages = getOperationLanguageSequence('homepage');
+			if (!languages.length) {
+				pushToast({ type: 'warning', text: __('No multilingual language is enabled for Warm Homepage.', 'ultracache') });
+				return false;
+			}
+			let succeeded = true;
 			setHomepageHtmlBusy(true);
-			await queueDashboardAction('warm_frontpage_html', {}, {
-				queued: 'Frontpage HTML warm processing via dashboard…',
-				success: (job) => buildQueuedWarmPipelineSuccess(job, 'Frontpage HTML warm completed.'),
-				failed: 'Frontpage HTML warm failed.',
-				runningLabel: 'Warming…',
-			}, 'warm_frontpage_html');
-			setHomepageHtmlBusy(false);
+			try {
+				for (let index = 0; index < languages.length; index += 1) {
+					const language = String(languages[index] || '');
+					const suffix = getLanguageActionSuffix(language, index, languages.length);
+					const completed = await queueDashboardAction('warm_frontpage_html', language ? { language } : {}, {
+						queued: 'Frontpage HTML warm processing via dashboard' + suffix + '…',
+						success: (job) => buildQueuedWarmPipelineSuccess(job, 'Frontpage HTML warm completed' + suffix + '.'),
+						failed: 'Frontpage HTML warm failed' + suffix + '.',
+						runningLabel: 'Warming' + suffix + '…',
+					}, 'warm_frontpage_html' + (language ? '_' + language : ''));
+					if (!(completed && completed.status === 'done')) {
+						succeeded = false;
+						break;
+					}
+				}
+			} finally {
+				setHomepageHtmlBusy(false);
+			}
+			return succeeded;
 		}
 
 		async function warmFrontpageHtmlCss() {
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
-				return;
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
+				return false;
 			}
 			if (!(settings && settings.homepageCssBundleEnabled)) {
 				pushToast({ type: 'warning', text: __('Please enable CSS Bundling before using CSS bundle warm actions.', 'ultracache') });
-				return;
+				return false;
 			}
+			const languages = getOperationLanguageSequence('homepage');
+			if (!languages.length) {
+				pushToast({ type: 'warning', text: __('No multilingual language is enabled for Warm Homepage.', 'ultracache') });
+				return false;
+			}
+			let succeeded = true;
 			setHomepageHtmlCssBusy(true);
-			await queueDashboardAction('warm_frontpage_html_css', {}, {
-				queued: 'Homepage HTML + CSS bundle warm processing via dashboard…',
-				success: (job) => buildQueuedWarmPipelineSuccess(job, 'Homepage HTML + CSS bundle warm completed.'),
-				failed: 'Homepage HTML + CSS bundle warm failed.',
-				runningLabel: 'Warming…',
-			}, 'warm_frontpage_html_css');
-			setHomepageHtmlCssBusy(false);
+			try {
+				for (let index = 0; index < languages.length; index += 1) {
+					const language = String(languages[index] || '');
+					const suffix = getLanguageActionSuffix(language, index, languages.length);
+					const completed = await queueDashboardAction('warm_frontpage_html_css', language ? { language } : {}, {
+						queued: 'Homepage HTML + CSS bundle warm processing via dashboard' + suffix + '…',
+						success: (job) => buildQueuedWarmPipelineSuccess(job, 'Homepage HTML + CSS bundle warm completed' + suffix + '.'),
+						failed: 'Homepage HTML + CSS bundle warm failed' + suffix + '.',
+						runningLabel: 'Warming' + suffix + '…',
+					}, 'warm_frontpage_html_css' + (language ? '_' + language : ''));
+					if (!(completed && completed.status === 'done')) {
+						succeeded = false;
+						break;
+					}
+				}
+			} finally {
+				setHomepageHtmlCssBusy(false);
+			}
+			return succeeded;
 		}
 
 		async function startWarmingAllWithFrontpageCss(forceRestart) {
@@ -418,7 +587,7 @@
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
 				return;
 			}
 			if (!(settings && settings.homepageCssBundleEnabled)) {
@@ -429,63 +598,23 @@
 				pushToast({ type: 'warning', text: __('Select at least one full-site warm source first.', 'ultracache') });
 				return;
 			}
-
-			const cssScope = getCurrentCssBundleScope();
-			const jobType = getCssWarmJobType('full', cssScope);
-			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
-			const controls = getJobControls(jobType);
-			if (!forceRestart && controls.canResume) {
-				await runJob(getSavedJob(), false);
-				return;
-			}
 			if (isBusy()) {
 				return;
 			}
 
+			const cssScope = getCurrentCssBundleScope();
+			const jobType = getCssWarmJobType('full', cssScope);
+			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
 			setAllUrlsCssBusy(true);
-			let manualPriorityToken = '';
-			let manualPriorityHandedOff = false;
 			try {
-				if ('per-page' !== cssScope) {
-					const saved = getSavedJob();
-					manualPriorityToken = await beginManualWarmPriority(jobType, saved && saved.manualSessionToken ? saved.manualSessionToken : '');
-					const prepared = await buildHomepageCssBundleBeforeWarm(cssScope, 'warm_full_prepare_' + cssScope + '_css');
-					if (!prepared) {
-						await endManualWarmPriority(manualPriorityToken);
-						return;
-					}
-				}
-				await runJob({
+				await runCrawlerAcrossLanguages({
 					type: jobType,
+					operation: 'full_site',
+					scope: 'full',
 					label: 'Warming Full Site HTML Cache + ' + bundleLabel,
-					cursor: '',
-					nextCursor: '',
-					processed: 0,
-					total: 0,
-					pendingItems: [],
-					hasMore: true,
-					logs: ['Starting full site crawler + ' + bundleLabel + '…'],
-					startTime: Date.now(),
-					batchSize: defaultBatchSize,
-					warmupGeneration: Number(getWarmupGeneration() || 0),
-					manualSessionToken: manualPriorityToken,
-				}, forceRestart, manualPriorityToken);
-				manualPriorityHandedOff = true;
-			} catch (error) {
-				if (manualPriorityToken && !manualPriorityHandedOff) {
-					try {
-						await endManualWarmPriority(manualPriorityToken);
-					} catch (releaseError) {
-						reportNonFatalAdminError('warmup.manual-priority.release', releaseError, {
-							severity: 'warning',
-							dedupeKey: 'warmup.manual-priority.release',
-							pushToast,
-							userVisible: true,
-							toastText: __('Warm-up setup failed, and the manual priority lease could not be released. Refresh warm-up status before retrying.', 'ultracache'),
-						});
-					}
-				}
-				throw error;
+					startLog: 'Starting full site crawler + ' + bundleLabel + '…',
+					prepare: 'per-page' === cssScope ? null : (language, index, total) => buildHomepageCssBundleBeforeWarm(cssScope, 'warm_full_prepare_' + cssScope + '_css', language, 'full_site', index, total),
+				}, forceRestart);
 			} finally {
 				setAllUrlsCssBusy(false);
 			}
@@ -496,35 +625,22 @@
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
 				return;
 			}
 			if (!hasMenuWarmScope(settings)) {
 				pushToast({ type: 'warning', text: __('Select a frontend menu and depth first.', 'ultracache') });
 				return;
 			}
-			const controls = getJobControls('warm_menu');
-			if (!forceRestart && controls.canResume) {
-				await runJob(getSavedJob(), false);
-				return;
-			}
 			if (isBusy()) {
 				return;
 			}
-			await runJob({
+			await runCrawlerAcrossLanguages({
 				type: 'warm_menu',
+				operation: 'menu',
 				scope: 'menu',
 				label: __('Warming Menu HTML Cache', 'ultracache'),
-				cursor: '',
-				nextCursor: '',
-				processed: 0,
-				total: 0,
-				pendingItems: [],
-				hasMore: true,
-				logs: ['Starting menu URL crawler…'],
-				startTime: Date.now(),
-				batchSize: defaultBatchSize,
-				warmupGeneration: Number(getWarmupGeneration() || 0),
+				startLog: 'Starting menu URL crawler…',
 			}, forceRestart);
 		}
 
@@ -533,7 +649,7 @@
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
 				return;
 			}
 			if (!(settings && settings.homepageCssBundleEnabled)) {
@@ -544,64 +660,23 @@
 				pushToast({ type: 'warning', text: __('Select a frontend menu and depth first.', 'ultracache') });
 				return;
 			}
-
-			const cssScope = getCurrentCssBundleScope();
-			const jobType = getCssWarmJobType('menu', cssScope);
-			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
-			const controls = getJobControls(jobType);
-			if (!forceRestart && controls.canResume) {
-				await runJob(getSavedJob(), false);
-				return;
-			}
 			if (isBusy()) {
 				return;
 			}
 
+			const cssScope = getCurrentCssBundleScope();
+			const jobType = getCssWarmJobType('menu', cssScope);
+			const bundleLabel = getCssWarmBundleLabel(cssScope, true);
 			setMenuUrlsCssBusy(true);
-			let manualPriorityToken = '';
-			let manualPriorityHandedOff = false;
 			try {
-				if ('per-page' !== cssScope) {
-					const saved = getSavedJob();
-					manualPriorityToken = await beginManualWarmPriority(jobType, saved && saved.manualSessionToken ? saved.manualSessionToken : '');
-					const prepared = await buildHomepageCssBundleBeforeWarm(cssScope, 'warm_menu_prepare_' + cssScope + '_css');
-					if (!prepared) {
-						await endManualWarmPriority(manualPriorityToken);
-						return;
-					}
-				}
-				await runJob({
+				await runCrawlerAcrossLanguages({
 					type: jobType,
+					operation: 'menu',
 					scope: 'menu',
 					label: 'Warming Menu HTML Cache + ' + bundleLabel,
-					cursor: '',
-					nextCursor: '',
-					processed: 0,
-					total: 0,
-					pendingItems: [],
-					hasMore: true,
-					logs: ['Starting menu URL crawler + ' + bundleLabel + '…'],
-					startTime: Date.now(),
-					batchSize: defaultBatchSize,
-					warmupGeneration: Number(getWarmupGeneration() || 0),
-					manualSessionToken: manualPriorityToken,
-				}, forceRestart, manualPriorityToken);
-				manualPriorityHandedOff = true;
-			} catch (error) {
-				if (manualPriorityToken && !manualPriorityHandedOff) {
-					try {
-						await endManualWarmPriority(manualPriorityToken);
-					} catch (releaseError) {
-						reportNonFatalAdminError('warmup.manual-priority.release', releaseError, {
-							severity: 'warning',
-							dedupeKey: 'warmup.manual-priority.release',
-							pushToast,
-							userVisible: true,
-							toastText: __('Warm-up setup failed, and the manual priority lease could not be released. Refresh warm-up status before retrying.', 'ultracache'),
-						});
-					}
-				}
-				throw error;
+					startLog: 'Starting menu URL crawler + ' + bundleLabel + '…',
+					prepare: 'per-page' === cssScope ? null : (language, index, total) => buildHomepageCssBundleBeforeWarm(cssScope, 'warm_menu_prepare_' + cssScope + '_css', language, 'menu', index, total),
+				}, forceRestart);
 			} finally {
 				setMenuUrlsCssBusy(false);
 			}
@@ -612,34 +687,22 @@
 			await syncQueuedSettingsBeforeAction();
 			const settings = getSettings();
 			if (!(settings && settings.pageCacheEnabled)) {
-				pushToast({ type: 'warning', text: __('Please enable Page Caching first or select a profile before warming cache.', 'ultracache') });
+				pushToast({ type: 'warning', text: __('Please enable Page Caching before warming cache.', 'ultracache') });
 				return;
 			}
 			if (!hasFullSiteWarmScope(settings)) {
 				pushToast({ type: 'warning', text: __('Select at least one full-site warm source first.', 'ultracache') });
 				return;
 			}
-			const controls = getJobControls('warm');
-			if (!forceRestart && controls.canResume) {
-				await runJob(getSavedJob(), false);
-				return;
-			}
 			if (isBusy()) {
 				return;
 			}
-			await runJob({
+			await runCrawlerAcrossLanguages({
 				type: 'warm',
+				operation: 'full_site',
+				scope: 'full',
 				label: __('Warming Full Site HTML Cache', 'ultracache'),
-				cursor: '',
-				nextCursor: '',
-				processed: 0,
-				total: 0,
-				pendingItems: [],
-				hasMore: true,
-				logs: ['Starting full site crawler…'],
-				startTime: Date.now(),
-				batchSize: defaultBatchSize,
-				warmupGeneration: Number(getWarmupGeneration() || 0),
+				startLog: 'Starting full site crawler…',
 			}, forceRestart);
 		}
 
@@ -663,6 +726,7 @@
 		isWarmJobType,
 		isWarmCssJobType,
 		getWarmScopeForType,
+		getManualWarmOperation,
 		processJobItem,
 		fetchJobBatch,
 		createController,

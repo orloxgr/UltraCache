@@ -1060,6 +1060,40 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
     }
 
 
+
+    /**
+     * Remove the legacy Scroll delayed-JS release trigger.
+     *
+     * Existing installations/imports that had Scroll enabled are migrated to
+     * the four explicit interaction triggers that remain supported. The legacy
+     * key is retained as accepted input for backward-compatible imports, but
+     * canonical settings always persist it disabled.
+     *
+     * @param array $settings Raw dashboard settings.
+     * @return array
+     */
+    private static function migrate_removed_delayed_js_scroll_trigger_setting(array $settings)
+    {
+        if (!array_key_exists('delayedJsAutostartScrollEnabled', $settings)) {
+            return $settings;
+        }
+
+        $scroll_enabled = self::normalize_boolean_setting_value(
+            $settings['delayedJsAutostartScrollEnabled'],
+            false
+        );
+        $settings['delayedJsAutostartScrollEnabled'] = false;
+
+        if ($scroll_enabled) {
+            $settings['delayedJsAutostartMousemoveEnabled'] = true;
+            $settings['delayedJsAutostartKeyboardEnabled'] = true;
+            $settings['delayedJsAutostartTouchPointerEnabled'] = true;
+            $settings['delayedJsAutostartClickEnabled'] = true;
+        }
+
+        return $settings;
+    }
+
     /**
      * Restore the explicit Varnish enable switch without changing the behavior
      * of installations that used the connection marker as the runtime gate.
@@ -1093,6 +1127,7 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $raw_settings = $settings;
         $settings = self::migrate_split_media_format_settings($settings);
         $settings = self::migrate_legacy_cron_warm_master_setting($settings);
+        $settings = self::migrate_removed_delayed_js_scroll_trigger_setting($settings);
 
         $settings = self::migrate_legacy_varnish_enable_setting($settings);
         $defaults = self::get_dashboard_defaults();
@@ -1153,16 +1188,32 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['cacheExceptionPaths']       = self::sanitize_excluded_paths_setting($settings['cacheExceptionPaths']);
         $settings['cacheExceptionQueryArgs']   = self::sanitize_setting_key_list($settings['cacheExceptionQueryArgs']);
         $settings['cacheQueryStringAllowlist'] = self::sanitize_setting_key_list($settings['cacheQueryStringAllowlist']);
-        $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? false, false);
+        $settings['cacheQueryCombinationLevel'] = in_array((string) ($settings['cacheQueryCombinationLevel'] ?? $defaults['cacheQueryCombinationLevel']), array('1', '2', '3', '4', 'all'), true)
+            ? (string) ($settings['cacheQueryCombinationLevel'] ?? $defaults['cacheQueryCombinationLevel'])
+            : (string) $defaults['cacheQueryCombinationLevel'];
+        $settings['cacheSafeTrackingCookiesEnabled'] = self::normalize_boolean_setting_value($settings['cacheSafeTrackingCookiesEnabled'] ?? $defaults['cacheSafeTrackingCookiesEnabled'], $defaults['cacheSafeTrackingCookiesEnabled']);
         $settings['safeTrackingCookieList']    = self::sanitize_cookie_pattern_setting($settings['safeTrackingCookieList']);
         $settings['unsafeCacheCookieList']     = self::sanitize_cookie_pattern_setting($settings['unsafeCacheCookieList']);
-        $settings['delayedLocalJsAutoStart'] = in_array((string) ($settings['delayedLocalJsAutoStart'] ?? $defaults['delayedLocalJsAutoStart']), array('interaction', 'custom'), true) ? (string) $settings['delayedLocalJsAutoStart'] : $defaults['delayedLocalJsAutoStart'];
+        $settings['delayedLocalJsAutoStart'] = in_array((string) ($settings['delayedLocalJsAutoStart'] ?? $defaults['delayedLocalJsAutoStart']), array('interaction', 'custom', 'infinite'), true) ? (string) $settings['delayedLocalJsAutoStart'] : $defaults['delayedLocalJsAutoStart'];
         $settings['delayedLocalJsAutoStartSeconds'] = self::sanitize_bounded_number_setting($settings['delayedLocalJsAutoStartSeconds'] ?? $defaults['delayedLocalJsAutoStartSeconds'], $defaults['delayedLocalJsAutoStartSeconds'], 0.05, 5);
-        foreach (array('delayedJsAutostartAfterLoadEnabled', 'delayedJsAutostartMousemoveEnabled', 'delayedJsAutostartScrollEnabled', 'delayedJsAutostartClickEnabled', 'delayedJsAutostartTouchPointerEnabled', 'delayedJsAutostartKeyboardEnabled') as $delayed_js_trigger_key) {
+        $settings['delayedJsMinimumReleaseSeconds'] = self::sanitize_bounded_integer_setting($settings['delayedJsMinimumReleaseSeconds'] ?? $defaults['delayedJsMinimumReleaseSeconds'], $defaults['delayedJsMinimumReleaseSeconds'], 0, 4);
+        $delayed_js_trigger_keys = array('delayedJsAutostartAfterLoadEnabled', 'delayedJsAutostartMousemoveEnabled', 'delayedJsAutostartClickEnabled', 'delayedJsAutostartTouchPointerEnabled', 'delayedJsAutostartKeyboardEnabled');
+        $has_delayed_js_trigger = false;
+        foreach ($delayed_js_trigger_keys as $delayed_js_trigger_key) {
             $settings[$delayed_js_trigger_key] = !empty($settings[$delayed_js_trigger_key]);
+            $has_delayed_js_trigger = $has_delayed_js_trigger || $settings[$delayed_js_trigger_key];
+        }
+        $settings['delayedJsAutostartScrollEnabled'] = false;
+        if ('infinite' === $settings['delayedLocalJsAutoStart'] && !$has_delayed_js_trigger) {
+            $settings['delayedJsAutostartMousemoveEnabled'] = true;
+            $settings['delayedJsAutostartClickEnabled'] = true;
+            $settings['delayedJsAutostartTouchPointerEnabled'] = true;
+            $settings['delayedJsAutostartKeyboardEnabled'] = true;
         }
         $settings['firstPartyJsParallelExecutionEnabled'] = !empty($settings['firstPartyJsParallelExecutionEnabled']);
         $settings['thirdPartyJsParallelExecutionEnabled'] = !empty($settings['thirdPartyJsParallelExecutionEnabled']);
+        $settings['realCookieBannerCompatibilityEnabled'] = !empty($settings['realCookieBannerCompatibilityEnabled']);
+        $settings['complianzCompatibilityEnabled'] = !empty($settings['complianzCompatibilityEnabled']);
         $settings['deferJsForceList']         = self::normalize_textarea_setting($settings['deferJsForceList']);
         $settings['deferJsExcludeList']       = self::merge_textarea_settings($settings['deferJsExcludeList'], $settings['delayNonCriticalJsExcludeList']);
         // Existing installs keep their saved visible JS Delay / Defer Exclusions.
@@ -1235,13 +1286,6 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['redisPersistent']           = !empty($settings['redisPersistent']);
         $settings['redisConnectTimeoutMs']     = self::sanitize_bounded_integer_setting($settings['redisConnectTimeoutMs'], $defaults['redisConnectTimeoutMs'], 50, 15000);
         $settings['redisReadTimeoutMs']        = self::sanitize_bounded_integer_setting($settings['redisReadTimeoutMs'], $defaults['redisReadTimeoutMs'], 50, 15000);
-        $settings['liteSpeedRefillAfterTargetedInvalidation'] = !empty($settings['liteSpeedRefillAfterTargetedInvalidation']);
-        $settings['liteSpeedWarmDuringSiteWarmup'] = !empty($settings['liteSpeedWarmDuringSiteWarmup']);
-        $settings['liteSpeedStalePurgeEnabled'] = !empty($settings['liteSpeedStalePurgeEnabled']);
-        $settings['liteSpeedRefreshAheadEnabled'] = !empty($settings['liteSpeedRefreshAheadEnabled']);
-        $settings['liteSpeedRefreshAheadThresholdPercent'] = self::sanitize_bounded_integer_setting($settings['liteSpeedRefreshAheadThresholdPercent'] ?? $defaults['liteSpeedRefreshAheadThresholdPercent'], $defaults['liteSpeedRefreshAheadThresholdPercent'], 50, 95);
-        $settings['liteSpeedRefreshAheadMaxPages'] = self::sanitize_bounded_integer_setting($settings['liteSpeedRefreshAheadMaxPages'] ?? $defaults['liteSpeedRefreshAheadMaxPages'], $defaults['liteSpeedRefreshAheadMaxPages'], 1, 10);
-        $settings['liteSpeedRefreshAheadPinnedUrls'] = self::sanitize_local_url_textarea_setting($settings['liteSpeedRefreshAheadPinnedUrls'] ?? '', 25);
         $settings['varnishCliEnabled']          = !empty($settings['varnishCliEnabled']);
         $settings['varnishConnectionConfigured'] = self::is_varnish_connection_configured($settings);
         $settings['varnishCliMode']            = self::sanitize_varnish_mode($settings['varnishCliMode']);
@@ -1266,6 +1310,29 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
         $settings['cronWarmStartAfterCleanup'] = !empty($settings['cronWarmStartAfterCleanup']);
         $settings['cronWarmStartAfterManualPurge'] = !empty($settings['cronWarmStartAfterManualPurge']);
         $settings['warmUncachedUrlsOnFirstVisit'] = !empty($settings['warmUncachedUrlsOnFirstVisit']);
+        $settings['warmCssBundlesEnabled'] = !empty($settings['warmCssBundlesEnabled']);
+        $settings['alsoWarmTranslationPagesEnabled'] = !empty($settings['alsoWarmTranslationPagesEnabled']);
+        $incoming_multilingual_policy = isset($settings['multilingualWarmPolicyV1']) && is_array($settings['multilingualWarmPolicyV1'])
+            ? $settings['multilingualWarmPolicyV1']
+            : array();
+        if (function_exists('ultracache_multilingual_sanitize_warm_policy_store')) {
+            // Lifecycle/migration metadata is runtime-owned. A stale dashboard
+            // tab may update providerPolicies, but it must never roll back the
+            // server's migration marker or known-language lifecycle state.
+            $stored_settings = function_exists('get_option') && defined('ULTRACACHE_SETTINGS_KEY')
+                ? get_option(ULTRACACHE_SETTINGS_KEY, array())
+                : array();
+            $stored_settings = is_array($stored_settings) ? $stored_settings : array();
+            $stored_multilingual_policy = ultracache_multilingual_sanitize_warm_policy_store(
+                $stored_settings['multilingualWarmPolicyV1'] ?? array()
+            );
+            $incoming_multilingual_policy['schemaVersion'] = 2;
+            $incoming_multilingual_policy['migrationVersion'] = (int) ($stored_multilingual_policy['migrationVersion'] ?? 0);
+            $incoming_multilingual_policy['providerStates'] = (array) ($stored_multilingual_policy['providerStates'] ?? array());
+            $settings['multilingualWarmPolicyV1'] = ultracache_multilingual_sanitize_warm_policy_store($incoming_multilingual_policy);
+        } else {
+            $settings['multilingualWarmPolicyV1'] = array('schemaVersion' => 2, 'migrationVersion' => 0, 'providerPolicies' => array(), 'providerStates' => array());
+        }
         $settings['uninstallCleanupPolicy'] = self::sanitize_uninstall_cleanup_policy($settings['uninstallCleanupPolicy'] ?? $defaults['uninstallCleanupPolicy']);
 
         // Keep the public settings payload canonical. Stored options may still contain
@@ -1308,6 +1375,38 @@ trait Ultra_Cache_WP_Settings_Validation_Trait
                 || !empty($frontend_compression['brokenGzip'])
             ) {
                 return new WP_Error('ultracache_html_compression_frontend_conflict', self::maybe_translate('Server-side compression is already active. UltraCache compression was not enabled.'));
+            }
+        }
+
+        if (self::setting_was_enabled_by_patch($current, $previous, 'apacheStaticHtmlDeliveryEnabled')) {
+            $server_capability = method_exists(static::class, 'get_setup_server_capability')
+                ? self::get_setup_server_capability()
+                : array();
+            $apache_detected = 'apache' === strtolower((string) ($server_capability['type'] ?? ''));
+
+            // A locally detected Apache origin is authoritative for applicability.
+            // Public requests may be answered by Varnish before Apache is observable,
+            // so a loopback delivery probe must not block the settings save in that case.
+            if (!$apache_detected) {
+                if (!method_exists(static::class, 'run_apache_static_html_delivery_capability_probe')) {
+                    return new WP_Error(
+                        'ultracache_apache_static_capability_unavailable',
+                        self::maybe_translate('Apache Static HTML Delivery cannot be enabled because its capability verification is unavailable.')
+                    );
+                }
+
+                $apache_static_capability = self::run_apache_static_html_delivery_capability_probe();
+                if (empty($apache_static_capability['verified']) || 'verified' !== (string) ($apache_static_capability['status'] ?? '')) {
+                    $status = sanitize_key((string) ($apache_static_capability['status'] ?? 'inconclusive'));
+                    $message = !empty($apache_static_capability['message'])
+                        ? (string) $apache_static_capability['message']
+                        : self::maybe_translate('Apache Static HTML Delivery could not be verified, so the setting was not enabled.');
+                    $code = 'unsupported' === $status
+                        ? 'ultracache_apache_static_unsupported'
+                        : 'ultracache_apache_static_unverified';
+
+                    return new WP_Error($code, $message);
+                }
             }
         }
 

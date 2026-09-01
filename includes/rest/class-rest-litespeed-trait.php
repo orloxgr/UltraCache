@@ -27,11 +27,14 @@ trait Ultra_Cache_Rest_LiteSpeed_Trait
             );
         }
 
-        $urls = $request->get_param('urls');
-        $urls = is_array($urls) ? $urls : array();
+        $operation = sanitize_key((string) $request->get_param('operation'));
+        $targets = in_array($operation, array('tags', 'stale-tags'), true)
+            ? $request->get_param('tags')
+            : $request->get_param('urls');
+        $targets = is_array($targets) ? $targets : array();
         $allowed = Ultra_Cache_WP::verify_litespeed_control_request(
-            (string) $request->get_param('operation'),
-            $urls,
+            $operation,
+            $targets,
             (string) $request->get_param('requestId'),
             absint($request->get_param('expires')),
             (string) $request->get_param('signature')
@@ -63,11 +66,14 @@ trait Ultra_Cache_Rest_LiteSpeed_Trait
             ), 503);
         }
 
-        $urls = $request->get_param('urls');
-        $urls = is_array($urls) ? $urls : array();
+        $operation = sanitize_key((string) $request->get_param('operation'));
+        $targets = in_array($operation, array('tags', 'stale-tags'), true)
+            ? $request->get_param('tags')
+            : $request->get_param('urls');
+        $targets = is_array($targets) ? $targets : array();
         $result = Ultra_Cache_WP::get_litespeed_control_response(
-            (string) $request->get_param('operation'),
-            $urls
+            $operation,
+            $targets
         );
         $response = new WP_REST_Response($result, !empty($result['success']) ? 200 : 400);
         $response->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -82,35 +88,4 @@ trait Ultra_Cache_Rest_LiteSpeed_Trait
         return $response;
     }
 
-    /**
-     * Run the canonical LiteSpeed public cache behavior test.
-     *
-     * @return WP_REST_Response
-     */
-    public function litespeed_behavior_test()
-    {
-        if (!class_exists('Ultra_Cache_WP') || !method_exists('Ultra_Cache_WP', 'run_litespeed_behavior_test')) {
-            return new WP_REST_Response(array(
-                'success' => false,
-                'status' => 'runner-unavailable',
-                'message' => __('LiteSpeed behavior test helper is unavailable.', 'ultracache'),
-            ), 500);
-        }
-
-        $result = Ultra_Cache_WP::run_litespeed_behavior_test();
-        if (method_exists('Ultra_Cache_WP', 'get_dashboard_diagnostics')) {
-            $result['diagnostics'] = Ultra_Cache_WP::get_dashboard_diagnostics();
-        }
-        if (method_exists('Ultra_Cache_WP', 'get_dashboard_settings_for_client')) {
-            $result['settings'] = Ultra_Cache_WP::get_dashboard_settings_for_client();
-        }
-        if (method_exists('Ultra_Cache_WP', 'get_engine_stats')) {
-            $result['stats'] = Ultra_Cache_WP::get_engine_stats();
-        }
-        if (method_exists('Ultra_Cache_WP', 'get_external_cache_detection')) {
-            $result['externalCaches'] = Ultra_Cache_WP::get_external_cache_detection(true);
-        }
-
-        return new WP_REST_Response($result, 200);
-    }
 }

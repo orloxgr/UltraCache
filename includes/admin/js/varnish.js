@@ -16,7 +16,7 @@
 		throw new Error('UltraCache admin Varnish modules are required before varnish.js.');
 	}
 
-	const { h, __, sprintf, formatNumber, formatLooseTime, formatBytes } = core;
+	const { h, __, sprintf, formatNumber, formatBytes } = core;
 	const { apiRequest } = api;
 	const { CacheHelperConflictNotice } = cacheShared;
 	const { getState: getFlushScopeState, renderControl: renderFlushScopeControl } = varnishFlushScope;
@@ -66,9 +66,24 @@
 		return !!String(current.varnishCliKey || '').trim() || !!current.clearVarnishCliKey;
 	}
 
+	function normalizeVarnishDefaultEndpointCandidate(value, mode) {
+		let normalized = String(value || '').trim();
+		if (!normalized) {
+			return '';
+		}
+		if (String(mode || 'http') === 'http') {
+			normalized = normalized.replace(/^http:\/\//i, '');
+		}
+		return normalized.replace(/\/$/, '');
+	}
+
+	function isDefaultVarnishServersForMode(value, mode) {
+		const normalized = normalizeVarnishDefaultEndpointCandidate(value, mode);
+		return !normalized || normalized === getDefaultVarnishServersForMode(mode);
+	}
+
 	function isDefaultVarnishServersValue(value) {
-		const normalized = String(value || '').trim();
-		return !normalized || normalized === '127.0.0.1:82' || normalized === '127.0.0.1:6082';
+		return isDefaultVarnishServersForMode(value, 'http') || isDefaultVarnishServersForMode(value, 'admin');
 	}
 
 	function formatVarnishResultDetailLines(result) {
@@ -166,9 +181,6 @@
 		if (status === 'static-route-only') {
 			return __('Static route only', 'ultracache');
 		}
-		if (status === 'proof-expired') {
-			return __('Proof expired', 'ultracache');
-		}
 		if (status === 'configuration-incomplete') {
 			return __('Configuration incomplete', 'ultracache');
 		}
@@ -239,7 +251,7 @@
 		let output = parts.join(' · ');
 		if (includeAction) {
 			output += '\n' + (type === 'invalidation'
-				? __('Action: fix the reported Varnish transport or authentication error, then run the invalidation or Test Varnish again.', 'ultracache')
+				? __('Action: fix the reported Varnish transport or authentication error, then run the invalidation or Redetect Varnish Capabilities again.', 'ultracache')
 				: __('Action: fix the reported HTTP or origin error, then run the affected-page or site warm-up again.', 'ultracache'));
 		}
 		return output;
@@ -336,17 +348,9 @@
 		presentation.message = String(capability.message || '');
 
 		if (capability.configurationChanged || String(capability.status || '') === 'configuration-changed') {
-			presentation.text = __('Configuration changed · run Test Varnish again', 'ultracache');
+			presentation.text = __('Configuration changed · run Redetect Varnish Capabilities again', 'ultracache');
 			presentation.tone = 'warning';
 			presentation.status = 'configuration-changed';
-			return presentation;
-		}
-
-		const proofExpiresAt = Math.max(0, Number(capability.proofExpiresAt || 0));
-		if (proofExpiresAt > 0 && proofExpiresAt <= Math.floor(Date.now() / 1000)) {
-			presentation.text = __('Proof expired · run Test Varnish again', 'ultracache');
-			presentation.tone = 'warning';
-			presentation.status = 'proof-expired';
 			return presentation;
 		}
 
@@ -444,8 +448,6 @@
 		const effectiveCapabilities = endpointCapabilities.effective && typeof endpointCapabilities.effective === 'object' ? endpointCapabilities.effective : {};
 		const capabilityStates = endpointCapabilities.capabilityStates && typeof endpointCapabilities.capabilityStates === 'object' ? endpointCapabilities.capabilityStates : {};
 		const publicPathCapabilities = endpointCapabilities.publicPath && typeof endpointCapabilities.publicPath === 'object' ? endpointCapabilities.publicPath : {};
-		const proofExpiresAtByCapability = endpointCapabilities.proofExpiresAtByCapability && typeof endpointCapabilities.proofExpiresAtByCapability === 'object' ? endpointCapabilities.proofExpiresAtByCapability : {};
-		let exactProofExpiresAt = Number(proofExpiresAtByCapability.exact || 0);
 		const staleGracePresentation = getStaleGracePolicyPresentation(source);
 		const htmlVariantPresentation = getHtmlVariantCapabilityPresentation(basicTest, effectiveCapabilities);
 		const endpoints = Array.isArray(endpointCapabilities.endpoints) ? endpointCapabilities.endpoints : [];
@@ -472,7 +474,6 @@
 			? capabilityStates[requiredExactCapability]
 			: {};
 		verifiedEndpointCount = Number(requiredExactState.behaviorVerifiedEndpointCount || 0);
-		exactProofExpiresAt = Number(requiredExactState.proofExpiresAt || exactProofExpiresAt || 0);
 		const modeLabel = isAdminMode ? __('Admin secret', 'ultracache') : __('HTTP endpoint', 'ultracache');
 		const controlConnectionTested = !!(basicTest.controlTransportTested || basicTest.invalidationAttempted || endpoints.some((endpoint) => Number(endpoint.testedAt || 0) > 0));
 		const controlConnectionVerified = !!(basicTest.controlConnectionAccepted || basicTest.controlTransportAccepted || endpoints.some((endpoint) => !!endpoint.controlConnectionVerified || !!endpoint.exactInvalidation));
@@ -510,9 +511,6 @@
 			if (value || state.behaviorVerifiedAllEndpoints) {
 				return { ok: true, text: __('Supported', 'ultracache'), tone: 'success' };
 			}
-			if (status === 'proof-expired') {
-				return { ok: false, text: withReason(__('Proof expired', 'ultracache')), tone: 'warning' };
-			}
 			if (status === 'partial') {
 				return { ok: false, text: withReason(__('Partially verified', 'ultracache')), tone: 'warning' };
 			}
@@ -546,9 +544,6 @@
 			}
 			const normalizedStatus = String(status || '');
 			const reason = String(message || normalizedStatus || __('No persisted capability outcome exists for the configured endpoint set.', 'ultracache')).replace(/-/g, ' ');
-			if (normalizedStatus === 'proof-expired') {
-				return { ok: false, text: __('Proof expired', 'ultracache') + ' · ' + reason, tone: 'warning' };
-			}
 			if (normalizedStatus === 'observation-incomplete') {
 				return { ok: false, text: __('Observation incomplete', 'ultracache') + ' · ' + reason, tone: 'warning' };
 			}
@@ -685,10 +680,7 @@
 				: (sharedCacheVerified ? __('Verified', 'ultracache') : __('Not verified', 'ultracache')), !sharedCacheTested ? 'neutral' : (sharedCacheVerified ? 'success' : 'warning')],
 			[__('Shared-cache policy', 'ultracache'), !!sharedCache.enabled, sharedMode, sharedCache.enabled ? (String(sharedCache.mode || '') === 'managed' ? 'success' : 'warning') : 'neutral'],
 			[__('Stale grace policy', 'ultracache'), staleGracePresentation.ok, staleGracePresentation.text, staleGracePresentation.tone],
-			[__('Last behavior test', 'ultracache'), !!basicTest.success, basicStatus + (basicTest.message && basicStatusCode !== 'not-tested' ? ' · ' + String(basicTest.message) : ''), basicTest.success ? 'success' : (basicTest.tested || basicTest.status ? 'warning' : 'neutral')],
-			[__('Exact proof expiry', 'ultracache'), exactProofExpiresAt > 0, exactProofExpiresAt > 0
-				? formatLooseTime(exactProofExpiresAt)
-				: __('No current proof', 'ultracache'), exactProofExpiresAt > 0 ? 'success' : 'neutral'],
+			[__('Behavior test', 'ultracache'), !!basicTest.success, basicStatus + (basicTest.message && basicStatusCode !== 'not-tested' ? ' · ' + String(basicTest.message) : ''), basicTest.success ? 'success' : (basicTest.tested || basicTest.status ? 'warning' : 'neutral')],
 		];
 		const registryStatus = String(endpointCapabilities.status || 'unconfigured').toLowerCase();
 		const registryReason = String(
@@ -799,9 +791,8 @@
 									? __('Observation incomplete', 'ultracache')
 									: (endpointExactStatus === 'configuration-changed'
 										? __('Configuration changed', 'ultracache')
-										: (endpointExactStatus === 'proof-expired'
-											? __('Proof expired', 'ultracache')
-											: (endpointExactTested ? __('Not verified', 'ultracache') : __('Not tested', 'ultracache')))));
+									: (endpointExactTested ? __('Not verified', 'ultracache') : __('Not tested', 'ultracache')))
+);
 							const endpointStatus = endpointExactVerified
 								? __('Exact invalidation verified', 'ultracache')
 								: (endpointConnectionSupported
@@ -818,10 +809,6 @@
 									? __('Not tested', 'ultracache') + ' · ' + endpointExactReason
 									: (endpointExactVerified ? __('Verified', 'ultracache') : __('Not verified', 'ultracache') + ' · ' + endpointExactReason), !endpointExactTested ? 'neutral' : (endpointExactVerified ? 'success' : 'warning')],
 								[__('Current capabilities', 'ultracache'), enabledCapabilities.length > 0, enabledCapabilities.length ? enabledCapabilities.join(', ') : __('None', 'ultracache'), 'neutral'],
-								[__('Tested', 'ultracache'), endpointTested, endpointTested ? formatLooseTime(endpoint.testedAt) : __('Not tested', 'ultracache') + ' · ' + endpointExactReason, 'neutral'],
-								[__('Proof expires', 'ultracache'), !!endpoint.exactProofExpiresAt, endpoint.exactProofExpiresAt
-									? formatLooseTime(endpoint.exactProofExpiresAt)
-									: __('No current proof', 'ultracache'), endpoint.exactProofExpiresAt ? 'success' : 'neutral'],
 							];
 							if (endpoint.lastFailure) {
 								endpointRows.push([__('Last failure', 'ultracache'), false, String(endpoint.lastFailure), 'warning']);
@@ -838,7 +825,6 @@
 							[__('Result', 'ultracache'), String(lastOperationStatus || '') === 'complete', lastOperationStatus || __('Unavailable', 'ultracache'), String(lastOperationStatus || '') === 'complete' ? 'success' : 'neutral'],
 							[__('Message', 'ultracache'), !!last.message, last.message || '', 'neutral'],
 							[__('URL', 'ultracache'), !!last.url, last.url || '', 'neutral'],
-							[__('Recorded', 'ultracache'), !!(last.timestamp || last.updatedAt || last.createdAt), last.timestamp || last.updatedAt || last.createdAt ? formatLooseTime(last.timestamp || last.updatedAt || last.createdAt) : '', 'neutral'],
 						].filter((row) => row[2] !== ''), 'neutral'),
 						terminalErrorDetails.length ? h('div', { className: 'mt-4 space-y-2', key: 'terminal-errors' }, terminalErrorDetails.map((detail, index) => h('div', {
 							className: 'text-xs text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 whitespace-pre-line break-words',
@@ -1011,10 +997,10 @@
 		const lastError = latestQueueError || (productionInvalidationResult && (lastRuntimeOutcome === 'failed' || lastRuntimeOutcome === 'unsupported' || (!lastRuntimeOutcome && !productionInvalidationResult.success && !productionInvalidationResult.skipped)) ? String(productionInvalidationResult.message || __('Invalidation failed', 'ultracache')) : '');
 		const warningItems = [];
 		if (connectionConfigured && (!varnish.available || endpointCount < 1 || (isAdminMode && !secretConfigured) || actionsBlocked)) {
-			warningItems.push({ category: 'configuration', label: __('Connection', 'ultracache'), message: __('Varnish is not ready. Check the connection settings, save them, and run Test Varnish.', 'ultracache') });
+			warningItems.push({ category: 'configuration', label: __('Connection', 'ultracache'), message: __('Varnish is not ready. Check the connection settings, save them, and run Redetect Varnish Capabilities.', 'ultracache') });
 		}
 		if (controlConnectionTested && !controlConnectionAccepted) {
-			warningItems.push({ category: 'transport', label: __('Connection', 'ultracache'), message: __('The configured Varnish control connection could not be authenticated or reached. Check the endpoint and secret, then run Test Varnish again.', 'ultracache') });
+			warningItems.push({ category: 'transport', label: __('Connection', 'ultracache'), message: __('The configured Varnish control connection could not be authenticated or reached. Check the endpoint and secret, then run Redetect Varnish Capabilities again.', 'ultracache') });
 		}
 		if (controlConnectionAccepted && !endpointCapabilitiesAllVerified) {
 			warningItems.push({ category: 'invalidation', label: __('Cache clearing', 'ultracache'), message: __('The Varnish control connection succeeded, but exact cache invalidation was not verified for the active VCL. UltraCache will use the next verified fallback.', 'ultracache') });
@@ -1046,7 +1032,7 @@
 			warningItems.push({
 				category: 'esi',
 				label: __('ESI', 'ultracache'),
-				message: String(esiCapability.message || __('Run Test Varnish after installing the ESI VCL rules. Until verification succeeds, registered fragments render inline fallback HTML.', 'ultracache')),
+				message: String(esiCapability.message || __('Run Redetect Varnish Capabilities after installing the ESI VCL rules. Until verification succeeds, registered fragments render inline fallback HTML.', 'ultracache')),
 			});
 		}
 		if (queueTerminal > 0 || (queuePending > 0 && queueProcessing === 0 && ['scheduled', 'recovered'].indexOf(refillWorkerStatus) === -1)) {
@@ -1194,6 +1180,8 @@
 						disabled: connectionDisabled || secretExternal,
 						placeholder: secretExternal ? 'Externally configured' : (secretConfigured ? 'Leave blank to keep current value' : 'Enter password or token'),
 						type: 'password',
+						name: 'ultracache_varnish_secret',
+						autoComplete: 'off',
 						key: 'key-input',
 					}),
 					secretManaged ? h(Button, {
@@ -1229,11 +1217,10 @@
 			h('div', { className: 'mt-4 flex flex-wrap gap-3' }, [
 				h(Button, { onClick: onSave, disabled: busy || infrastructureLocked, variant: 'primary' }, busy ? 'Working…' : 'Save Varnish Settings'),
 				h(Button, { onClick: onDetect, disabled: busy || infrastructureLocked || !varnish.available, variant: 'light' }, busy ? 'Working…' : __("Detect Varnish Configuration", 'ultracache')),
-				h(Button, { onClick: onTest, disabled: busy || infrastructureLocked || formDirty || !connectionConfigured || !varnish.available || actionsBlocked, variant: 'light', title: formDirty ? __("Save Varnish Settings before testing.", 'ultracache') : '' }, busy ? 'Working…' : __("Test Varnish", 'ultracache')),
-				h(Button, { onClick: onMeasurePerformance, disabled: busy || infrastructureLocked || formDirty || !sharedCacheEnabled, variant: 'light', title: formDirty ? __("Save Varnish Settings before measuring.", 'ultracache') : '' }, busy ? 'Working…' : __("Measure Varnish Performance", 'ultracache')),
+				h(Button, { onClick: onTest, disabled: busy || infrastructureLocked || formDirty || !connectionConfigured || !varnish.available || actionsBlocked, variant: 'light', title: formDirty ? __("Save Varnish Settings before redetecting capabilities.", 'ultracache') : '' }, busy ? 'Working…' : __("Redetect Varnish Capabilities", 'ultracache')),
 				h(Button, { onClick: onFlushAll, disabled: busy || infrastructureLocked || formDirty || !connectionConfigured || !varnish.available || actionsBlocked || !siteFlushActionAvailable, variant: 'light', title: formDirty ? __("Save Varnish Settings before flushing.", 'ultracache') : '' }, busy ? 'Working…' : __("Flush Varnish Cache", 'ultracache')),
 			]),
-			formDirty ? h('div', { className: 'mt-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, __("Unsaved Varnish changes detected. Save the settings before testing or flushing.", 'ultracache')) : null,
+			formDirty ? h('div', { className: 'mt-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2' }, __("Unsaved Varnish changes detected. Save the settings before redetecting capabilities or flushing.", 'ultracache')) : null,
 			h('div', { className: 'uc-diagnostic-group mt-5', key: 'varnish-simple-status' }, [
 				h('div', { className: 'uc-section-title' }, __('Varnish status', 'ultracache')),
 				h('div', { className: 'grid grid-cols-1 lg:grid-cols-2 gap-x-6' }, simpleStatusRows),
@@ -1265,41 +1252,90 @@
 
 		function updateVarnishField(key, value) {
 			setVarnishForm((current) => {
-				const next = Object.assign({}, current || {}, { [key]: value });
-				if (key === 'varnishCliMode' && isDefaultVarnishServersValue(current && current.varnishCliServers)) {
-					next.varnishCliServers = getDefaultVarnishServersForMode(value);
+				const currentForm = current || {};
+				const next = Object.assign({}, currentForm, { [key]: value });
+				if (key === 'varnishCliMode') {
+					const previousMode = currentForm.varnishCliMode || 'http';
+					if (isDefaultVarnishServersForMode(currentForm.varnishCliServers, previousMode)) {
+						next.varnishCliServers = getDefaultVarnishServersForMode(value);
+					}
 				}
 				return next;
 			});
 
 		}
 
+		function buildVarnishSettingsPatch(form, includeSecretChanges = true) {
+			const sourceForm = Object.assign({}, form || {});
+			const configuredServers = String(sourceForm.varnishCliServers || '').trim();
+			const patch = {
+				varnishCliEnabled: !!sourceForm.varnishCliEnabled,
+				configureVarnishConnection: true,
+				varnishCliMode: sourceForm.varnishCliMode || 'http',
+				varnishCliServers: configuredServers,
+				varnishCliTimeoutSeconds: sourceForm.varnishCliTimeoutSeconds,
+				varnishInvalidationsPerMinute: sourceForm.varnishInvalidationsPerMinute,
+			};
+			if (includeSecretChanges && sourceForm.varnishCliKey) {
+				patch.varnishCliKey = sourceForm.varnishCliKey;
+			}
+			if (includeSecretChanges && sourceForm.clearVarnishCliKey) {
+				patch.clearVarnishCliKey = true;
+			}
+			return patch;
+		}
+
+		async function performVarnishCapabilityDetection() {
+			try {
+				const response = await apiRequest('varnish_behavior_test', {});
+				applyDashboardPayload(response || {});
+				mergeVarnishTestResult(response || {});
+				if (response && response.success === false) {
+					throw new Error(formatVarnishResultMessage(response, 'Varnish capability detection failed.'));
+				}
+				return response;
+			} catch (error) {
+				const payload = error && error.data && typeof error.data === 'object' ? error.data : null;
+				if (payload) {
+					applyDashboardPayload(payload || {});
+					mergeVarnishTestResult(payload || {});
+					const detailedError = new Error(formatVarnishResultMessage(payload, error && error.message ? error.message : 'Varnish capability detection failed.'));
+					detailedError.data = payload;
+					detailedError.rest = error.rest || null;
+					throw detailedError;
+				}
+				throw error;
+			}
+		}
+
+		async function redetectVarnishCapabilitiesAndSave(form) {
+			const response = await performVarnishCapabilityDetection();
+			const finalPatch = buildVarnishSettingsPatch(form, false);
+			await saveSettingsPatch(finalPatch);
+			return response;
+		}
+
 		async function saveVarnishSettings() {
 			return enqueueUiOperation('varnish_settings_save', 'Save Varnish settings', async () => {
 				const form = Object.assign({}, varnishForm || {});
-				const configuredServers = String(form.varnishCliServers || '').trim();
-				const patch = {
-					varnishCliEnabled: !!form.varnishCliEnabled,
-					configureVarnishConnection: true,
-					varnishCliMode: form.varnishCliMode || 'http',
-					varnishCliServers: configuredServers,
-					varnishCliTimeoutSeconds: form.varnishCliTimeoutSeconds,
-					varnishInvalidationsPerMinute: form.varnishInvalidationsPerMinute,
-				};
-				if (form.varnishCliKey) {
-					patch.varnishCliKey = form.varnishCliKey;
-				}
-				if (form.clearVarnishCliKey) {
-					patch.clearVarnishCliKey = true;
-				}
-				const response = await saveSettingsPatch(patch);
+				const firstPatch = buildVarnishSettingsPatch(form, true);
+				const firstResponse = await saveSettingsPatch(firstPatch);
 				setVarnishForm((current) => Object.assign({}, current || {}, {
 					varnishConnectionConfigured: true,
 					varnishCliKey: '',
 					clearVarnishCliKey: false,
 				}));
-				return response;
-			}, { processingText: 'Processing Varnish settings save…', successText: 'Varnish settings saved.', failedText: 'Failed to save Varnish settings.' });
+
+				if (!firstPatch.varnishCliEnabled || !String(firstPatch.varnishCliServers || '').trim()) {
+					return firstResponse;
+				}
+
+				return redetectVarnishCapabilitiesAndSave(form);
+			}, {
+				processingText: 'Saving Varnish settings, redetecting capabilities, and saving the verified configuration…',
+				successText: 'Varnish settings saved and capabilities redetected.',
+				failedText: 'Failed to save or verify Varnish settings.',
+			});
 		}
 
 		function assertVarnishSettingsSaved(actionLabel) {
@@ -1347,37 +1383,21 @@
 				}
 			}, {
 				processingText: 'Checking the homepage and locating candidate Varnish PURGE and BAN endpoints…',
-				successText: (result) => result && result.message ? String(result.message) : 'Varnish candidate detected. Save the settings and run Test Varnish.',
+				successText: (result) => result && result.message ? String(result.message) : 'Varnish candidate detected. Save the settings and run Redetect Varnish Capabilities.',
 				failedText: 'Varnish configuration discovery failed.',
 			});
 		}
 
 		async function runVarnishTest() {
-			assertVarnishSettingsSaved(__("Test Varnish", 'ultracache'));
-			return enqueueUiOperation('varnish_test', 'Test Varnish', async () => {
-				try {
-					const response = await apiRequest('varnish_behavior_test', {});
-					applyDashboardPayload(response || {});
-					mergeVarnishTestResult(response || {});
-					if (response && response.success === false) {
-						throw new Error(formatVarnishResultMessage(response, 'Varnish test failed.'));
-					}
-					return response;
-				} catch (error) {
-					const payload = error && error.data && typeof error.data === 'object' ? error.data : null;
-					if (payload) {
-						applyDashboardPayload(payload || {});
-						mergeVarnishTestResult(payload || {});
-						const detailedError = new Error(formatVarnishResultMessage(payload, error && error.message ? error.message : 'Varnish test failed.'));
-						detailedError.data = payload;
-						detailedError.rest = error.rest || null;
-						throw detailedError;
-					}
-					throw error;
-				}
-			}, { processingText: 'Testing Varnish connection, exact invalidation, and public refill…', successText: (result) => {
-				return result && result.message ? String(result.message) : 'Varnish test completed.';
-			}, failedText: 'Varnish test failed.' });
+			assertVarnishSettingsSaved(__("Redetect Varnish Capabilities", 'ultracache'));
+			return enqueueUiOperation('varnish_test', 'Redetect Varnish capabilities', async () => {
+				const form = Object.assign({}, varnishForm || {});
+				return redetectVarnishCapabilitiesAndSave(form);
+			}, {
+				processingText: 'Redetecting Varnish connection, invalidation, refill, and runtime capabilities…',
+				successText: (result) => result && result.message ? String(result.message) : 'Varnish capabilities redetected.',
+				failedText: 'Varnish capability detection failed.',
+			});
 		}
 
 

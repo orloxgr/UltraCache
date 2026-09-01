@@ -41,10 +41,12 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
 
     public static function unschedule_scheduled_events()
     {
-        $timestamp = wp_next_scheduled('ultracache_scheduled_cache_cleanup');
-        while ($timestamp) {
-            wp_unschedule_event($timestamp, 'ultracache_scheduled_cache_cleanup');
-            $timestamp = wp_next_scheduled('ultracache_scheduled_cache_cleanup');
+        foreach (array('ultracache_scheduled_cache_cleanup', 'ultracache_cache_asset_refs_gc', 'ultracache_cache_asset_refs_gc_catchup') as $hook) {
+            $timestamp = wp_next_scheduled($hook);
+            while ($timestamp) {
+                wp_unschedule_event($timestamp, $hook);
+                $timestamp = wp_next_scheduled($hook);
+            }
         }
     }
 
@@ -80,19 +82,24 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             && self::has_pending_varnish_invalidation_rows();
         $keep_varnish_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
             && self::should_keep_varnish_refresh_ahead_cron();
-        $keep_litespeed_refresh_ahead = method_exists(static::class, 'should_keep_litespeed_refresh_ahead_cron')
-            && self::should_keep_litespeed_refresh_ahead_cron();
         $background_rate_enabled = method_exists(static::class, 'get_shared_automation_pages_per_minute')
             && self::get_shared_automation_pages_per_minute(self::get_settings()) > 0;
         $foreground_active = method_exists(static::class, 'is_manual_warmup_blocking_cron')
             && self::is_manual_warmup_blocking_cron();
         $keep_background_worker = $has_pending_varnish_invalidations
-            || ($background_rate_enabled && ($has_pending_varnish || $keep_varnish_refresh_ahead || $keep_litespeed_refresh_ahead));
+            || ($background_rate_enabled && ($has_pending_varnish || $keep_varnish_refresh_ahead));
         if (!$force && !$foreground_active && $keep_background_worker) {
             wp_schedule_event(time() + MINUTE_IN_SECONDS, 'ultracache_every_minute', 'ultracache_cron_warm_tick');
             if ($has_pending_varnish_invalidations) {
                 wp_schedule_single_event(time() + 5, 'ultracache_cron_warm_tick_kickoff');
             }
+        }
+    }
+
+    private static function ensure_cache_asset_refs_gc_event_scheduled()
+    {
+        if (!wp_next_scheduled('ultracache_cache_asset_refs_gc')) {
+            wp_schedule_event(time() + MINUTE_IN_SECONDS, 'hourly', 'ultracache_cache_asset_refs_gc');
         }
     }
 
@@ -107,17 +114,19 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
             wp_schedule_event(time() + MINUTE_IN_SECONDS, $schedule, 'ultracache_scheduled_cache_cleanup');
         }
 
+        // Cache-asset registry retention is correctness maintenance, not an optional cache-purge policy.
+        // Keep it independent from Scheduled Cache Cleanup so expired inactive rows cannot grow without bound.
+        self::ensure_cache_asset_refs_gc_event_scheduled();
+
         if (method_exists(static::class, 'ensure_targeted_page_warm_worker_ready')) {
             self::ensure_targeted_page_warm_worker_ready();
         }
 
         $keep_varnish_refresh_ahead = method_exists(static::class, 'should_keep_varnish_refresh_ahead_cron')
             && self::should_keep_varnish_refresh_ahead_cron();
-        $keep_litespeed_refresh_ahead = method_exists(static::class, 'should_keep_litespeed_refresh_ahead_cron')
-            && self::should_keep_litespeed_refresh_ahead_cron();
         $has_pending_varnish_invalidations = method_exists(static::class, 'has_pending_varnish_invalidation_rows')
             && self::has_pending_varnish_invalidation_rows();
-        if ($has_pending_varnish_invalidations || $keep_varnish_refresh_ahead || $keep_litespeed_refresh_ahead) {
+        if ($has_pending_varnish_invalidations || $keep_varnish_refresh_ahead) {
             self::ensure_cron_warm_events_scheduled($has_pending_varnish_invalidations ? 1 : null);
         } else {
             $warm_state = self::get_cron_warm_state();
@@ -220,6 +229,16 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
         self::run_scheduled_cache_cleanup();
     }
 
+    public function handle_cache_asset_refs_gc()
+    {
+        self::run_cache_asset_refs_gc();
+    }
+
+    public function handle_cache_asset_refs_gc_catchup()
+    {
+        self::run_cache_asset_refs_gc();
+    }
+
     public function handle_cron_warm_tick()
     {
         self::run_cron_warm_tick(array('invokedBy' => 'wp-cron'));
@@ -310,6 +329,37 @@ trait Ultra_Cache_WP_Scheduled_Maintenance_Trait
         }
 
         return is_numeric($deleted) ? max(0, (int) $deleted) : 0;
+    }
+
+    public static function run_cache_asset_refs_gc()
+    {
+        $token = 'asset-refs-gc-' . wp_generate_password(24, false, false);
+        $lock_name = 'ultracache_cache_asset_refs_gc';
+        $locked = function_exists('ultracache_acquire_lock')
+            && ultracache_acquire_lock($lock_name, $token, 120, array('startedAt' => time()));
+
+        if (!$locked) {
+            return array('success' => false, 'skipped' => true, 'reason' => 'lock_busy', 'deleted' => 0);
+        }
+
+        try {
+            $result = self::prune_cache_asset_refs_table_batched(25000, 5000, 3.0);
+            $deleted = max(0, (int) ($result['deleted'] ?? 0));
+            $backlog_likely = !empty($result['backlogLikely']);
+
+            if ($backlog_likely && !wp_next_scheduled('ultracache_cache_asset_refs_gc_catchup')) {
+                wp_schedule_single_event(time() + MINUTE_IN_SECONDS, 'ultracache_cache_asset_refs_gc_catchup');
+            }
+
+            return array_merge(array('success' => true, 'skipped' => false), $result, array(
+                'deleted' => $deleted,
+                'catchupScheduled' => $backlog_likely,
+            ));
+        } finally {
+            if (function_exists('ultracache_release_lock')) {
+                ultracache_release_lock($lock_name, $token);
+            }
+        }
     }
 
     public static function cleanup_plugin_database_tables(array $args = array())

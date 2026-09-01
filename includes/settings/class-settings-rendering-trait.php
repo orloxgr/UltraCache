@@ -255,6 +255,17 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
         $settings['varnishCliKeyConfigured'] = !empty($varnish['configured']);
         $settings['varnishCliKeyManaged'] = !empty($varnish['managed']);
         $settings['varnishCliKeyExternal'] = !empty($varnish['external']);
+        $settings['multilingualStatus'] = function_exists('ultracache_multilingual_get_dashboard_status')
+            ? ultracache_multilingual_get_dashboard_status()
+            : array(
+                'provider' => 'none',
+                'active' => false,
+                'ambiguous' => false,
+                'ready' => true,
+                'defaultLanguage' => '',
+                'urlMode' => 'inactive',
+                'languages' => array(),
+            );
 
         return $settings;
     }
@@ -391,6 +402,7 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'cache_logged_in_users'        => false,
             'cache_query_strings'          => !empty($ui['cacheQueryStringsEnabled']),
             'cache_query_allowlist'        => $query_allowlist,
+            'cache_query_combination_level'=> in_array((string) ($ui['cacheQueryCombinationLevel'] ?? '3'), array('1', '2', '3', '4', 'all'), true) ? (string) ($ui['cacheQueryCombinationLevel'] ?? '3') : '3',
             'cache_safe_tracking_cookies'  => !empty($ui['cacheSafeTrackingCookiesEnabled']),
             'safe_tracking_cookie_patterns'=> $safe_tracking_cookie_patterns,
             'unsafe_cache_cookie_patterns' => $unsafe_cache_cookie_patterns,
@@ -398,14 +410,15 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'brotli_enabled'               => !empty($ui['brotliEnabled']),
             'cache_stats_enabled'          => !empty($ui['cacheStatsEnabled']),
             'preload_on_save'              => !empty($ui['preRenderOnSave']),
+            'warm_translation_pages'       => !empty($ui['alsoWarmTranslationPagesEnabled']),
             'defer_js'                     => $defer_js_enabled,
             'defer_all_js'                 => $defer_all_js_enabled,
             'delay_all_js'                 => $delay_all_js_enabled,
-            'delayed_local_js_auto_start' => in_array((string) ($ui['delayedLocalJsAutoStart'] ?? 'custom'), array('interaction', 'custom'), true) ? (string) ($ui['delayedLocalJsAutoStart'] ?? 'custom') : 'custom',
+            'delayed_local_js_auto_start' => in_array((string) ($ui['delayedLocalJsAutoStart'] ?? 'custom'), array('interaction', 'custom', 'infinite'), true) ? (string) ($ui['delayedLocalJsAutoStart'] ?? 'custom') : 'custom',
             'delayed_local_js_auto_start_seconds' => self::sanitize_bounded_number_setting($ui['delayedLocalJsAutoStartSeconds'] ?? 0.05, 0.05, 0.05, 5),
+            'delayed_js_minimum_release_seconds' => self::sanitize_bounded_integer_setting($ui['delayedJsMinimumReleaseSeconds'] ?? 0, 0, 0, 4),
             'delayed_js_autostart_after_load' => !empty($ui['delayedJsAutostartAfterLoadEnabled']),
             'delayed_js_autostart_mousemove' => !empty($ui['delayedJsAutostartMousemoveEnabled']),
-            'delayed_js_autostart_scroll' => !empty($ui['delayedJsAutostartScrollEnabled']),
             'delayed_js_autostart_click' => !empty($ui['delayedJsAutostartClickEnabled']),
             'delayed_js_autostart_touch_pointer' => !empty($ui['delayedJsAutostartTouchPointerEnabled']),
             'delayed_js_autostart_keyboard' => !empty($ui['delayedJsAutostartKeyboardEnabled']),
@@ -441,10 +454,17 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'cls_dimensions'               => !empty($ui['clsDimensionsEnabled']),
             'async_css'                    => !empty($ui['asyncCssEnabled']),
             'async_external_css'           => !empty($ui['asyncExternalCssEnabled']),
+            'async_consent_css'            => !empty($ui['asyncConsentCssEnabled']),
+            'async_consent_css_auto'       => !empty($ui['asyncConsentCssAutoEnabled']),
             'async_css_exclude_list'       => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncCssExcludeList'])),
             'async_external_css_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['asyncExternalCssExcludeList'] ?? '')),
             'aggressive_async_css'         => !empty($ui['aggressiveAsyncCssEnabled']),
             'delay_non_critical_js'        => $delay_non_critical_js_enabled,
+            'protect_wpbakery_animations'   => !empty($ui['protectWpBakeryAnimationsEnabled']),
+            'protect_elementor_compatibility' => !empty($ui['protectElementorCompatibilityEnabled']),
+            'real_cookie_banner_compatibility' => !empty($ui['realCookieBannerCompatibilityEnabled']),
+            'complianz_compatibility' => !empty($ui['complianzCompatibilityEnabled']),
+            'protect_woocommerce_variable_product_compatibility' => !empty($ui['woocommerceVariableProductCompatibilityEnabled']),
             'delay_non_critical_js_aggressive' => $defer_stage_aggressive,
             'delay_non_critical_js_exclude_list' => self::parse_textarea_setting(self::normalize_textarea_setting($ui['deferJsExcludeList'])),
             'lcp_image_priority'           => !empty($ui['lcpImagePriorityEnabled']),
@@ -479,13 +499,6 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'browser_cache_rules'          => !empty($ui['browserCacheRulesEnabled']),
             'apache_static_html_delivery'  => !empty($ui['apacheStaticHtmlDeliveryEnabled']),
             'litespeed_cache_enabled'      => !empty($ui['liteSpeedCacheEnabled']) && !empty($ui['pageCacheEnabled']),
-            'litespeed_refill_after_targeted_invalidation' => !empty($ui['liteSpeedRefillAfterTargetedInvalidation']),
-            'litespeed_warm_during_site_warmup' => !empty($ui['liteSpeedWarmDuringSiteWarmup']),
-            'litespeed_stale_purge_enabled' => !empty($ui['liteSpeedStalePurgeEnabled']),
-            'litespeed_refresh_ahead_enabled' => !empty($ui['liteSpeedRefreshAheadEnabled']),
-            'litespeed_refresh_ahead_threshold_percent' => max(50, min(95, absint($ui['liteSpeedRefreshAheadThresholdPercent'] ?? 85))),
-            'litespeed_refresh_ahead_max_pages' => max(1, min(10, absint($ui['liteSpeedRefreshAheadMaxPages'] ?? 5))),
-            'litespeed_refresh_ahead_pinned_urls' => (string) ($ui['liteSpeedRefreshAheadPinnedUrls'] ?? ''),
             'shared_cache_delivery_enabled' => !empty($shared_cache_delivery_status['enabled']),
             'shared_cache_control_verified' => !empty($shared_cache_delivery_status['controlVerified']),
             'shared_cache_control_proof_expires_at' => absint($shared_cache_delivery_status['controlProofExpiresAt'] ?? 0),
@@ -535,6 +548,7 @@ trait Ultra_Cache_WP_Settings_Rendering_Trait
             'cron_warm_start_after_cleanup'=> !empty($ui['cronWarmStartAfterCleanup']),
             'cron_warm_start_after_manual_purge'=> !empty($ui['cronWarmStartAfterManualPurge']),
             'warm_uncached_urls_on_first_visit' => !empty($ui['warmUncachedUrlsOnFirstVisit']),
+            'warm_css_bundles_enabled'     => !empty($ui['warmCssBundlesEnabled']),
             'debug_headers_enabled'        => !empty($ui['debugHeadersEnabled']),
             'cron_warm_pages_per_minute'   => max(0, absint($ui['cronWarmPagesPerMinute'])),
             'scheduled_warm_limit'         => max(1, absint($ui['scheduledWarmLimit'])),

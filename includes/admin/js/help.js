@@ -46,30 +46,10 @@
 	}
 
 	[
-		['All Off', [
-			'What it does: turns off the optimization modules that the profile system controls. It does not erase your saved lists, diagnostics, scheduling choices, or Varnish settings.',
-			'Why it helps: this is the clean testing switch. If something looks wrong, All Off gives you a quiet baseline so you can turn features back on one group at a time.',
-			'Watch for: because it disables speed features, PageSpeed can drop until you choose another profile or enable individual options again.',
-		]],
-		['Safe', [
-			'What it does: chooses the careful preset. It keeps risky frontend JavaScript timing off, enables safer cache and object-cache helpers, and preserves your visible exclusion lists.',
-			'Why it helps: it gives most sites a speed base without moving scripts too far from where WordPress printed them.',
-			'Watch for: Safe is intentionally conservative. If the site is stable and you want higher scores, Balanced or manual CSS/JS controls can go further.',
-		]],
-		['Balanced', [
-			'What it does: chooses the middle preset. It enables more CSS bundling and selected delayed JavaScript helpers, but does not turn on Delay all JS.',
-			'Why it helps: the browser gets fewer blocking files and less early JavaScript work, which can improve LCP and TBT while staying testable.',
-			'Watch for: still test menus, sliders, product pages, forms, and checkout because this preset changes more frontend timing than Safe.',
-		]],
-		['Aggressive', [
-			'What it does: chooses the speed-first preset. It uses defer as the base JavaScript strategy, turns on targeted delay modules, uses aggressive CSS bundling, warms affected pages after content saves, and enables Apache Static HTML Delivery on compatible hosts.',
-			'Why it helps: it tries to keep the first view focused on HTML, CSS, and the hero image instead of letting many scripts compete early.',
-			'Watch for: aggressive settings need scanning and testing. If a script error appears, prefer Defer Instead of Delay first, then Do Not Defer or Delay only when defer still breaks it.',
-		]],
-		['Custom', [
-			'What it does: appears when your saved settings no longer match a known preset exactly.',
-			'Why it helps: it tells you that the site is now tuned by individual switches and lists, not by one simple profile recipe.',
-			'Watch for: Custom is not bad. It just means the exact mix is yours, so keep notes when you test changes.',
+		['Start Wizard', [
+			'What it does: opens the shared Setup Wizard, which applies UltraCache’s recommended performance configuration and lets you select the JavaScript Strategy profile, Object Cache backend, and warm-up scope using the existing subsystems.',
+			'Why it helps: fresh installs and later reconfiguration use one maintained setup path instead of separate setup and optimal-settings flows.',
+			'Watch for: infrastructure credentials, schedules, exclusions, safeguards, and other user-maintained lists are preserved. If UltraCache cannot identify one primary frontend menu deterministically, it preserves the existing menu selection instead of guessing.',
 		]],
 		['Page Caching', [
 			'What it does: saves public pages as ready-made HTML files. Later anonymous visitors can receive that saved page instead of asking WordPress to build it again.',
@@ -94,11 +74,10 @@
 		['LiteSpeed HTML Cache', [
 			'What it does: writes a managed LiteSpeed cache lookup and image-variant contract, labels eligible UltraCache HTML with TTL and tags, and can populate LSCache through the existing page-warm pipeline.',
 			'Why it helps: a confirmed LiteSpeed cache engine can serve the saved public page before WordPress and PHP start while keeping orig, WebP, and AVIF HTML separate. Full purges use the site tag; affected URLs can be rebuilt and exact-purged again immediately before refill.',
-			'Stale regeneration: the optional stale-purge switch marks affected exact URL tags stale before regeneration. The shared page pipeline then rebuilds UltraCache HTML, performs a final hard exact purge, and refills every active LiteSpeed bucket.',
-			'Refresh ahead: the bounded scanner collects pinned, home, posts, shop, menu, analytics, and sitemap candidates. It uses the actual UltraCache .fresh markers and Fresh TTL rather than an uncertain LiteSpeed Age header, then queues only pages that reach the selected threshold.',
-			'Behavior test: sends two public requests for every active HTML bucket, performs one shared blocking exact purge, and sends two more requests per bucket. PASS requires an observable MISS followed by HIT after purge; hidden cache headers produce INCONCLUSIVE instead of a false PASS.',
+			'Stale regeneration: when Automation Stale While Revalidate is enabled with a real stale window, affected exact URL tags are marked stale before regeneration. The shared page pipeline then rebuilds UltraCache HTML, performs a final hard exact purge, and refills every active LiteSpeed bucket.',
+			'Detection: UltraCache identifies a LiteSpeed/OpenLiteSpeed origin from the anonymous frontend response. Native cache operation does not depend on a MISS/HIT verification test.',
 			'Production telemetry: bounded counters and the latest 30 site-purge, exact-URL purge, stale exact-URL purge, and refill operations are stored separately from behavior-test traffic. URLs are reduced to local paths and response bodies are never stored.',
-			'Watch for: Targeted refill, site warm-up, stale purge, and refresh ahead are independent controls. Native purge uses a short-lived signed same-site control response, and explicit LiteSpeed bypass responses are reported as failed refills instead of successful warm requests.',
+			'Watch for: Native purge uses a short-lived signed same-site control response, and explicit LiteSpeed bypass responses are reported as failed refills instead of successful warm requests.',
 		]],
 		['HTML Compression', [
 			'What it does: chooses whether UltraCache writes cached HTML using server-managed output, gzip, or Brotli where the server supports it.',
@@ -113,7 +92,7 @@
 		['Cache Pages with Safe Tracking Cookies', [
 			'What it does: allows public HTML cache when the only cookies involved are in your Safe Tracking Cookies list.',
 			'Why it helps: analytics cookies should not force WordPress to rebuild the same public page again and again.',
-			'Watch for: use this only for cookies that never change visible HTML. UltraCache still does not store or replay Set-Cookie headers.',
+			'Watch for: this list classifies known harmless response cookies. Cacheability Policy v2 also allows incidental response cookies such as PHPSESSID when no private/auth/cart signal exists. UltraCache still does not store or replay Set-Cookie headers.',
 		]],
 		['Enable Media Rewrite', [
 			'What it does: rewrites frontend image URLs to AVIF or WebP according to the selected output mode, but only when the optimized files already exist.',
@@ -190,8 +169,8 @@
 			'Why it helps: scripts after the hero image wait so the first visible content gets attention first.',
 			'Watch for: this depends on LCP Image Priority. If a script after the boundary creates something visible above the fold, move it to Defer Instead or exclude it.',
 		]],
-		['Delay safe third-party JS', [
-			'What it does: delays third-party analytics, pixels, ads, tracking, and marketing scripts that match the safe pattern list.',
+		['Delay third-party JS', [
+			'What it does: delays third-party analytics, pixels, ads, tracking, and marketing scripts that match the third-party delay pattern list.',
 			'Why it helps: those scripts usually do not need to block the first view, so delaying them can improve LCP and TBT.',
 			'Watch for: tracking may fire later. If a tag must run immediately for consent, payment, login, or a critical form, protect it with a visible safeguard.',
 		]],
@@ -212,13 +191,18 @@
 		]],
 		['Event triggers', [
 			'What it does: chooses which visitor actions can release the delayed JavaScript queue early.',
-			'Why it helps: if someone clicks, scrolls, types, touches, or moves the pointer, the site can wake delayed scripts before the fallback timer.',
-			'Watch for: leaving all events off gives pure timer-based release, which is good for repeatable testing.',
+			'Why it helps: if someone clicks, types, touches, or moves the pointer, the site can wake delayed scripts before the fallback timer.',
+			'Watch for: leaving all events off gives pure timer-based release unless Do not autostart JS is selected. With Do not autostart JS and no selected trigger, UltraCache enables Mouse move, Keyboard, Touch / pointer, and Click automatically.',
 		]],
 		['If no event happens, autostart JS after', [
-			'What it does: sets the fallback timer for every delayed JavaScript queue.',
-			'Why it helps: delayed scripts still run even if the visitor does nothing.',
-			'Watch for: shorter timers are safer for functionality but less aggressive for speed. Longer timers protect the first view more but can delay widgets.',
+			'What it does: sets the fallback timer for every delayed JavaScript queue, or disables that timer with Do not autostart JS.',
+			'Why it helps: timed values guarantee delayed scripts eventually run even if the visitor does nothing; Do not autostart JS keeps them waiting for a configured trigger.',
+			'Watch for: shorter timers are safer for functionality but less aggressive for speed. Do not autostart JS has no timer release, so UltraCache requires at least one event trigger.',
+		]],
+		['Minimum Delay Release', [
+			'What it does: blocks every delayed-JavaScript release until the selected minimum time has elapsed from page navigation.',
+			'Why it helps: an early click, touch, key press, mouse move, After page load trigger, or existing Auto Release request can be captured without releasing the delayed lane too early.',
+			'Watch for: this is a gate, not another release timer. Disabled preserves existing behavior; with Auto Release at 2 seconds and Minimum Delay Release at 3 seconds, release occurs no earlier than 3 seconds.',
 		]],
 		['CSS Bundling', [
 			'What it does: creates local UltraCache CSS bundles from eligible stylesheet links.',
@@ -445,7 +429,7 @@
 			'Why it helps: important text and brand fonts stay in the normal CSS flow.',
 			'Watch for: put visible heading, menu, body, product-title, and logo fonts here if delayed fonts cause late changes.',
 		]],
-		['Safe Third-Party Delay Patterns', [
+		['Delay third-party JS Patterns', [
 			'What it does: lists third-party script fragments that UltraCache may treat as safe to delay, such as analytics and tracking.',
 			'Why it helps: those scripts often do not need to run before the visitor sees the page.',
 			'Watch for: these are matching patterns for scripts already printed by the site. They do not add new scripts.',
@@ -584,6 +568,11 @@
 			"What it does: calls Elementor's native cache clear before UltraCache removes its own page cache.",
 			"Why it helps: Elementor cached element output and generated files are invalidated with UltraCache HTML, while each page\'s referenced Elementor CSS is regenerated as needed before that page is cached again.",
 			"Watch for: leave this off unless you want every Flush All Cache operation to clear Elementor\'s native cache and generated files. UltraCache does not run a global Elementor CSS regeneration; regeneration is per page as that page is stored or warmed.",
+		]],
+		['Also warm CSS bundles', [
+			'What it does: makes the three manual warm actions build the configured UltraCache CSS bundle scope together with HTML.',
+			'Why it helps: one Homepage, Configured Menu, or Full Site action can prepare both cached HTML and the CSS bundles those pages need.',
+			'Watch for: CSS Bundling must be enabled. Turn this off when you intentionally want the warm actions to rebuild HTML only.',
 		]],
 		['Menu warm-up', [
 			'What it does: chooses a saved WordPress menu as the URL source for menu warm-up.',

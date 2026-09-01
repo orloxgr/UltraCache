@@ -95,6 +95,93 @@ private function apply_lcp_boundary_defer_to_html($html, array $settings = array
         return $out . substr($html, $last);
     }
 
+/**
+ * Restore generic DELAY decisions that conflict with the page's LCP execution
+ * fingerprint. Visible user lists remain higher authority; this pass only
+ * vetoes generic UltraCache delay reasons and always restores to ordered DEFER.
+ */
+private function restore_lcp_protected_delayed_scripts_in_html($html, array $settings = array())
+    {
+        if (empty($settings['lcp_image_priority']) || !is_string($html) || '' === $html || false === stripos($html, 'text/ultracache-delayed-js')) {
+            return $html;
+        }
+
+        $context = $this->ultracache_get_lcp_protection_context($html);
+        if ('none' === (string) ($context['source'] ?? 'none') || empty($context['tokens'])) {
+            return $html;
+        }
+
+        $records = $this->collect_script_dependency_records_from_html($html);
+        if (empty($records)) {
+            return $html;
+        }
+
+        $generic_delay_reasons = array(
+            'delay-all-js',
+            'lcp-boundary-defer',
+            'non-critical-first-party',
+            'non-critical-first-party-aggressive',
+        );
+        $replacements = array();
+        foreach ($records as $index => $record) {
+            if (empty($record['delayed']) || empty($record['has_src'])) {
+                continue;
+            }
+            $open = (string) ($record['open'] ?? '');
+            $reason = sanitize_key((string) $this->extract_attribute_from_html_tag($open, 'data-ultracache-delay-reason'));
+            if (!in_array($reason, $generic_delay_reasons, true)) {
+                continue;
+            }
+
+            $handle = (string) ($record['handle'] ?? '');
+            $src = (string) ($record['src'] ?? '');
+            $matched = $this->ultracache_lcp_protection_context_matches_script($handle, $src, $open, $settings, $context);
+            if ('' === $matched) {
+                continue;
+            }
+
+            $replacement = $this->ultracache_build_script_record_for_lane($record, 'defer', $settings, 'lcp-protected');
+            if (!is_string($replacement) || '' === $replacement || $replacement === (string) ($record['tag'] ?? '')) {
+                continue;
+            }
+            $replacement = $this->ultracache_add_lcp_protection_attributes_to_script_tag(
+                $replacement,
+                (string) ($context['source'] ?? 'lcp'),
+                $matched
+            );
+            $replacements[(int) $index] = $replacement;
+        }
+
+        if (empty($replacements)) {
+            return $html;
+        }
+        return $this->ultracache_apply_script_record_replacements_by_offset($html, $records, $replacements);
+    }
+
+private function ultracache_add_lcp_protection_attributes_to_script_tag($tag, $source, $matched)
+    {
+        if (!is_string($tag) || '' === $tag || false === stripos($tag, '<script')) {
+            return $tag;
+        }
+        try {
+            if (class_exists('WP_HTML_Tag_Processor')) {
+                $processor = new WP_HTML_Tag_Processor($tag);
+                if ($processor->next_tag('SCRIPT')) {
+                    $processor->set_attribute('data-ultracache-lcp-protected', '1');
+                    $processor->set_attribute('data-ultracache-lcp-source', sanitize_key((string) $source));
+                    $processor->set_attribute('data-ultracache-lcp-evidence', sanitize_html_class((string) $matched));
+                    $updated = $processor->get_updated_html();
+                    if (is_string($updated) && '' !== $updated) {
+                        return $updated;
+                    }
+                }
+            }
+        } catch (Throwable $error) {
+            return $tag;
+        }
+        return $tag;
+    }
+
 private function get_lcp_boundary_external_script_tags($html)
     {
         if (!is_string($html) || '' === $html || false === stripos($html, '<script')) {
@@ -316,6 +403,14 @@ private function find_lcp_boundary_offset($html)
             return max(1, (int) $manual_target['boundary_offset']);
         }
 
+        // Browser-observed mappings are the persistent frontend truth. Once a
+        // mapping exists, use its actual selector/resource boundary before the
+        // provisional server-side SR7/generic heuristic.
+        $observed_boundary = $this->ultracache_find_observed_lcp_boundary_offset($html);
+        if ($observed_boundary > 0) {
+            return max(1, (int) $observed_boundary);
+        }
+
         $candidate = $this->find_manual_lcp_candidate($html);
         if (null === $candidate) {
             $candidate = $this->find_best_sr7_lcp_candidate($html);
@@ -528,19 +623,15 @@ private function should_delay_lcp_boundary_script($handle, $src, $tag, array $se
             return false;
         }
 
+        if ($this->should_protect_elementor_compatibility_script($handle, $src, $tag, $settings)) {
+            return false;
+        }
+
         if (!empty($settings['_lcp_boundary_callback_dependency_fragments']) && is_array($settings['_lcp_boundary_callback_dependency_fragments'])) {
             $exclude_fragments = (array) $settings['_lcp_boundary_callback_dependency_fragments'];
             if ($this->script_matches_fragment_list($handle, $src, $exclude_fragments) || $this->lcp_boundary_script_tag_matches_fragments($tag, $exclude_fragments)) {
                 return false;
             }
-        }
-
-        if ($this->script_handle_has_wp_inline_companion_segments($handle)) {
-            return false;
-        }
-
-        if ($this->script_handle_has_enqueued_dependents($handle)) {
-            return false;
         }
 
         $src_lc = strtolower((string) $src);
@@ -584,6 +675,14 @@ private function maybe_build_lcp_boundary_delayed_script_tag($tag, array $settin
         }
 
         if ($this->is_script_user_force_deferred($handle, $src, $tag, $settings)) {
+            return $this->add_defer_attribute_to_script_tag($tag, true);
+        }
+
+        if ($this->should_protect_elementor_compatibility_script($handle, $src, $tag, $settings)) {
+            return $this->add_defer_attribute_to_script_tag($tag, true);
+        }
+
+        if ($this->should_protect_wpbakery_animation_script($handle, $src, $tag, $settings)) {
             return $this->add_defer_attribute_to_script_tag($tag, true);
         }
 

@@ -613,6 +613,12 @@ function ultracache_uninstall_delete_state_prefix($state_prefix)
         return false;
     }
 
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Idempotent uninstall checks only the validated UltraCache-owned locks table before deleting state rows.
+    $existing = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
+    if ((string) $existing !== $table) {
+        return true;
+    }
+
     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- Uninstall cleanup deletes only validated UltraCache-owned state rows.
     $deleted = $wpdb->query(
         $wpdb->prepare(
@@ -672,6 +678,7 @@ function ultracache_run_uninstall_cleanup()
         $ultracache_options = array(
             'ultracache_cron_warm_state',
             'ultracache_crawl_scope_summary',
+            'ultracache_wpml_topology_v1',
             'ultracache_cron_warm_lock_atomic',
             'ultracache_wp_cache_managed',
             'ultracache_media_diagnostics_v1',
@@ -682,6 +689,7 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_avif_encoder_self_test_v1',
             'ultracache_media_queue_build_state_v1',
             'ultracache_media_background_paused_v1',
+            'ultracache_media_background_paused_v2',
             'ultracache_media_stale_worker_state_v1',
             'ultracache_media_queue_rebuild_generation_v1',
             'ultracache_media_replacement_active_job_v1',
@@ -700,6 +708,7 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_settings_google_fonts_last_scan',
             'ultracache_opcache_last_flush_at',
             'ultracache_external_cache_detection',
+            'ultracache_elementor_js_compatibility_knowledge',
             'ultracache_action_queue_heavy_lock_v1',
             'ultracache_warmup_generation',
             'ultracache_warm_runtime_reset_version',
@@ -709,10 +718,13 @@ function ultracache_run_uninstall_cleanup()
             'ultracache_varnish_refresh_ahead_state_v1',
             'ultracache_varnish_refresh_candidates_v1',
             'ultracache_varnish_metrics_v1',
+            'ultracache_litespeed_detection_v1',
+    'ultracache_woocommerce_endpoint_contract_v1',
             'ultracache_litespeed_metrics_v1',
             'ultracache_litespeed_diagnostic_behavior_v1',
             'ultracache_litespeed_refresh_candidates_v1',
             'ultracache_litespeed_refresh_ahead_state_v1',
+            'ultracache_litespeed_automation_contract',
             'ultracache_varnish_diagnostic_basic_v1',
             'ultracache_varnish_endpoint_capabilities_v1',
             'ultracache_varnish_esi_capability_v1',
@@ -866,6 +878,7 @@ function ultracache_run_uninstall_cleanup()
         foreach (array(
             'ultracache_object_cache_last_flush_report',
             'ultracache_crawl_scope_summary',
+            'ultracache_wpml_topology_v1',
             'ultracache_cache_asset_refs_db_version',
             'ultracache_css_rewrite_map_db_version',
             'ultracache_locks_db_version',

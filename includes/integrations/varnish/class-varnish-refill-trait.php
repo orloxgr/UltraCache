@@ -229,44 +229,52 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
     /**
      * Return request arguments for one public Varnish refill request.
      *
-     * @param string $bucket UltraCache HTML variant bucket.
+     * @param string $bucket             UltraCache HTML variant bucket.
+     * @param bool   $authenticated_warm Whether to send the authenticated internal warm contract.
      * @return array
      */
-    private static function get_varnish_refill_request_args($bucket)
+    private static function get_varnish_refill_request_args($bucket, $authenticated_warm = true)
     {
         $bucket = in_array((string) $bucket, array('orig', 'webp', 'avif'), true) ? (string) $bucket : 'orig';
         $accept = function_exists('ultracache_get_accept_header_for_html_bucket')
             ? ultracache_get_accept_header_for_html_bucket($bucket)
             : 'text/html,application/xhtml+xml';
 
-        $runtime_token = function_exists('ultracache_create_runtime_control_token')
+        $authenticated_warm = (bool) $authenticated_warm;
+        $runtime_token = $authenticated_warm && function_exists('ultracache_create_runtime_control_token')
             ? ultracache_create_runtime_control_token()
             : '';
+        $headers = array(
+            'Accept' => $accept,
+            'PageSpeed' => 'off',
+            'ModPagespeed' => 'off',
+        );
+        if ($authenticated_warm) {
+            $headers['X-UltraCache-Warm'] = '1';
+            $headers['X-UltraCache-Internal-Request'] = '1';
+            $headers['X-UltraCache-Token'] = $runtime_token;
+        }
 
         return array(
             'method' => 'GET',
-            'timeout' => 10,
+            'timeout' => function_exists('ultracache_get_php_max_execution_time_seconds')
+                ? ultracache_get_php_max_execution_time_seconds()
+                : max(0, (int) ini_get('max_execution_time')),
             'redirection' => 0,
             'user-agent' => 'Mozilla/5.0 (compatible; UltraCache-Varnish-Refill/' . (defined('ULTRACACHE_VERSION') ? ULTRACACHE_VERSION : 'unknown') . '; +https://wordpress.org)',
-            'headers' => array_filter(array(
-                'Accept' => $accept,
-                'PageSpeed' => 'off',
-                'ModPagespeed' => 'off',
-                'X-UltraCache-Warm' => '1',
-                'X-UltraCache-Internal-Request' => '1',
-                'X-UltraCache-Token' => $runtime_token,
-            )),
+            'headers' => array_filter($headers),
         );
     }
 
     /**
      * Send one bounded public loopback request for a Varnish HTML variant.
      *
-     * @param string $url    Public local URL.
-     * @param string $bucket UltraCache HTML variant bucket.
+     * @param string $url                Public local URL.
+     * @param string $bucket             UltraCache HTML variant bucket.
+     * @param bool   $authenticated_warm Whether to use the authenticated warm request contract.
      * @return array|WP_Error
      */
-    private static function send_single_varnish_refill_request($url, $bucket)
+    private static function send_single_varnish_refill_request($url, $bucket, $authenticated_warm = true)
     {
         $url = esc_url_raw((string) $url);
         if ('' === $url
@@ -278,13 +286,16 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
             );
         }
 
-        $args = self::get_varnish_refill_request_args($bucket);
-        $runtime_token = (string) ($args['headers']['X-UltraCache-Token'] ?? '');
-        if ('' === $runtime_token) {
-            return new WP_Error(
-                'ultracache_internal_auth_unavailable',
-                self::maybe_translate('Could not authenticate the internal Varnish refill request.')
-            );
+        $authenticated_warm = (bool) $authenticated_warm;
+        $args = self::get_varnish_refill_request_args($bucket, $authenticated_warm);
+        if ($authenticated_warm) {
+            $runtime_token = (string) ($args['headers']['X-UltraCache-Token'] ?? '');
+            if ('' === $runtime_token) {
+                return new WP_Error(
+                    'ultracache_internal_auth_unavailable',
+                    self::maybe_translate('Could not authenticate the internal Varnish refill request.')
+                );
+            }
         }
 
         $args['sslverify'] = !function_exists('ultracache_is_local_https_url') || !ultracache_is_local_https_url($url);
@@ -365,6 +376,11 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
             'ultraCache' => self::get_varnish_response_header($response, 'x-ultra-cache'),
             'ultraCacheSource' => self::get_varnish_response_header($response, 'x-ultra-cache-source'),
             'ultraCacheVariant' => self::get_varnish_response_header($response, 'x-ultracache-variant'),
+            'ultraCacheCacheable' => self::get_varnish_response_header($response, 'x-ultracache-cacheable'),
+            'ultraCachePageCacheable' => self::get_varnish_response_header($response, 'x-ultracache-page-cacheable'),
+            'sharedCacheState' => self::get_varnish_response_header($response, 'x-ultracache-shared-cache-state'),
+            'sharedCacheReason' => self::get_varnish_response_header($response, 'x-ultracache-shared-cache-reason'),
+            'cacheControl' => self::get_varnish_response_header($response, 'cache-control'),
             'ultraCacheEsi' => self::get_varnish_response_header($response, 'x-ultracache-esi'),
             'ultraCacheEsiCount' => self::get_varnish_response_header($response, 'x-ultracache-esi-count'),
             'ultraCacheEsiUniqueCount' => self::get_varnish_response_header($response, 'x-ultracache-esi-unique-count'),
@@ -379,9 +395,30 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
         $esi_unique_count = $esi_parent ? max(0, min($esi_fragment_count, (int) $headers['ultraCacheEsiUniqueCount'])) : 0;
         $esi_min_ttl = $esi_parent ? max(0, min(WEEK_IN_SECONDS, (int) $headers['ultraCacheEsiTtlMin'])) : 0;
         $esi_max_ttl = $esi_parent ? max($esi_min_ttl, min(WEEK_IN_SECONDS, (int) $headers['ultraCacheEsiTtlMax'])) : 0;
+        $cookie_names = function_exists('ultracache_get_http_response_set_cookie_names')
+            ? ultracache_get_http_response_set_cookie_names($response)
+            : array();
+        $cookie_policy = function_exists('ultracache_response_cookie_cache_policy')
+            ? ultracache_response_cookie_cache_policy($cookie_names, self::get_settings())
+            : array('decision' => empty($cookie_names) ? 'none' : 'reject', 'reason' => 'response-cookie-policy-unavailable');
+        $ultra_status = strtoupper(trim((string) $headers['ultraCache']));
+        $cache_control = strtolower((string) $headers['cacheControl']);
+        $origin_public = !in_array($ultra_status, array('BYPASS', 'SKIP'), true)
+            && 1 !== preg_match('/(?:^|[,\s])(private|no-store|no-cache)(?:$|[,=\s])/', $cache_control);
+        $cookie_handoff_deferred = 200 === $response_code
+            && !empty($cookie_names)
+            && 'allow' === (string) ($cookie_policy['decision'] ?? '')
+            && $origin_public
+            && ('deferred-response-cookie' === sanitize_key((string) $headers['sharedCacheState'])
+                || in_array($ultra_status, array('STORE', 'HIT'), true));
+        $shared_cache_blocked = 200 === $response_code
+            && !empty($cookie_names)
+            && 'reject' === (string) ($cookie_policy['decision'] ?? '');
 
         return array(
             'success' => 200 === $response_code,
+            'warning' => $shared_cache_blocked,
+            'sharedCacheBlocked' => $shared_cache_blocked,
             'httpCode' => $response_code,
             'status' => $is_redirect ? 'REDIRECT' : (string) ($classification['status'] ?? 'INCONCLUSIVE'),
             'varnishDetected' => !empty($classification['varnishDetected']),
@@ -399,6 +436,10 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
             'esiUniqueFragmentCount' => $esi_unique_count,
             'esiMinTtl' => $esi_min_ttl,
             'esiMaxTtl' => $esi_max_ttl,
+            'setCookieNames' => $cookie_names,
+            'responseCookiePolicy' => $cookie_policy,
+            'cookieHandoffDeferred' => $cookie_handoff_deferred,
+            'sharedCacheState' => sanitize_key((string) $headers['sharedCacheState']),
         );
     }
 
@@ -454,11 +495,12 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
      * Send one public refill request and retry only transient transport/server
      * failures. A successful or terminal HTTP response is never repeated.
      *
-     * @param string $url    Public local URL.
-     * @param string $bucket HTML variant bucket.
+     * @param string $url                Public local URL.
+     * @param string $bucket             HTML variant bucket.
+     * @param bool   $authenticated_warm Whether to use the authenticated warm request contract.
      * @return array
      */
-    private static function send_varnish_refill_request_with_transient_retry($url, $bucket)
+    private static function send_varnish_refill_request_with_transient_retry($url, $bucket, $authenticated_warm = true)
     {
         $max_attempts = (int) apply_filters('ultracache_varnish_refill_max_attempts', 3, $url, $bucket);
         $max_attempts = max(1, min(4, $max_attempts));
@@ -466,7 +508,7 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
         $summary = array();
 
         for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
-            $summary = self::summarize_varnish_refill_response(self::send_single_varnish_refill_request($url, $bucket));
+            $summary = self::summarize_varnish_refill_response(self::send_single_varnish_refill_request($url, $bucket, $authenticated_warm));
             $summary['attempt'] = $attempt;
             $summary['retryable'] = empty($summary['success']) && self::is_varnish_refill_failure_retryable($summary);
             $attempts[] = $summary;
@@ -564,6 +606,7 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
         $refilled_count = 0;
         $retryable_failure_count = 0;
         $terminal_failure_count = 0;
+        $warning_count = 0;
         $esi_parent_variant_count = 0;
         $esi_fragment_reference_count = 0;
         $esi_unique_fragment_reference_count = 0;
@@ -588,10 +631,81 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
             $request_result = self::send_varnish_refill_request_with_transient_retry($url, $bucket);
             $refill = is_array($request_result['summary'] ?? null) ? $request_result['summary'] : array();
             $refill_attempts = is_array($request_result['attempts'] ?? null) ? $request_result['attempts'] : array();
+            $request_count = max(1, (int) ($request_result['attemptCount'] ?? count($refill_attempts)));
+            $cookie_handoff_required = !empty($refill['cookieHandoffDeferred']);
+            $cookie_handoff_cookie_names = array_values((array) ($refill['setCookieNames'] ?? array()));
+            $cookie_handoff_policy_reason = sanitize_key((string) (($refill['responseCookiePolicy']['reason'] ?? '')));
+            $cookie_handoff_completed = false;
+            $cookie_handoff_verified = false;
+            $cookie_handoff_verification_status = '';
+
+            if (!empty($refill['success']) && $cookie_handoff_required) {
+                if (!self::invoke_varnish_refill_heartbeat($heartbeat, 'varnish-cookie-handoff-before', $bucket)) {
+                    return self::normalize_varnish_refill_result_state(array(
+                        'success' => false,
+                        'retryable' => true,
+                        'terminal' => false,
+                        'ownershipLost' => true,
+                        'failureClass' => 'ownership-lost',
+                        'message' => self::maybe_translate('Warm-up ownership expired before the clean Varnish cookie handoff completed.'),
+                        'variantCount' => count($details),
+                        'refilledCount' => $refilled_count,
+                        'details' => $details,
+                    ));
+                }
+
+                // The first authenticated warm request may legitimately boot WordPress and emit
+                // an incidental Set-Cookie while storing the UltraCache object. The clean handoff
+                // must be a normal anonymous public request so advanced-cache.php can satisfy it
+                // before plugin code runs and Varnish can store the cookie-free representation.
+                $clean_result = self::send_varnish_refill_request_with_transient_retry($url, $bucket, false);
+                $clean_summary = is_array($clean_result['summary'] ?? null) ? $clean_result['summary'] : array();
+                $request_count += max(1, (int) ($clean_result['attemptCount'] ?? 1));
+                $refill_attempts = array_merge($refill_attempts, (array) ($clean_result['attempts'] ?? array()));
+
+                if (!empty($clean_summary['success']) && empty($clean_summary['cookieHandoffDeferred'])) {
+                    $refill = $clean_summary;
+                    $cookie_handoff_completed = true;
+                    $clean_status = strtoupper((string) ($clean_summary['status'] ?? 'INCONCLUSIVE'));
+                    if ('HIT' === $clean_status || 'STALE' === $clean_status) {
+                        $cookie_handoff_verified = true;
+                        $cookie_handoff_verification_status = $clean_status;
+                    } elseif (!empty($clean_summary['varnishDetected']) && 'MISS' === $clean_status) {
+                        $verify_result = self::send_varnish_refill_request_with_transient_retry($url, $bucket, false);
+                        $verify_summary = is_array($verify_result['summary'] ?? null) ? $verify_result['summary'] : array();
+                        $request_count += max(1, (int) ($verify_result['attemptCount'] ?? 1));
+                        $refill_attempts = array_merge($refill_attempts, (array) ($verify_result['attempts'] ?? array()));
+                        $verify_status = strtoupper((string) ($verify_summary['status'] ?? 'INCONCLUSIVE'));
+                        $cookie_handoff_verification_status = $verify_status;
+                        if (!empty($verify_summary['success']) && in_array($verify_status, array('HIT', 'STALE'), true)) {
+                            $refill = $verify_summary;
+                            $cookie_handoff_verified = true;
+                        } else {
+                            $refill['warning'] = true;
+                            $refill['detail'] = self::maybe_translate('A clean Varnish refill completed after an incidental response cookie, but the optional follow-up request did not verify an outer-cache HIT.');
+                        }
+                    }
+                } else {
+                    $refill = $clean_summary;
+                    if (!empty($refill['success'])) {
+                        $refill['warning'] = true;
+                        $refill['detail'] = self::maybe_translate('The public page remained cacheable in UltraCache, but the clean shared-cache handoff still carried a response cookie and could not populate Varnish in this pass.');
+                    }
+                }
+            }
+
             $success = !empty($refill['success']);
+            $shared_cache_blocked = !empty($refill['sharedCacheBlocked']);
             $all_ok = $all_ok && $success;
             if ($success) {
-                ++$refilled_count;
+                $shared_cache_refill_completed = !$shared_cache_blocked
+                    && (!$cookie_handoff_required || $cookie_handoff_completed);
+                if ($shared_cache_refill_completed) {
+                    ++$refilled_count;
+                }
+                if (!empty($refill['warning']) || $shared_cache_blocked) {
+                    ++$warning_count;
+                }
                 if (!empty($refill['esiParent'])) {
                     ++$esi_parent_variant_count;
                     $esi_fragment_reference_count += max(0, (int) ($refill['esiFragmentCount'] ?? 0));
@@ -621,12 +735,22 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
                 'refillStatus' => (string) ($refill['status'] ?? 'INCONCLUSIVE'),
                 'refillEvidence' => (string) ($refill['evidence'] ?? ''),
                 'detail' => (string) ($refill['detail'] ?? ''),
-                'attemptCount' => max(1, (int) ($request_result['attemptCount'] ?? count($refill_attempts))),
+                'attemptCount' => $request_count,
+                'cookieHandoffRequired' => $cookie_handoff_required,
+                'cookieHandoffCompleted' => $cookie_handoff_completed,
+                'cookieHandoffVerified' => $cookie_handoff_verified,
+                'cookieHandoffVerificationStatus' => $cookie_handoff_verification_status,
+                'setCookieNames' => $cookie_handoff_cookie_names,
+                'responseCookiePolicy' => $cookie_handoff_policy_reason,
+                'sharedCacheBlocked' => $shared_cache_blocked,
                 'attempts' => array_map(
-                    static function ($attempt_summary) {
+                    static function ($attempt_summary, $attempt_index) {
                         $attempt_summary = is_array($attempt_summary) ? $attempt_summary : array();
                         return array(
-                            'attempt' => max(1, (int) ($attempt_summary['attempt'] ?? 1)),
+                            // Individual retry helpers number their own local histories from 1.
+                            // After cookie handoff merges warm, clean, and verification histories,
+                            // expose one monotonic sequence for the combined diagnostic timeline.
+                            'attempt' => max(1, (int) $attempt_index + 1),
                             'success' => !empty($attempt_summary['success']),
                             'retryable' => !empty($attempt_summary['retryable']),
                             'httpCode' => max(0, (int) ($attempt_summary['httpCode'] ?? 0)),
@@ -636,7 +760,8 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
                             'detail' => sanitize_text_field((string) ($attempt_summary['detail'] ?? '')),
                         );
                     },
-                    array_slice($refill_attempts, 0, 4)
+                    array_slice($refill_attempts, 0, 4),
+                    array_keys(array_slice($refill_attempts, 0, 4))
                 ),
                 'esiParent' => !empty($refill['esiParent']),
                 'esiFragmentCount' => max(0, (int) ($refill['esiFragmentCount'] ?? 0)),
@@ -672,12 +797,14 @@ trait Ultra_Cache_WP_Varnish_Refill_Trait
             'success' => $all_ok,
             'retryable' => $retryable,
             'terminal' => !$all_ok && !$retryable,
-            'warning' => false,
+            'warning' => $all_ok && $warning_count > 0,
             'failureClass' => $all_ok
                 ? ''
                 : sanitize_key((string) ($first_failed_detail['failureClass'] ?? ($retryable ? 'varnish-http-transient' : 'varnish-http-terminal'))),
             'message' => $all_ok
-                ? self::maybe_translate_sprintf('Varnish public refill completed for %d HTML variant(s).', count($details))
+                ? ($refilled_count === count($details)
+                    ? self::maybe_translate_sprintf('Varnish public refill completed for %d HTML variant(s).', count($details))
+                    : self::maybe_translate_sprintf('Varnish refill requests completed, but only %d of %d HTML variant(s) were eligible for shared-cache refill.', $refilled_count, count($details)))
                 : self::maybe_translate('Varnish public refill failed for one or more HTML variants.'),
             'variantCount' => count($details),
             'refilledCount' => $refilled_count,

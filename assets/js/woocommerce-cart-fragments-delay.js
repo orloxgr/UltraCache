@@ -9,6 +9,7 @@
 	var config = window.ultracacheWooCartFragmentsDelayConfig || {};
 	var autoEvents = Array.isArray(config.autoEvents) ? config.autoEvents : [];
 	var autoAfterLoad = !!config.autoAfterLoad;
+	var autoTimerEnabled = config.autoTimerEnabled !== false;
 	var autoDelayMs = typeof config.autoDelayMs === 'number' ? config.autoDelayMs : parseInt(config.autoDelayMs || 50, 10);
 	var skipCartCookies = config.skipCartCookies !== false;
 	var released = false;
@@ -264,6 +265,7 @@
 		mark('active', '1');
 		mark('auto-delay-ms', autoDelayMs);
 		mark('auto-after-load', autoAfterLoad ? '1' : '0');
+		mark('auto-timer-enabled', autoTimerEnabled ? '1' : '0');
 		mark('auto-events', autoEvents.join(','));
 
 		if (autoEvents && autoEvents.length) {
@@ -292,9 +294,11 @@
 			}, 0);
 		}
 
-		afterDomReady(function () {
-			release('timer');
-		}, autoDelayMs);
+		if (autoTimerEnabled) {
+			afterDomReady(function () {
+				release('timer');
+			}, autoDelayMs);
+		}
 	}
 
 	function installWhenReady(tries) {

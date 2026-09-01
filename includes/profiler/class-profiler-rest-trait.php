@@ -25,11 +25,16 @@ trait Ultra_Cache_Profiler_Rest_Trait
         $url = esc_url_raw($url);
         $parts = wp_parse_url($url);
         $home_parts = wp_parse_url(home_url('/'));
-        $home_host = isset($home_parts['host']) ? strtolower((string) $home_parts['host']) : '';
         $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
 
-        if ('' === $home_host || '' === $host || $host !== $home_host) {
+        if ('' === $host || (function_exists('ultracache_is_public_site_url') && !ultracache_is_public_site_url($url))) {
             return new WP_Error('ultracache_profile_url_not_allowed', __('Only same-site URLs can be scanned.', 'ultracache'));
+        }
+        if (!function_exists('ultracache_is_public_site_url')) {
+            $home_host = isset($home_parts['host']) ? strtolower((string) $home_parts['host']) : '';
+            if ('' === $home_host || $host !== $home_host) {
+                return new WP_Error('ultracache_profile_url_not_allowed', __('Only same-site URLs can be scanned.', 'ultracache'));
+            }
         }
 
         if (function_exists('ultracache_is_strict_frontend_loopback_url') && !ultracache_is_strict_frontend_loopback_url($url)) {

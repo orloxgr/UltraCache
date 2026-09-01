@@ -53,6 +53,10 @@
 			changeMediaLibraryReplacementCleanupPreviewPage,
 			runMediaConversionTest,
 			openMediaConversionTestModal,
+			isMediaLibraryReplacementRollbackRunnerReady,
+			getMediaLibraryReplacementRollbackStatus,
+			runMediaLibraryReplacementRollback,
+			getMediaLibraryReplacementRollbackLabel,
 			getMediaLibraryReplacementDeleteDisabledReason,
 			getMediaLibraryReplacementRecoveryStatus,
 			isMediaLibraryReplacementRunnerReady,
@@ -76,18 +80,6 @@
 			openMediaLibraryReplacementPreviewModal,
 			openMediaLibraryReplacementDbPreviewModal,
 			openMediaLibraryReplacementCleanupPreviewModal,
-			copyMediaLibraryReplacementFiles,
-			prepareMediaLibraryReplacementMetadataUpdates,
-			applyMediaLibraryReplacementMetadataUpdates,
-			scanMediaLibraryReplacementReferences,
-			matchMediaLibraryReplacementReferences,
-			applyMediaLibraryReplacementDatabaseReplacements,
-			verifyMediaLibraryReplacementDatabaseReplacements,
-			rollbackMediaLibraryReplacementDatabaseReplacements,
-			scanMediaLibraryReplacementThemeCssReferences,
-			previewMediaLibraryReplacementThemeCssReplacements,
-			applyMediaLibraryReplacementThemeCssReplacements,
-			verifyMediaLibraryReplacementThemeCssReplacements,
 			rollbackMediaLibraryReplacementMetadataUpdates
 		} = source;
 
@@ -751,12 +743,15 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 					(() => {
 						const deleteOriginalsDisabledReason = getMediaLibraryReplacementDeleteDisabledReason();
 						const replacementRecovery = getMediaLibraryReplacementRecoveryStatus();
+						const rollbackStatus = getMediaLibraryReplacementRollbackStatus();
+						const rollbackAvailable = !!rollbackStatus.rollbackAvailable;
+						const rollbackDisabledReason = rollbackAvailable ? '' : String(rollbackStatus.message || __('There are no applied replacement changes available to roll back.', 'ultracache'));
 						const workflowBusy = busy || mediaConversionTestBusy || mediaLibraryReplacementBusy || !isMediaLibraryReplacementRunnerReady() || isMediaLibraryReplacementOwnedByAnotherDashboard();
 						const prepareState = getMediaLibraryReplacementWorkflowButtonState('prepare', deleteOriginalsDisabledReason);
 						const prepareStatus = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.prepare && typeof mediaLibraryReplacementStatus.prepare === 'object'
 							? mediaLibraryReplacementStatus.prepare
 							: {};
-						const prepareFailureGuidance = __('Preparation failed. Open Advanced / Manual Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
+						const prepareFailureGuidance = __('Preparation failed. Open Advanced / Recovery and click “Restart Replacement Plan”, then run “Prepare Replacement” again.', 'ultracache');
 						const doState = getMediaLibraryReplacementWorkflowButtonState('do', deleteOriginalsDisabledReason);
 						const doStatus = mediaLibraryReplacementStatus && mediaLibraryReplacementStatus.do && typeof mediaLibraryReplacementStatus.do === 'object'
 							? mediaLibraryReplacementStatus.do
@@ -860,17 +855,6 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 									doStatus.canContinue ? h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'continue-media-library-replacement-help' },
 										__('Keeps every completed metadata and database change, excludes UltraCache internal state, and retries only unresolved replacement rows.', 'ultracache')
 									) : null,
-									doStatus.canRestartDatabase ? h('button', {
-										type: 'button',
-										className: 'uc-btn w-full text-white py-3 font-bold',
-										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-										onClick: () => recoverMediaLibraryReplacementWorkflow('restart_database'),
-										disabled: workflowBusy,
-										key: 'restart-media-library-replacement-database',
-									}, __('Restart Database Replacement', 'ultracache')) : null,
-									doStatus.canRestartDatabase ? h('p', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'restart-media-library-replacement-database-help' },
-										__('Preserves completed metadata and database changes, rebuilds only the unresolved database plan from the current database state, and then resumes replacement.', 'ultracache')
-									) : null,
 								]) : null,
 								h('div', { className: 'space-y-1', key: 'verify-media-library-replacement-workflow-group' }, [
 									h('button', {
@@ -901,17 +885,8 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 							replacementRecovery.resumable ? h('div', { className: 'text-xs text-emerald-300 leading-relaxed', key: 'media-library-replacement-resumable' }, __('A paused server workflow was recovered. Use the active workflow button to continue from the saved phase and cursor.', 'ultracache')) : null,
 							!isMediaLibraryReplacementReadinessRunnerReady() ? h('div', { className: 'text-xs text-zinc-500 leading-relaxed', key: 'media-library-replacement-help' }, getMediaLibraryReplacementRunnerUnavailableMessage()) : null,
 						h('details', { className: 'pt-2', key: 'media-library-replacement-advanced-controls' }, [
-								h('summary', { className: 'cursor-pointer text-sm font-semibold text-zinc-200', style: { paddingBottom: '10px' } }, __('Advanced / Manual Recovery', 'ultracache')),
+								h('summary', { className: 'cursor-pointer text-sm font-semibold text-zinc-200', style: { paddingBottom: '10px' } }, __('Advanced / Recovery', 'ultracache')),
 								h('div', { className: 'mt-3 uc-media-batch-actions', style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, [
-									h('button', {
-										type: 'button',
-										className: getMediaLibraryReplacementActionClass('prepare', 'uc-btn w-full text-white py-3 font-bold'),
-										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
-										onClick: () => prepareMediaLibraryReplacementFoundation(false),
-										disabled: workflowBusy || prepareState.disabled,
-										title: prepareState.reason || '',
-										key: 'prepare-media-library-replacement',
-									}, mediaLibraryReplacementBusy ? __('Preparing replacement registry…', 'ultracache') : __('Prepare / Resume Library Replacement', 'ultracache')),
 									h('button', {
 										type: 'button',
 										className: getMediaLibraryReplacementActionClass('restart', 'uc-btn w-full text-white py-3 font-bold'),
@@ -921,24 +896,18 @@ function renderMediaLibraryReplacementCleanupPreviewModal() {
 										title: replacementRecovery.restartBlockedReason || '',
 										key: 'restart-media-library-replacement',
 									}, mediaLibraryReplacementBusy ? __('Restarting replacement plan…', 'ultracache') : __('Restart Replacement Plan', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('preview', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: openMediaLibraryReplacementPreviewModal, disabled: workflowBusy, key: 'preview-media-library-replacement' }, mediaLibraryReplacementBusy ? __('Loading replacement preview…', 'ultracache') : __('Preview Library Mapping', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('copy', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: copyMediaLibraryReplacementFiles, disabled: workflowBusy, key: 'copy-media-library-replacement-files' }, mediaLibraryReplacementBusy ? __('Copying replacement files…', 'ultracache') : __('Copy Replacement Files', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('metadata_prepare', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: prepareMediaLibraryReplacementMetadataUpdates, disabled: workflowBusy, key: 'prepare-media-library-replacement-metadata' }, mediaLibraryReplacementBusy ? __('Preparing metadata plans…', 'ultracache') : __('Prepare Metadata Updates', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('metadata_apply', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: applyMediaLibraryReplacementMetadataUpdates, disabled: workflowBusy, key: 'apply-media-library-replacement-metadata' }, mediaLibraryReplacementBusy ? __('Switching metadata…', 'ultracache') : __('Switch Attachment Metadata', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('refs_scan', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: scanMediaLibraryReplacementReferences, disabled: workflowBusy, key: 'scan-media-library-replacement-references' }, mediaLibraryReplacementBusy ? __('Scanning references…', 'ultracache') : __('Scan Database References', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('refs_match', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: matchMediaLibraryReplacementReferences, disabled: workflowBusy, key: 'match-media-library-replacement-references' }, mediaLibraryReplacementBusy ? __('Matching references…', 'ultracache') : __('Match Database References', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('db_preview', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: openMediaLibraryReplacementDbPreviewModal, disabled: workflowBusy, key: 'preview-media-library-replacement-db-replacements' }, mediaLibraryReplacementBusy ? __('Loading DB preview…', 'ultracache') : __('Preview DB Replacements', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('db_apply', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: applyMediaLibraryReplacementDatabaseReplacements, disabled: workflowBusy, key: 'apply-media-library-replacement-db-replacements' }, mediaLibraryReplacementBusy ? __('Applying DB replacements…', 'ultracache') : __('Apply DB Replacements', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('db_verify', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: verifyMediaLibraryReplacementDatabaseReplacements, disabled: workflowBusy, key: 'verify-media-library-replacement-db-replacements' }, mediaLibraryReplacementBusy ? __('Verifying DB replacements…', 'ultracache') : __('Verify DB Replacements', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('theme_css_scan', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: scanMediaLibraryReplacementThemeCssReferences, disabled: workflowBusy, key: 'scan-media-library-replacement-theme-css' }, mediaLibraryReplacementBusy ? __('Scanning theme CSS…', 'ultracache') : __('Scan Theme CSS References', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('theme_css_preview', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: previewMediaLibraryReplacementThemeCssReplacements, disabled: workflowBusy, key: 'preview-media-library-replacement-theme-css' }, mediaLibraryReplacementBusy ? __('Loading theme CSS preview…', 'ultracache') : __('Preview Theme CSS Replacements', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('theme_css_apply', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: applyMediaLibraryReplacementThemeCssReplacements, disabled: workflowBusy, key: 'apply-media-library-replacement-theme-css' }, mediaLibraryReplacementBusy ? __('Applying theme CSS…', 'ultracache') : __('Apply Theme CSS Replacements', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('theme_css_verify', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: verifyMediaLibraryReplacementThemeCssReplacements, disabled: workflowBusy, key: 'verify-media-library-replacement-theme-css' }, mediaLibraryReplacementBusy ? __('Verifying theme CSS…', 'ultracache') : __('Verify Theme CSS Replacements', 'ultracache')),
-									h('button', { type: 'button', className: 'uc-btn w-full text-white py-3 font-bold', style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: rollbackMediaLibraryReplacementDatabaseReplacements, disabled: workflowBusy, key: 'rollback-media-library-replacement-db-replacements' }, mediaLibraryReplacementBusy ? __('Rolling back DB replacements…', 'ultracache') : __('Rollback DB Replacements', 'ultracache')),
-									h('button', { type: 'button', className: 'uc-btn w-full text-white py-3 font-bold', style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: rollbackMediaLibraryReplacementMetadataUpdates, disabled: workflowBusy, key: 'rollback-media-library-replacement-metadata' }, mediaLibraryReplacementBusy ? __('Rolling back metadata…', 'ultracache') : __('Rollback Attachment Metadata', 'ultracache')),
-									h('button', { type: 'button', className: getMediaLibraryReplacementActionClass('cleanup_preview', 'uc-btn w-full text-white py-3 font-bold'), style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' }, onClick: openMediaLibraryReplacementCleanupPreviewModal, disabled: workflowBusy, key: 'preview-media-library-replacement-cleanup' }, mediaLibraryReplacementBusy ? __('Loading cleanup preview…', 'ultracache') : __('Cleanup Preview', 'ultracache')),
-											]),
+									h('button', {
+										type: 'button',
+										className: 'uc-btn w-full text-white py-3 font-bold',
+										style: { width: '100%', minWidth: 0, whiteSpace: 'nowrap' },
+										onClick: runMediaLibraryReplacementRollback,
+										disabled: workflowBusy || !isMediaLibraryReplacementRollbackRunnerReady() || !rollbackAvailable,
+										title: rollbackDisabledReason,
+										key: 'rollback-media-library-replacement',
+									}, getMediaLibraryReplacementRollbackLabel()),
+								]),
 							]),
+
 						]);
 					})(),
 					mediaLibraryReplacementStatus ? h('div', { className: 'text-xs text-zinc-400 leading-relaxed space-y-1', key: 'media-library-replacement-status' }, [

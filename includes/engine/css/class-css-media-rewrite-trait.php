@@ -76,9 +76,11 @@ trait Ultra_Cache_Engine_CSS_Media_Rewrite_Trait
         $request_assets[$source_url] = array();
 
         $source_host = strtolower((string) wp_parse_url($source_url, PHP_URL_HOST));
-        $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
         $source_url_path = strtolower((string) wp_parse_url($source_url, PHP_URL_PATH));
-        if ('' === $source_host || '' === $home_host || $source_host !== $home_host || '.css' !== substr($source_url_path, -4)) {
+        $is_local = function_exists('ultracache_is_local_site_url')
+            ? ultracache_is_local_site_url($source_url)
+            : $source_host === strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        if ('' === $source_host || !$is_local || '.css' !== substr($source_url_path, -4)) {
             return array();
         }
 

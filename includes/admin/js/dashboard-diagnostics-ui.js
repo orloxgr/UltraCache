@@ -69,8 +69,8 @@
 			? ('Enabled' + (allowlist.length ? ' - Whitelist: ' + allowlist.join(', ') : ' - Whitelist empty: query-string variants bypass cache'))
 			: 'Disabled';
 		const safeTrackingCookieCacheText = loadedRuntime.cache_safe_tracking_cookies === false
-			? 'Strict mode: any Set-Cookie skips cache'
-			: 'Enabled: safe tracking Set-Cookie can store public HTML';
+			? 'Strict mode: any response Set-Cookie skips storage'
+			: 'Policy v2: response cookies may store public HTML unless private/auth/cart state is detected';
 		const objectCacheStatus = diagnostics.objectCache || {};
 		const pageCacheStatus = diagnostics.pageCache || {};
 		const selectedObjectBackend = objectCacheStatus.selectedBackend || 'redis';

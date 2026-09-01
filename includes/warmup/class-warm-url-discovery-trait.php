@@ -11,9 +11,169 @@ if (!defined('ABSPATH')) {
 
 trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 {
-        private function get_affected_url_plan_for_post($post_id)
+        /** Provider-native language currently selected for URL-only discovery. */
+        private $warm_multilingual_context_code = '';
+
+        /** Return frontend languages for one warm/discovery operation, or one neutral context. */
+        private function get_warm_language_codes($operation = '')
         {
-            return $this->build_affected_url_plan(
+            $operation = sanitize_key((string) $operation);
+            if ('' !== $operation && function_exists('ultracache_multilingual_get_warm_languages')) {
+                if (function_exists('ultracache_multilingual_is_active') && ultracache_multilingual_is_active()) {
+                    return array_values(ultracache_multilingual_get_warm_languages($operation));
+                }
+            }
+
+            if (function_exists('ultracache_multilingual_get_active_language_codes')) {
+                $languages = ultracache_multilingual_get_active_language_codes();
+                if (!empty($languages)) {
+                    if (function_exists('ultracache_should_warm_translation_pages')
+                        && !ultracache_should_warm_translation_pages()
+                    ) {
+                        $default_language = function_exists('ultracache_multilingual_get_default_language')
+                            ? (string) ultracache_multilingual_get_default_language()
+                            : '';
+                        if ('' !== $default_language && in_array($default_language, $languages, true)) {
+                            return array($default_language);
+                        }
+
+                        return array((string) reset($languages));
+                    }
+
+                    return array_values($languages);
+                }
+            }
+
+            return array('');
+        }
+
+        /** Return the provider-native language selected for this discovery callback. */
+        private function get_current_warm_language_code()
+        {
+            if ('' !== (string) $this->warm_multilingual_context_code) {
+                return (string) $this->warm_multilingual_context_code;
+            }
+
+            return function_exists('ultracache_multilingual_get_current_language')
+                ? (string) ultracache_multilingual_get_current_language()
+                : '';
+        }
+
+        /** Translate one generated public URL for the current discovery language. */
+        private function translate_warm_url_for_context($url)
+        {
+            $url = (string) $url;
+            $language_code = $this->get_current_warm_language_code();
+            if ('' === $url || '' === $language_code) {
+                return $url;
+            }
+
+            if (
+                function_exists('ultracache_multilingual_get_provider')
+                && 'wpml' === ultracache_multilingual_get_provider()
+                && function_exists('ultracache_wpml_translate_generated_url')
+            ) {
+                return ultracache_wpml_translate_generated_url($url, $language_code);
+            }
+
+            if (!function_exists('ultracache_multilingual_translate_url')) {
+                return $url;
+            }
+
+            return ultracache_multilingual_translate_url($url, $language_code);
+        }
+
+        /** Execute one discovery callback in a provider-supported language context. */
+        private function run_warm_language_context($language_code, callable $callback)
+        {
+            $language_code = function_exists('ultracache_multilingual_normalize_language_code')
+                ? ultracache_multilingual_normalize_language_code($language_code)
+                : '';
+            $previous = (string) $this->warm_multilingual_context_code;
+            $this->warm_multilingual_context_code = $language_code;
+
+            try {
+                if ('' !== $language_code && function_exists('ultracache_multilingual_run_in_language')) {
+                    return ultracache_multilingual_run_in_language($language_code, $callback);
+                }
+
+                return call_user_func($callback);
+            } finally {
+                $this->warm_multilingual_context_code = $previous;
+            }
+        }
+
+        /** Return the exact public home for the current multilingual language. */
+        private function get_current_warm_home_url()
+        {
+            $language_code = $this->get_current_warm_language_code();
+            if ('' !== $language_code && function_exists('ultracache_multilingual_get_language_home_urls')) {
+                $homes = ultracache_multilingual_get_language_home_urls();
+                if (!empty($homes[$language_code])) {
+                    return (string) $homes[$language_code];
+                }
+            }
+
+            return home_url('/');
+        }
+
+        /** Return the language assigned to one post through WPML's public API. */
+        private function get_wpml_post_language_code($post_id)
+        {
+            $post_id = absint($post_id);
+            $post_type = $post_id > 0 ? get_post_type($post_id) : '';
+            if ($post_id < 1 || '' === (string) $post_type || !function_exists('ultracache_wpml_get_element_language_code')) {
+                return '';
+            }
+
+            return ultracache_wpml_get_element_language_code($post_id, $post_type);
+        }
+
+        /** Return the language assigned to one taxonomy term through WPML's public API. */
+        private function get_wpml_term_language_code($term_id, $taxonomy)
+        {
+            if (!function_exists('ultracache_wpml_get_element_language_code')) {
+                return '';
+            }
+
+            return ultracache_wpml_get_element_language_code(absint($term_id), sanitize_key((string) $taxonomy));
+        }
+
+        /** Build a provider-aware post affected-URL plan. */
+        private function get_affected_url_plan_for_post($post_id, $language_code = '')
+        {
+            $post_id = absint($post_id);
+            $provider = function_exists('ultracache_multilingual_get_provider')
+                ? ultracache_multilingual_get_provider()
+                : 'none';
+
+            // WPML keeps translated-object semantics: one translation change is
+            // resolved only in that translation's public language context.
+            if ('wpml' === $provider) {
+                if ('' === (string) $language_code) {
+                    $language_code = $this->get_wpml_post_language_code($post_id);
+                }
+
+                $plan = $this->run_warm_language_context($language_code, function () use ($post_id) {
+                    return $this->build_affected_url_plan(
+                        $this->get_related_urls_for_post(
+                            $post_id,
+                            array(
+                                'includeFeeds'            => true,
+                                'includePagination'       => true,
+                                'includeAuthorArchive'    => true,
+                                'includeDateArchives'     => true,
+                                'includePostCommentsFeed' => true,
+                                'includeSiteFront'        => true,
+                            )
+                        )
+                    );
+                });
+
+                return $this->filter_wpml_affected_plan_warm_by_policy($plan, $language_code);
+            }
+
+            $plan = $this->build_affected_url_plan(
                 $this->get_related_urls_for_post(
                     $post_id,
                     array(
@@ -26,10 +186,45 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                     )
                 )
             );
+
+            // TranslatePress and future shared-object renderers expose one
+            // WordPress object through multiple public language URLs. Expand
+            // only those URLs; unrelated objects remain outside the plan.
+            return $this->expand_affected_url_plan_for_shared_object_renderings($plan);
         }
-        private function get_affected_url_plan_for_term($term_id, $taxonomy)
+
+        /** Build a provider-aware taxonomy-term affected-URL plan. */
+        private function get_affected_url_plan_for_term($term_id, $taxonomy, $language_code = '')
         {
-            return $this->build_affected_url_plan(
+            $term_id = absint($term_id);
+            $taxonomy = sanitize_key((string) $taxonomy);
+            $provider = function_exists('ultracache_multilingual_get_provider')
+                ? ultracache_multilingual_get_provider()
+                : 'none';
+
+            if ('wpml' === $provider) {
+                if ('' === (string) $language_code) {
+                    $language_code = $this->get_wpml_term_language_code($term_id, $taxonomy);
+                }
+
+                $plan = $this->run_warm_language_context($language_code, function () use ($term_id, $taxonomy) {
+                    return $this->build_affected_url_plan(
+                        $this->get_related_urls_for_term(
+                            $term_id,
+                            $taxonomy,
+                            array(
+                                'includeFeeds'      => true,
+                                'includePagination' => true,
+                                'includeSiteFront'  => true,
+                            )
+                        )
+                    );
+                });
+
+                return $this->filter_wpml_affected_plan_warm_by_policy($plan, $language_code);
+            }
+
+            $plan = $this->build_affected_url_plan(
                 $this->get_related_urls_for_term(
                     $term_id,
                     $taxonomy,
@@ -40,7 +235,55 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                     )
                 )
             );
+
+            return $this->expand_affected_url_plan_for_shared_object_renderings($plan);
         }
+        /** Expand one affected plan only for shared-object multilingual renderers. */
+        private function expand_affected_url_plan_for_shared_object_renderings(array $plan)
+        {
+            if (!function_exists('ultracache_multilingual_expand_shared_object_public_urls')) {
+                return $plan;
+            }
+
+            $purge_urls = ultracache_multilingual_expand_shared_object_public_urls(
+                (array) ($plan['purgeUrls'] ?? array())
+            );
+            $warm_urls = function_exists('ultracache_multilingual_expand_shared_object_warm_urls')
+                ? ultracache_multilingual_expand_shared_object_warm_urls(
+                    (array) ($plan['warmUrls'] ?? array()),
+                    'affected_save'
+                )
+                : ultracache_multilingual_expand_shared_object_public_urls(
+                    (array) ($plan['warmUrls'] ?? array())
+                );
+
+            $purge_plan = $this->build_affected_url_plan($purge_urls);
+            $warm_plan = $this->build_affected_url_plan($warm_urls);
+
+            return array(
+                'purgeUrls' => (array) ($purge_plan['purgeUrls'] ?? array()),
+                'warmUrls'  => (array) ($warm_plan['warmUrls'] ?? array()),
+            );
+        }
+
+        /** Keep WPML invalidation intact while gating proactive affected-save warm by language policy. */
+        private function filter_wpml_affected_plan_warm_by_policy(array $plan, $language_code)
+        {
+            $language_code = function_exists('ultracache_multilingual_normalize_language_code')
+                ? ultracache_multilingual_normalize_language_code($language_code)
+                : trim((string) $language_code);
+            if ('' === $language_code || !function_exists('ultracache_multilingual_get_warm_languages')) {
+                return $plan;
+            }
+
+            $eligible = ultracache_multilingual_get_warm_languages('affected_save');
+            if (!in_array($language_code, $eligible, true)) {
+                $plan['warmUrls'] = array();
+            }
+
+            return $plan;
+        }
+
         private function get_affected_url_plan_for_term_assignment($post_id, $taxonomy, array $terms = array(), array $tt_ids = array(), array $old_tt_ids = array())
         {
             $plans = array($this->get_affected_url_plan_for_post($post_id));
@@ -339,14 +582,14 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
         private function get_site_front_urls($include_archives = false)
         {
             $urls = array();
-            $this->append_related_url($urls, home_url('/'));
+            $this->append_related_url($urls, $this->get_current_warm_home_url());
 
             if (function_exists('get_feed_link')) {
                 $this->append_related_url($urls, get_feed_link());
             }
 
             $posts_page_url = $this->get_posts_index_url();
-            if ($posts_page_url && home_url('/') !== $posts_page_url) {
+            if ($posts_page_url && $this->get_current_warm_home_url() !== $posts_page_url) {
                 $this->append_related_url($urls, $posts_page_url);
                 $this->append_related_url($urls, $this->build_archive_feed_url($posts_page_url));
             }
@@ -376,6 +619,29 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 
             return array_values($urls);
         }
+        /** Return site-front/archive URLs across every active multilingual language. */
+        private function get_all_language_site_front_urls($include_archives = false)
+        {
+            $urls = array();
+            foreach ($this->get_warm_language_codes() as $language_code) {
+                $language_urls = $this->run_warm_language_context(
+                    $language_code,
+                    function () use ($include_archives) {
+                        return $this->get_site_front_urls($include_archives);
+                    }
+                );
+                foreach ((array) $language_urls as $url) {
+                    $url = is_string($url) ? trim($url) : '';
+                    if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                        continue;
+                    }
+                    $urls[$url] = $url;
+                }
+            }
+
+            return array_values($urls);
+        }
+
         private function get_posts_index_url()
         {
             $posts_page_id = (int) get_option('page_for_posts');
@@ -386,10 +652,12 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                 }
             }
 
-            return home_url('/');
+            return $this->get_current_warm_home_url();
         }
         private function append_related_url(array &$urls, $url)
         {
+            $url = $this->translate_warm_url_for_context((string) $url);
+
             $normalized_url = $this->normalize_url($url);
             if ('' === $normalized_url || !$this->is_cacheable_local_url($normalized_url)) {
                 return false;
@@ -779,7 +1047,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                     continue;
                 }
                 $raw_count++;
-                $key = strtolower($url);
+                $key = $url;
                 if (isset($seen[$key])) {
                     continue;
                 }
@@ -850,8 +1118,8 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 
             $urls = array();
             foreach ((array) $term_ids as $term_id) {
-                $term_link = get_term_link((int) $term_id, $taxonomy);
-                if (!is_wp_error($term_link) && $term_link) {
+                $term_link = $this->safe_get_term_link((int) $term_id, $taxonomy);
+                if ($term_link) {
                     $urls[] = $term_link;
                 }
             }
@@ -892,7 +1160,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 
             return array_values(array_unique($selected));
         }
-        private function get_full_site_warm_source_urls($source, $remaining, $scope_settings = null)
+        private function get_full_site_warm_source_urls_for_current_language($source, $remaining, $scope_settings = null)
         {
             $source = sanitize_key((string) $source);
             $remaining = max(0, (int) $remaining);
@@ -901,7 +1169,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
             }
 
             if ('homepage' === $source) {
-                $urls = array(home_url('/'));
+                $urls = array($this->get_current_warm_home_url());
                 $posts_page_id = (int) get_option('page_for_posts');
                 if ($posts_page_id > 0) {
                     $posts_page_url = $this->safe_get_permalink($posts_page_id);
@@ -975,6 +1243,52 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
 
             return array();
         }
+        /** Expand one selected full-site source across every active multilingual language. */
+        private function get_full_site_warm_source_urls($source, $remaining, $scope_settings = null)
+        {
+            $remaining = max(0, (int) $remaining);
+            if ($remaining <= 0) {
+                return array();
+            }
+
+            $urls = array();
+            $seen = array();
+            foreach ($this->get_warm_language_codes() as $language_code) {
+                if (count($urls) >= $remaining) {
+                    break;
+                }
+
+                $language_urls = $this->run_warm_language_context(
+                    $language_code,
+                    function () use ($source, $remaining, $scope_settings, &$urls) {
+                        return $this->get_full_site_warm_source_urls_for_current_language(
+                            $source,
+                            max(1, $remaining - count($urls)),
+                            $scope_settings
+                        );
+                    }
+                );
+
+                foreach ((array) $language_urls as $url) {
+                    $url = is_string($url) ? trim($url) : '';
+                    if ('' === $url || !$this->is_cacheable_local_url($url)) {
+                        continue;
+                    }
+                    $key = $url;
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                    $urls[] = $url;
+                    if (count($urls) >= $remaining) {
+                        break;
+                    }
+                }
+            }
+
+            return array_values($urls);
+        }
+
         private function get_full_site_warm_source_breakdown($max_urls = 5000, $scope_settings = null)
         {
             $max_urls = max(1, (int) $max_urls);
@@ -1014,7 +1328,7 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
             $sources = $this->get_full_site_warm_sources_lookup();
 
             if ('menu' !== $scope && isset($sources['homepage'])) {
-                $urls[] = home_url('/');
+                $urls[] = $this->get_current_warm_home_url();
 
                 $posts_page_id = (int) get_option('page_for_posts');
                 if ($posts_page_id > 0) {
@@ -1044,13 +1358,67 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
         }
         private function safe_get_permalink($post_id)
         {
+            $post_id = absint($post_id);
+            if ($post_id < 1) {
+                return '';
+            }
+
+            $language_code = $this->get_current_warm_language_code();
+            if (
+                '' !== $language_code
+                && function_exists('ultracache_multilingual_get_provider')
+                && 'wpml' === ultracache_multilingual_get_provider()
+                && function_exists('ultracache_wpml_get_translated_object_id')
+            ) {
+                $post_type = get_post_type($post_id);
+                $translated_id = '' !== (string) $post_type
+                    ? ultracache_wpml_get_translated_object_id($post_id, (string) $post_type, $language_code)
+                    : 0;
+                if ($translated_id < 1) {
+                    return '';
+                }
+                $post_id = $translated_id;
+            }
+
             try {
                 $permalink = get_permalink($post_id);
             } catch (Throwable $e) {
                 return '';
             }
 
-            return is_string($permalink) ? $permalink : '';
+            $permalink = is_string($permalink) ? $permalink : '';
+            return '' !== $permalink ? $this->translate_warm_url_for_context($permalink) : '';
+        }
+
+        /** Return one taxonomy permalink in the current warm language. */
+        private function safe_get_term_link($term_id, $taxonomy)
+        {
+            $term_id = absint($term_id);
+            $taxonomy = sanitize_key((string) $taxonomy);
+            if ($term_id < 1 || '' === $taxonomy) {
+                return '';
+            }
+
+            $language_code = $this->get_current_warm_language_code();
+            if (
+                '' !== $language_code
+                && function_exists('ultracache_multilingual_get_provider')
+                && 'wpml' === ultracache_multilingual_get_provider()
+                && function_exists('ultracache_wpml_get_translated_object_id')
+            ) {
+                $translated_id = ultracache_wpml_get_translated_object_id($term_id, $taxonomy, $language_code);
+                if ($translated_id < 1) {
+                    return '';
+                }
+                $term_id = $translated_id;
+            }
+
+            $term_link = get_term_link($term_id, $taxonomy);
+            if (is_wp_error($term_link) || !$term_link) {
+                return '';
+            }
+
+            return $this->translate_warm_url_for_context((string) $term_link);
         }
         private function get_warm_scope_settings($raw = null)
         {
@@ -1114,9 +1482,35 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
         private function get_full_site_warm_sources_lookup($scope_settings = null)
         {
             $scope = is_array($scope_settings) ? $this->normalize_warm_scope_settings_array($scope_settings) : $this->get_warm_scope_settings();
+            $sources = array_values((array) ($scope['sources'] ?? array()));
+
+            // 3.04.42: resolve full-site source policy inside the selected
+            // language context, before seed/post/term discovery starts. This
+            // prevents low-traffic languages from querying global source
+            // classes only to discard their URLs later.
+            $language_code = (string) $this->warm_multilingual_context_code;
+            if ('' !== $language_code
+                && function_exists('ultracache_multilingual_get_language_warm_policy')
+            ) {
+                $policy = ultracache_multilingual_get_language_warm_policy($language_code);
+                if (!empty($policy) && empty($policy['useGlobalFullSiteSources'])) {
+                    $allowed = $this->get_allowed_full_site_warm_source_keys();
+                    $requested = isset($policy['fullSiteSources']) && is_array($policy['fullSiteSources'])
+                        ? $policy['fullSiteSources']
+                        : array();
+                    $requested_lookup = array_fill_keys(array_map('sanitize_key', $requested), true);
+                    $sources = array_values(array_filter(
+                        $allowed,
+                        static function ($source) use ($requested_lookup) {
+                            return isset($requested_lookup[$source]);
+                        }
+                    ));
+                }
+            }
+
             $lookup = array();
-            foreach ((array) $scope['sources'] as $source) {
-                $lookup[$source] = true;
+            foreach ($sources as $source) {
+                $lookup[(string) $source] = true;
             }
             return $lookup;
         }
@@ -1375,6 +1769,9 @@ trait Ultra_Cache_Engine_Warm_URL_Discovery_Trait
                 }
 
                 $url = $this->normalize_menu_warm_url($url);
+                if ('' !== $url) {
+                    $url = $this->translate_warm_url_for_context($url);
+                }
                 if ('' !== $url && $this->is_cacheable_local_url($url)) {
                     $urls[] = $url;
                 }

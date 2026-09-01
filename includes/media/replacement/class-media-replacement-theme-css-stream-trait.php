@@ -364,7 +364,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
             && (int) ($state['commit_verify_mtime'] ?? -1) === $mtime;
     }
 
-    private function process_media_replacement_theme_css_scan_stream(array $state, $deadline)
+    private function process_media_replacement_theme_css_scan_stream(array $state)
     {
         $path = (string) $state['file_path'];
         if (!$this->verify_media_replacement_theme_css_source_stat($state)) {
@@ -449,8 +449,6 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
 
         $limit = max(1, min(100, absint($args['limit'] ?? 20)));
         $entry_limit = max(25, min(2500, $limit * 25));
-        $time_budget = max(1.0, min(30.0, isset($args['time_budget']) ? (float) $args['time_budget'] : 15.0));
-        $deadline = microtime(true) + $time_budget;
         $state = $this->get_media_replacement_theme_css_scan_state();
         $start_new = 'idle' === $state['phase'] || !empty($args['reset']) || !empty($args['start']);
 
@@ -494,7 +492,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
         if ('discover' === $state['phase']) {
             $work_units = 0;
             $complete = false;
-            while ($work_units < $entry_limit && ($work_units === 0 || microtime(true) < $deadline)) {
+            while ($work_units < $entry_limit) {
                 $error = '';
                 $entry = $this->get_next_media_replacement_theme_css_traversal_entry($state, $error);
                 if ('' !== $error) {
@@ -541,7 +539,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
 
         if ('scan' === $state['phase']) {
             $completed_files = 0;
-            while ($completed_files < $limit && microtime(true) < $deadline) {
+            while ($completed_files < $limit) {
                 $stream = $this->get_media_replacement_theme_css_stream_state();
                 if ('scan' !== $stream['mode']) {
                     $rows = $this->get_media_replacement_theme_css_inventory_rows($state['cursor_file_id'], 1);
@@ -550,7 +548,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
                     }
                     $stream = $this->initialize_media_replacement_theme_css_read_state('scan', $rows[0]);
                 }
-                $result = $this->process_media_replacement_theme_css_scan_stream($stream, $deadline);
+                $result = $this->process_media_replacement_theme_css_scan_stream($stream);
                 if (empty($result['success'])) {
                     return $this->fail_media_replacement_theme_css_scan($state, 'theme_css_file_read_failed', (string) ($result['message'] ?? __('Theme CSS stream scanning failed.', 'ultracache')));
                 }
@@ -604,7 +602,7 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
         if ('validate_file_set' === $state['phase']) {
             $work_units = 0;
             $complete = false;
-            while ($work_units < $entry_limit && microtime(true) < $deadline) {
+            while ($work_units < $entry_limit) {
                 $stream = $this->get_media_replacement_theme_css_stream_state();
                 if ('validate' === $stream['mode']) {
                     $result = $this->process_media_replacement_theme_css_validation_stream($stream);
@@ -996,11 +994,10 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
             return $authorization;
         }
         $limit = max(1, min(100, absint($args['limit'] ?? 25)));
-        $deadline = microtime(true) + max(1.0, min(30.0, isset($args['time_budget']) ? (float) $args['time_budget'] : 15.0));
         $processed_files = 0;
         $applied_refs = 0;
 
-        while ($processed_files < $limit && microtime(true) < $deadline) {
+        while ($processed_files < $limit) {
             $stream = $this->get_media_replacement_theme_css_stream_state();
             if ('apply' !== $stream['mode']) {
                 $path = $this->get_media_replacement_theme_css_next_file(array('pending', 'failed'));
@@ -1165,12 +1162,11 @@ trait Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait
         }
         $args = is_array($args) ? $args : array();
         $limit = max(1, min(100, absint($args['limit'] ?? 50)));
-        $deadline = microtime(true) + max(1.0, min(30.0, isset($args['time_budget']) ? (float) $args['time_budget'] : 15.0));
         $processed_files = 0;
         $verified_refs = 0;
         $failed_refs = 0;
 
-        while ($processed_files < $limit && microtime(true) < $deadline) {
+        while ($processed_files < $limit) {
             $stream = $this->get_media_replacement_theme_css_stream_state();
             if ('verify' !== $stream['mode']) {
                 $path = $this->get_media_replacement_theme_css_next_file(array('applied', 'verify_failed'));

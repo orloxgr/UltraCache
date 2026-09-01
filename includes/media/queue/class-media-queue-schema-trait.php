@@ -11,6 +11,31 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 {
 	// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching -- UltraCache uses private custom media conversion queue tables with validated table identifiers.
 
+	/** Last queue upsert effect. Preserves bool-return compatibility while exposing actionable-work semantics. */
+	private $last_media_queue_upsert_effect = 'none';
+
+	/** Per-request memo for media queue schema verification capabilities. */
+	private $media_queue_schema_request_memo = array();
+
+	/** Reset media queue schema verification memo after schema mutation. */
+	private function reset_media_queue_schema_request_memo() {
+		$this->media_queue_schema_request_memo = array();
+	}
+
+	private function set_last_media_queue_upsert_effect($effect) {
+		$allowed = array('none', 'inserted', 'promoted', 'touched', 'preserved', 'failed');
+		$effect = sanitize_key((string) $effect);
+		$this->last_media_queue_upsert_effect = in_array($effect, $allowed, true) ? $effect : 'none';
+	}
+
+	public function get_last_media_queue_upsert_effect() {
+		return (string) $this->last_media_queue_upsert_effect;
+	}
+
+	public function last_media_queue_upsert_created_work() {
+		return in_array($this->last_media_queue_upsert_effect, array('inserted', 'promoted'), true);
+	}
+
 
 		private function get_media_queue_table_name() {
 			global $wpdb;
@@ -19,43 +44,65 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 		}
 
 
-		private function media_queue_table_exists() {
+		private function media_queue_table_exists($force_schema_verify = false) {
 			global $wpdb;
+			if (!$force_schema_verify && self::MEDIA_QUEUE_DB_VERSION === (string) get_option(self::MEDIA_QUEUE_DB_VERSION_OPTION, '')) {
+				return true;
+			}
+			if (array_key_exists('table_exists', $this->media_queue_schema_request_memo)) {
+				return (bool) $this->media_queue_schema_request_memo['table_exists'];
+			}
 			$table = $this->get_media_queue_table_name();
 			$found = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table));
-			return (string) $found === (string) $table;
+			$this->media_queue_schema_request_memo['table_exists'] = ((string) $found === (string) $table);
+			return (bool) $this->media_queue_schema_request_memo['table_exists'];
 		}
 
 
 		private function media_queue_failure_column_exists() {
 			global $wpdb;
+			if (array_key_exists('failure_column', $this->media_queue_schema_request_memo)) {
+				return (bool) $this->media_queue_schema_request_memo['failure_column'];
+			}
 			$table  = $this->get_media_queue_table_name();
 			$column = $wpdb->get_var($wpdb->prepare('SHOW COLUMNS FROM %i LIKE %s', $table, 'consecutive_failures'));
-			return 'consecutive_failures' === (string) $column;
+			$this->media_queue_schema_request_memo['failure_column'] = ('consecutive_failures' === (string) $column);
+			return (bool) $this->media_queue_schema_request_memo['failure_column'];
 		}
 
 
 		private function media_queue_stale_recovery_column_exists() {
 			global $wpdb;
+			if (array_key_exists('stale_recovery_column', $this->media_queue_schema_request_memo)) {
+				return (bool) $this->media_queue_schema_request_memo['stale_recovery_column'];
+			}
 			$table  = $this->get_media_queue_table_name();
 			$column = $wpdb->get_var($wpdb->prepare('SHOW COLUMNS FROM %i LIKE %s', $table, 'stale_recoveries'));
-			return 'stale_recoveries' === (string) $column;
+			$this->media_queue_schema_request_memo['stale_recovery_column'] = ('stale_recoveries' === (string) $column);
+			return (bool) $this->media_queue_schema_request_memo['stale_recovery_column'];
 		}
 
 
 		private function media_queue_local_source_columns_exist() {
 			global $wpdb;
+			if (array_key_exists('local_source_columns', $this->media_queue_schema_request_memo)) {
+				return (bool) $this->media_queue_schema_request_memo['local_source_columns'];
+			}
 			$table = $this->get_media_queue_table_name();
 			$required = array('source_kind', 'source_identity', 'source_scope', 'source_owner', 'source_relative_path', 'source_url', 'requested_format');
 			$columns = $wpdb->get_col($wpdb->prepare('SHOW COLUMNS FROM %i', $table));
-			return empty(array_diff($required, array_map('strval', (array) $columns)));
+			$this->media_queue_schema_request_memo['local_source_columns'] = empty(array_diff($required, array_map('strval', (array) $columns)));
+			return (bool) $this->media_queue_schema_request_memo['local_source_columns'];
 		}
 
 
 		private function media_queue_index_rows($index_name) {
 			global $wpdb;
 			$table = $this->get_media_queue_table_name();
-			$rows = $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+			if (!array_key_exists('index_rows', $this->media_queue_schema_request_memo)) {
+				$this->media_queue_schema_request_memo['index_rows'] = (array) $wpdb->get_results($wpdb->prepare('SHOW INDEX FROM %i', $table), ARRAY_A);
+			}
+			$rows = (array) $this->media_queue_schema_request_memo['index_rows'];
 			$index_name = (string) $index_name;
 			$matches = array_values(array_filter((array) $rows, static function ($row) use ($index_name) {
 				return $index_name === (string) ($row['Key_name'] ?? '');
@@ -160,10 +207,12 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				if (!empty($this->media_queue_index_rows('attachment_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX attachment_format', $table));
+					$this->reset_media_queue_schema_request_memo();
 				}
 				if (empty($this->media_queue_index_rows('attachment_format'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the verified UltraCache-owned index after the versioned legacy-definition repair above.
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD KEY attachment_format (attachment_id, format)', $table));
+					$this->reset_media_queue_schema_request_memo();
 				}
 			}
 
@@ -171,6 +220,7 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				if (!empty($this->media_queue_index_rows('source_request'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Versioned repair of an UltraCache-owned custom-table index whose existing definition cannot be corrected reliably by dbDelta().
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i DROP INDEX source_request', $table));
+					$this->reset_media_queue_schema_request_memo();
 				}
 				if (!$this->deduplicate_media_queue_source_requests()) {
 					return false;
@@ -178,6 +228,7 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				if (empty($this->media_queue_index_rows('source_request'))) {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.SchemaChange -- Recreates the deduplicated UltraCache-owned unique index after the versioned legacy-definition repair above.
 					$wpdb->query($wpdb->prepare('ALTER TABLE %i ADD UNIQUE KEY source_request (source_kind, source_identity, format, requested_format)', $table));
+					$this->reset_media_queue_schema_request_memo();
 				}
 			}
 
@@ -185,18 +236,27 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 		}
 
 
-		public function ensure_media_queue_table() {
+		public function ensure_media_queue_table($force_schema_verify = false) {
 			global $wpdb;
 
 			$table = $this->get_media_queue_table_name();
 			$version = (string) get_option(self::MEDIA_QUEUE_DB_VERSION_OPTION, '');
-			if (self::MEDIA_QUEUE_DB_VERSION === $version && $this->media_queue_table_exists() && $this->media_queue_failure_column_exists() && $this->media_queue_stale_recovery_column_exists() && $this->media_queue_local_source_columns_exist() && $this->media_queue_attachment_format_index_exists() && $this->media_queue_source_request_index_exists()) {
-				return $this->ensure_media_queue_units_table();
+			$force_schema_verify = (bool) $force_schema_verify;
+
+			// Runtime readiness trusts UltraCache's stored schema contract. Full table/column/index
+			// introspection is reserved for activation or an actual version mismatch.
+			if (!$force_schema_verify && self::MEDIA_QUEUE_DB_VERSION === $version) {
+				return $this->ensure_media_queue_units_table(false);
+			}
+
+			if ($force_schema_verify && self::MEDIA_QUEUE_DB_VERSION === $version && $this->media_queue_table_exists(true) && $this->media_queue_failure_column_exists() && $this->media_queue_stale_recovery_column_exists() && $this->media_queue_local_source_columns_exist() && $this->media_queue_attachment_format_index_exists() && $this->media_queue_source_request_index_exists()) {
+				return $this->ensure_media_queue_units_table(true);
 			}
 
 			if (!ultracache_require_wordpress_admin_include('upgrade.php', 'dbDelta')) {
 				return false;
 			}
+			$this->reset_media_queue_schema_request_memo();
 			$charset_collate = $wpdb->get_charset_collate();
 			$sql = "CREATE TABLE {$table} (
 				id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -227,9 +287,10 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 			) {$charset_collate};";
 
 			dbDelta($sql);
-			if ($this->media_queue_table_exists() && $this->media_queue_failure_column_exists() && $this->media_queue_stale_recovery_column_exists() && $this->media_queue_local_source_columns_exist() && $this->ensure_media_queue_source_identity_indexes()) {
+			$this->reset_media_queue_schema_request_memo();
+			if ($this->media_queue_table_exists(true) && $this->media_queue_failure_column_exists() && $this->media_queue_stale_recovery_column_exists() && $this->media_queue_local_source_columns_exist() && $this->ensure_media_queue_source_identity_indexes()) {
 				update_option(self::MEDIA_QUEUE_DB_VERSION_OPTION, self::MEDIA_QUEUE_DB_VERSION, false);
-				return $this->ensure_media_queue_units_table();
+				return $this->ensure_media_queue_units_table($force_schema_verify);
 			}
 
 			return false;
@@ -515,12 +576,114 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 		}
 
 
-		public function upsert_media_queue_item($attachment_id, $format = 'best', $status = 'pending', $last_error = '', $attempts = 0, $force_pending = false) {
+		/**
+		 * Return an already-known queue state for frontend on-demand discovery.
+		 *
+		 * Any existing row is authoritative for normal frontend discovery: pending
+		 * work is already queued, processing work is worker-owned, and terminal
+		 * done/skipped/failed rows must not be resurrected by page traffic.
+		 * Negative lookups are intentionally not memoized because this request may
+		 * create the row immediately afterwards.
+		 */
+		private function get_existing_on_demand_media_queue_status($source_kind, $source_identity = '', $format = 'best', $requested_format = '', $attachment_id = 0) {
+			$source_kind = sanitize_key((string) $source_kind);
+			$source_identity = strtolower(trim((string) $source_identity));
+			$format = $this->normalize_media_queue_format($format);
+			$requested_format = strtolower(trim((string) $requested_format));
+			$attachment_id = absint($attachment_id);
+
+			if ('attachment' === $source_kind) {
+				if ($attachment_id <= 0) {
+					return '';
+				}
+				$source_identity = hash('sha256', 'attachment:' . $attachment_id);
+				$requested_format = '';
+			} elseif ('local_asset' === $source_kind) {
+				if (!preg_match('/^[a-f0-9]{64}$/', $source_identity) || !in_array($requested_format, array('avif', 'webp'), true)) {
+					return '';
+				}
+			} else {
+				return '';
+			}
+
+			$memo_key = $source_kind . '|' . $source_identity . '|' . $format . '|' . $requested_format;
+			if (isset($this->on_demand_queue_existing_status_memo[$memo_key])) {
+				return (string) $this->on_demand_queue_existing_status_memo[$memo_key];
+			}
+			if (!$this->ensure_media_queue_table()) {
+				return '';
+			}
+
+			global $wpdb;
+			$table = $this->get_media_queue_table_name();
+			if ('attachment' === $source_kind) {
+				$status = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT status FROM %i WHERE source_kind = 'attachment' AND attachment_id = %d AND format = %s LIMIT 1",
+						$table,
+						$attachment_id,
+						$format
+					)
+				);
+			} else {
+				$status = $wpdb->get_var(
+					$wpdb->prepare(
+						'SELECT status FROM %i WHERE source_kind = %s AND source_identity = %s AND format = %s AND requested_format = %s LIMIT 1',
+						$table,
+						'local_asset',
+						$source_identity,
+						$format,
+						$requested_format
+					)
+				);
+			}
+
+			$status = strtolower(trim((string) $status));
+			if (!in_array($status, array('pending', 'processing', 'done', 'failed', 'skipped'), true)) {
+				return '';
+			}
+			$this->on_demand_queue_existing_status_memo[$memo_key] = $status;
+			return $status;
+		}
+
+
+		private function remember_on_demand_media_queue_status($source_kind, $source_identity = '', $format = 'best', $requested_format = '', $attachment_id = 0, $status = 'pending') {
+			$source_kind = sanitize_key((string) $source_kind);
+			$format = $this->normalize_media_queue_format($format);
+			$requested_format = strtolower(trim((string) $requested_format));
+			$attachment_id = absint($attachment_id);
+			$status = strtolower(trim((string) $status));
+			if (!in_array($status, array('pending', 'processing', 'done', 'failed', 'skipped'), true)) {
+				return;
+			}
+			if ('attachment' === $source_kind) {
+				if ($attachment_id <= 0) {
+					return;
+				}
+				$source_identity = hash('sha256', 'attachment:' . $attachment_id);
+				$requested_format = '';
+			} elseif ('local_asset' === $source_kind) {
+				$source_identity = strtolower(trim((string) $source_identity));
+				if (!preg_match('/^[a-f0-9]{64}$/', $source_identity) || !in_array($requested_format, array('avif', 'webp'), true)) {
+					return;
+				}
+			} else {
+				return;
+			}
+			$memo_key = $source_kind . '|' . $source_identity . '|' . $format . '|' . $requested_format;
+			$this->on_demand_queue_existing_status_memo[$memo_key] = $status;
+		}
+
+
+		public function upsert_media_queue_item($attachment_id, $format = 'best', $status = 'pending', $last_error = '', $attempts = 0, $force_pending = false, $preserve_existing_status = false) {
+			$this->set_last_media_queue_upsert_effect('none');
 			$attachment_id = absint($attachment_id);
 			if ($attachment_id <= 0 || !wp_attachment_is_image($attachment_id)) {
+				$this->set_last_media_queue_upsert_effect('failed');
 				return false;
 			}
 			if (!$this->ensure_media_queue_table()) {
+				$this->set_last_media_queue_upsert_effect('failed');
 				return false;
 			}
 
@@ -534,6 +697,16 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 
 			$existing = $wpdb->get_row($wpdb->prepare("SELECT id, status, source_mtime, source_size, attempts, consecutive_failures, stale_recoveries FROM %i WHERE source_kind = 'attachment' AND attachment_id = %d AND format = %s", $table, $attachment_id, $format), ARRAY_A);
 			if (is_array($existing) && !empty($existing['id'])) {
+				if ($preserve_existing_status) {
+					$this->set_last_media_queue_upsert_effect('preserved');
+					return false;
+				}
+				// FAILED is an explicit-retry terminal state and PROCESSING is worker-owned.
+				// Generic non-forced callers must never turn either state back into PENDING.
+				if (!$force_pending && 'pending' === $status && in_array((string) ($existing['status'] ?? ''), array('failed', 'processing'), true)) {
+					$this->set_last_media_queue_upsert_effect('preserved');
+					return false;
+				}
 				$same_source = ((int) $existing['source_mtime'] === (int) $signature['mtime'] && (int) $existing['source_size'] === (int) $signature['size']);
 				$reset_failure_state = $force_pending || !$same_source;
 				$next_status = $status;
@@ -541,7 +714,7 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 					$next_status = (!$force_pending && $same_source) ? (string) $existing['status'] : 'pending';
 				}
 
-				$wpdb->update(
+				$updated = $wpdb->update(
 					$table,
 					array(
 						'source_mtime'         => (int) $signature['mtime'],
@@ -557,6 +730,12 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 					array('%d', '%d', '%s', '%d', '%d', '%d', '%s', '%s'),
 					array('%d')
 				);
+				if (false === $updated) {
+					$this->set_last_media_queue_upsert_effect('failed');
+					return false;
+				}
+				$created_work = 'pending' === $next_status && 'pending' !== (string) $existing['status'];
+				$this->set_last_media_queue_upsert_effect($created_work ? 'promoted' : 'touched');
 				return true;
 			}
 
@@ -581,7 +760,12 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				array('%d', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%d', '%d', '%d', '%s', '%s', '%s')
 			);
 
-			return false !== $created;
+			if (false === $created) {
+				$this->set_last_media_queue_upsert_effect('failed');
+				return false;
+			}
+			$this->set_last_media_queue_upsert_effect('pending' === $status ? 'inserted' : 'touched');
+			return true;
 		}
 
 
@@ -638,9 +822,11 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 		}
 
 
-		public function upsert_local_asset_media_queue_item(array $source, $requested_format, $status = 'pending', $last_error = '', $attempts = 0, $force_pending = false) {
+		public function upsert_local_asset_media_queue_item(array $source, $requested_format, $status = 'pending', $last_error = '', $attempts = 0, $force_pending = false, $preserve_existing_status = false) {
+			$this->set_last_media_queue_upsert_effect('none');
 			$source = $this->normalize_local_asset_queue_source($source, $requested_format);
 			if (empty($source) || !$this->ensure_media_queue_table()) {
+				$this->set_last_media_queue_upsert_effect('failed');
 				return false;
 			}
 
@@ -661,8 +847,18 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				ARRAY_A
 			);
 			if (is_array($existing) && !empty($existing['id'])) {
+				if ($preserve_existing_status) {
+					$this->set_last_media_queue_upsert_effect('preserved');
+					return false;
+				}
 				if ('processing' === (string) ($existing['status'] ?? '')) {
+					$this->set_last_media_queue_upsert_effect('preserved');
 					return true;
+				}
+				// FAILED local assets are terminal until the explicit Retry Failed action.
+				if (!$force_pending && 'pending' === $status && 'failed' === (string) ($existing['status'] ?? '')) {
+					$this->set_last_media_queue_upsert_effect('preserved');
+					return false;
 				}
 				$same_source = (int) $existing['source_mtime'] === (int) $source['source_mtime'] && (int) $existing['source_size'] === (int) $source['source_size'];
 				$reset = $force_pending || !$same_source;
@@ -698,7 +894,13 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 					$update_formats,
 					array('%d')
 				);
-				return false !== $updated;
+				if (false === $updated) {
+					$this->set_last_media_queue_upsert_effect('failed');
+					return false;
+				}
+				$created_work = 'pending' === $next_status && 'pending' !== (string) $existing['status'];
+				$this->set_last_media_queue_upsert_effect($created_work ? 'promoted' : 'touched');
+				return true;
 			}
 
 			$created = $wpdb->insert(
@@ -725,7 +927,12 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				),
 				array('%d','%s','%s','%s','%s','%s','%s','%s','%s','%d','%d','%s','%d','%d','%d','%s','%s','%s')
 			);
-			return false !== $created;
+			if (false === $created) {
+				$this->set_last_media_queue_upsert_effect('failed');
+				return false;
+			}
+			$this->set_last_media_queue_upsert_effect('pending' === $status ? 'inserted' : 'touched');
+			return true;
 		}
 
 
@@ -932,7 +1139,9 @@ trait Ultra_Cache_Media_Queue_Schema_Trait
 				'done' => (int) $counts['done'],
 				'failed' => (int) $counts['failed'],
 				'recoverableInterrupted' => (int) $recoverable_interrupted,
-				'retryable' => (int) $counts['failed'] + (int) $recoverable_interrupted,
+				// Retry Failed is intentionally terminal-state only. Processing rows are
+				// recovered by the stale/interrupted worker recovery path, not this action.
+				'retryable' => (int) $counts['failed'],
 				'skipped' => (int) $counts['skipped'],
 				'alreadyOptimized' => (int) $counts['skipped'],
 				'completed' => $completed,

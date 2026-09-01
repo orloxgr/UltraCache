@@ -87,8 +87,16 @@ trait Ultra_Cache_Engine_Iframe_Lazy_Load_Trait
         if (!$skip) {
             $request_uri = sanitize_text_field(ultracache_server_value('REQUEST_URI'));
             $path = strtolower((string) ultracache_safe_wp_parse_url($request_uri, PHP_URL_PATH, 'iframe_lazy_load_request_path'));
-            if ('' !== $path && preg_match('~/(?:wp-login\.php|wp-admin(?:/|$)|checkout(?:/|$)|cart(?:/|$)|my-account(?:/|$)|order-pay(?:/|$)|order-received(?:/|$)|lost-password(?:/|$)|resetpass(?:/|$)|register(?:/|$))~i', $path)) {
+            if ('' !== $path && preg_match('~/(?:wp-login\.php|wp-admin(?:/|$)|resetpass(?:/|$)|register(?:/|$))~i', $path)) {
                 $skip = true;
+            }
+            if (!$skip && '' !== $path && function_exists('ultracache_get_woocommerce_dynamic_paths')) {
+                foreach (ultracache_get_woocommerce_dynamic_paths() as $dynamic_path) {
+                    if ($this->matches_path_rule($path, $dynamic_path)) {
+                        $skip = true;
+                        break;
+                    }
+                }
             }
         }
 
@@ -164,6 +172,10 @@ trait Ultra_Cache_Engine_Iframe_Lazy_Load_Trait
             return false;
         }
 
+        if (function_exists('ultracache_is_strict_frontend_loopback_url') && ultracache_is_strict_frontend_loopback_url($source)) {
+            return false;
+        }
+
         $home = home_url('/');
         $home_scheme = strtolower((string) wp_parse_url($home, PHP_URL_SCHEME));
         $home_host = strtolower(rtrim((string) wp_parse_url($home, PHP_URL_HOST), '.'));
@@ -214,7 +226,7 @@ trait Ultra_Cache_Engine_Iframe_Lazy_Load_Trait
             'okta.com',
             'hcaptcha.com',
             'recaptcha.net',
-            'challenges.cloudflare.com',
+            'challenges.cloudflare',
         );
         foreach ($critical_host_fragments as $fragment) {
             if (false !== strpos($host, $fragment)) {

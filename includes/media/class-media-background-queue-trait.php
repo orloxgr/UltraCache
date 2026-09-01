@@ -19,6 +19,49 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		/** Per-request positive cache for an active dashboard media session. */
 		private $manual_media_conversion_active_for_request = null;
 
+		/**
+		 * Retire the ambiguous legacy pause record and return the current pause record.
+		 *
+		 * The v1 option only stored a boolean-like administrator reason. It could not
+		 * prove that a current administrator action created the pause, so it is not
+		 * authoritative under the v2 contract.
+		 *
+		 * @return array<string,mixed>
+		 */
+		private function get_media_background_pause_record() {
+			if (false !== get_option(self::MEDIA_BACKGROUND_PAUSED_LEGACY_OPTION, false)) {
+				delete_option(self::MEDIA_BACKGROUND_PAUSED_LEGACY_OPTION);
+			}
+
+			$state = get_option(self::MEDIA_BACKGROUND_PAUSED_OPTION, array());
+			if (!is_array($state)) {
+				delete_option(self::MEDIA_BACKGROUND_PAUSED_OPTION);
+				return array();
+			}
+
+			if ('repeated_stale_workers' === (string) ($state['reason'] ?? '')) {
+				delete_option(self::MEDIA_BACKGROUND_PAUSED_OPTION);
+				delete_option(self::MEDIA_STALE_WORKER_STATE_OPTION);
+				return array();
+			}
+
+			$valid = !empty($state['paused'])
+				&& self::MEDIA_BACKGROUND_PAUSE_SCHEMA_VERSION === absint($state['schemaVersion'] ?? 0)
+				&& 'administrator_control' === sanitize_key((string) ($state['source'] ?? ''))
+				&& '' !== sanitize_text_field((string) ($state['pauseId'] ?? ''))
+				&& absint($state['requestedAt'] ?? 0) > 0
+				&& absint($state['actorUserId'] ?? 0) > 0;
+
+			if (!$valid) {
+				if (!empty($state)) {
+					delete_option(self::MEDIA_BACKGROUND_PAUSED_OPTION);
+				}
+				return array();
+			}
+
+			return $state;
+		}
+
 
 		/**
 		 * Return whether an administrator has paused all media generation work.
@@ -26,13 +69,8 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		 * @return bool
 		 */
 		public function is_media_background_work_paused() {
-			$state = get_option(self::MEDIA_BACKGROUND_PAUSED_OPTION, array());
-			if (is_array($state) && 'repeated_stale_workers' === (string) ($state['reason'] ?? '')) {
-				delete_option(self::MEDIA_BACKGROUND_PAUSED_OPTION);
-				delete_option(self::MEDIA_STALE_WORKER_STATE_OPTION);
-				return false;
-			}
-			return is_array($state) ? !empty($state['paused']) : !empty($state);
+			$state = $this->get_media_background_pause_record();
+			return !empty($state['paused']);
 		}
 
 		/**
@@ -339,11 +377,10 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		 * @return array<string,mixed>
 		 */
 		public function get_media_background_work_state() {
-			$state = get_option(self::MEDIA_BACKGROUND_PAUSED_OPTION, array());
-			$state = is_array($state) ? $state : array('paused' => !empty($state));
+			$state = $this->get_media_background_pause_record();
 			$incident_state = $this->get_media_stale_worker_state(true);
-			$paused = $this->is_media_background_work_paused();
-			$paused_at = absint($state['updatedAt'] ?? 0);
+			$paused = !empty($state['paused']);
+			$paused_at = absint($state['requestedAt'] ?? ($state['updatedAt'] ?? 0));
 			$reason = sanitize_key((string) ($state['reason'] ?? ''));
 			$message = (string) ($state['message'] ?? '');
 			if ('' === $message && 'repeated_stale_workers' === $reason) {
@@ -364,6 +401,10 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				'backgroundPausedAt'           => $paused_at,
 				'backgroundPauseReason'        => $reason,
 				'backgroundPauseMessage'       => $message,
+				'backgroundPauseContractVersion' => absint($state['schemaVersion'] ?? 0),
+				'backgroundPauseSource'        => sanitize_key((string) ($state['source'] ?? '')),
+				'backgroundPauseId'            => sanitize_text_field((string) ($state['pauseId'] ?? '')),
+				'backgroundPauseActorUserId'   => absint($state['actorUserId'] ?? 0),
 				'backgroundStaleCount'         => $stale_count,
 				'backgroundStaleItems'         => $stale_items,
 				'backgroundStaleThreshold'     => max(1, absint($incident_state['threshold'] ?? 3)),
@@ -624,7 +665,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		 * @param string $token Owner token.
 		 * @return array<string,mixed>
 		 */
-		public function end_manual_media_conversion_session($token) {
+		public function end_manual_media_conversion_session($token, $resume_background = true) {
 			$token = $this->normalize_manual_media_conversion_token($token);
 			$state = $this->get_manual_media_conversion_state();
 			if (empty($state['manualSessionActive'])) {
@@ -656,7 +697,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
 			}
 			$resumed_background_work = false;
-			if ($released && !$this->is_media_background_work_paused()) {
+			if ($released && $resume_background && !$this->is_media_background_work_paused()) {
 				if (method_exists($this, 'reset_stale_media_queue_items')) {
 					$this->recover_abandoned_media_queue_claims();
 				}
@@ -696,21 +737,30 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		 * @param bool $paused Requested pause state.
 		 * @return array<string,mixed>
 		 */
-		public function set_media_background_work_paused($paused) {
+		public function set_media_background_work_paused($paused, $context = array()) {
 			$paused = (bool) $paused;
+			$context = is_array($context) ? $context : array();
 			$reset_processing = 0;
 
 			if ($paused) {
+				$pause_id = function_exists('wp_generate_uuid4') ? wp_generate_uuid4() : uniqid('uc-media-pause-', true);
 				update_option(
 					self::MEDIA_BACKGROUND_PAUSED_OPTION,
 					array(
-						'paused'    => true,
-						'updatedAt' => time(),
-						'reason'    => 'administrator',
-						'message'   => __('Media generation is paused by an administrator.', 'ultracache'),
+						'schemaVersion' => self::MEDIA_BACKGROUND_PAUSE_SCHEMA_VERSION,
+						'paused'        => true,
+						'pauseId'       => sanitize_text_field((string) $pause_id),
+						'requestedAt'   => time(),
+						'updatedAt'     => time(),
+						'reason'        => 'administrator',
+						'source'        => 'administrator_control',
+						'actorUserId'   => absint($context['actorUserId'] ?? get_current_user_id()),
+						'requestUri'    => sanitize_text_field((string) ($context['requestUri'] ?? '')),
+						'message'       => __('Media generation is paused by an administrator.', 'ultracache'),
 					),
 					false
 				);
+				delete_option(self::MEDIA_BACKGROUND_PAUSED_LEGACY_OPTION);
 				$this->background_generation_dispatch_registered = false;
 				wp_clear_scheduled_hook(self::BACKGROUND_QUEUE_HOOK);
 
@@ -727,6 +777,7 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				$this->invalidate_media_work_summary_cache();
 			} else {
 				delete_option(self::MEDIA_BACKGROUND_PAUSED_OPTION);
+				delete_option(self::MEDIA_BACKGROUND_PAUSED_LEGACY_OPTION);
 				$this->clear_media_stale_worker_state();
 				if (method_exists($this, 'reset_stale_media_queue_items')) {
 					$this->recover_abandoned_media_queue_claims();
@@ -771,7 +822,12 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 				return;
 			}
 
-			$this->upsert_media_queue_item($attachment_id, 'best', 'pending', '', 0);
+			if (!$this->upsert_media_queue_item($attachment_id, 'best', 'pending', '', 0)) {
+				return;
+			}
+			if (!$this->last_media_queue_upsert_created_work()) {
+				return;
+			}
 			$this->invalidate_media_work_summary_cache();
 			$this->queue_background_generation_dispatch('upload');
 		}
@@ -930,8 +986,10 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 		 * @return string
 		 */
 		private function get_background_generation_worker_signature($token, $expires) {
-			$message = 'ultracache-media-background-worker|' . (string) $token . '|' . (int) $expires . '|' . home_url('/');
-			return hash_hmac('sha256', $message, wp_salt('auth'));
+			$message = (string) $token . '|' . (int) $expires;
+			return function_exists('ultracache_internal_sign')
+				? ultracache_internal_sign('media-background-worker', $message)
+				: hash_hmac('sha256', 'ultracache|media-background-worker|' . $message, wp_salt('auth'));
 		}
 
 		/**
@@ -982,6 +1040,11 @@ trait Ultra_Cache_Media_Background_Queue_Trait
 			$expires   = time() + 120;
 			$signature = $this->get_background_generation_worker_signature($token, $expires);
 			$url       = rest_url('ultracache/v1/media/background-worker');
+			$origin    = function_exists('ultracache_get_configured_site_origin') ? (string) ultracache_get_configured_site_origin() : '';
+			$scheme    = strtolower((string) wp_parse_url($origin, PHP_URL_SCHEME));
+			if (in_array($scheme, array('http', 'https'), true)) {
+				$url = set_url_scheme((string) $url, $scheme);
+			}
 			$args      = array(
 				'timeout'             => 0.01,
 				'blocking'            => false,

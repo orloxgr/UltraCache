@@ -17,6 +17,7 @@ require_once ultracache_plugin_dir('includes/media/replacement/class-media-repla
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-database-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-theme-css-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-theme-css-stream-trait.php');
+require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-rollback-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-workflow-trait.php');
 require_once ultracache_plugin_dir('includes/media/replacement/class-media-replacement-cleanup-trait.php');
 
@@ -30,11 +31,9 @@ trait Ultra_Cache_Media_Replacement_Trait
     use Ultra_Cache_Media_Replacement_Files_Trait;
     use Ultra_Cache_Media_Replacement_Metadata_Trait;
     use Ultra_Cache_Media_Replacement_Database_Trait;
-    use Ultra_Cache_Media_Replacement_Theme_CSS_Trait, Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait {
-        Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait::scan_media_library_replacement_theme_css_references insteadof Ultra_Cache_Media_Replacement_Theme_CSS_Trait;
-        Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait::apply_media_library_replacement_theme_css_replacements insteadof Ultra_Cache_Media_Replacement_Theme_CSS_Trait;
-        Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait::verify_media_library_replacement_theme_css_replacements insteadof Ultra_Cache_Media_Replacement_Theme_CSS_Trait;
-    }
+    use Ultra_Cache_Media_Replacement_Theme_CSS_Trait;
+    use Ultra_Cache_Media_Replacement_Theme_CSS_Stream_Trait;
+    use Ultra_Cache_Media_Replacement_Rollback_Trait;
     use Ultra_Cache_Media_Replacement_Workflow_Trait;
     use Ultra_Cache_Media_Replacement_Cleanup_Trait;
 

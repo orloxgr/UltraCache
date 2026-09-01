@@ -9,10 +9,14 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
         {
             $url = (string) $url;
             $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
-            $home_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
             $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
-            if ('' !== $host && '' !== $home_host && $host !== $home_host) {
-                return 'external';
+            if ('' !== $host) {
+                $is_local = function_exists('ultracache_is_public_site_url')
+                    ? ultracache_is_public_site_url($url)
+                    : $host === strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+                if (!$is_local) {
+                    return 'external';
+                }
             }
             $core_markers = array_values(array_filter(array(
                 function_exists('ultracache_wordpress_includes_public_path') ? ultracache_wordpress_includes_public_path() : '',
@@ -303,6 +307,10 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 return $html;
             }
 
+            if (function_exists('ultracache_should_bypass_logged_in_frontend_optimizations') && ultracache_should_bypass_logged_in_frontend_optimizations()) {
+                return $html;
+            }
+
             $target_url = '';
             if (!empty($context['url'])) {
                 $target_url = esc_url_raw((string) $context['url']);
@@ -317,6 +325,9 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             }
 
             $settings = $this->get_settings();
+            if (!empty($settings['protect_elementor_compatibility'])) {
+                $settings = $this->apply_elementor_js_compatibility_context($html, $settings);
+            }
             $html = $this->apply_html_rewrite_safely($html, 'normalize-script-loading-attrs', function ($html) use ($settings) {
                 return $this->normalize_protected_script_loading_attributes_in_html($html, $settings);
             });
@@ -493,7 +504,7 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
                 });
             }
 
-            if (!empty($settings['async_css']) || !empty($settings['async_external_css']) || !empty($settings['aggressive_async_css']) || !empty($settings['font_mix_css_bundle_async'])) {
+            if (!empty($settings['async_css']) || !empty($settings['async_external_css']) || !empty($settings['async_consent_css']) || !empty($settings['async_consent_css_auto']) || !empty($settings['aggressive_async_css']) || !empty($settings['font_mix_css_bundle_async'])) {
                 $html = $this->apply_async_css_links_to_html($html);
             }
 
@@ -538,6 +549,20 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
             if (!empty($settings['delay_all_js']) || !empty($settings['defer_js']) || !empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js']) || !empty($settings['delay_non_critical_js'])) {
                 $html = $this->apply_html_rewrite_safely($html, 'restore-user-excluded-delayed-js', function ($html) use ($settings) {
                     return $this->restore_user_excluded_delayed_scripts_in_html($html, $settings);
+                });
+            }
+
+            if (!empty($settings['defer_js']) || !empty($settings['defer_all_js']) || !empty($settings['delay_all_js']) || !empty($settings['delay_safe_third_party_js']) || !empty($settings['delay_functional_third_party_js']) || !empty($settings['delay_all_third_party_js']) || !empty($settings['delay_non_critical_js']) || !empty($settings['lcp_boundary_defer'])) {
+                $html = $this->apply_html_rewrite_safely($html, 'normalize-js-dependency-lanes', function ($html) use ($settings) {
+                    return $this->ultracache_normalize_registered_dependency_lanes_in_html($html, $settings);
+                });
+
+                $html = $this->apply_html_rewrite_safely($html, 'dedupe-final-js-execution-identities', function ($html) {
+                    return $this->ultracache_dedupe_final_script_execution_identities_in_html($html);
+                });
+
+                $html = $this->apply_html_rewrite_safely($html, 'collect-non-native-inline-registry', function ($html) use ($settings) {
+                    return $this->ultracache_collect_non_native_inline_registry_in_html($html, $settings);
                 });
             }
 
@@ -986,12 +1011,18 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
         private function get_speculation_rules_prefetch_exclude_paths(array $settings = array())
         {
             $paths = array(
-                '/cart/*',
-                '/checkout/*',
-                '/my-account/*',
                 '/wc-api/*',
                 '/logout*',
             );
+
+            if (function_exists('ultracache_get_woocommerce_dynamic_paths')) {
+                foreach (ultracache_get_woocommerce_dynamic_paths() as $dynamic_path) {
+                    $pattern = $this->convert_path_to_speculation_href_pattern($dynamic_path);
+                    if ('' !== $pattern) {
+                        $paths[] = $pattern;
+                    }
+                }
+            }
 
             $excluded_paths = array();
             if (!empty($settings['excluded_paths']) && is_array($settings['excluded_paths'])) {
@@ -1022,6 +1053,10 @@ trait Ultra_Cache_Engine_HTML_Output_Trait
 
             if ('/' !== $path[0]) {
                 $path = '/' . $path;
+            }
+
+            if ('/' === $path) {
+                return '/';
             }
 
             if (substr($path, -1) === '*') {
