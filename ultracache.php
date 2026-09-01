@@ -190,6 +190,12 @@ class Ultra_Cache_WP
     /** @var bool Coalesced WooCommerce routing-contract synchronization is pending. */
     private static $woocommerce_endpoint_contract_sync_pending = false;
 
+    /** @var bool A late WPML public-topology comparison is pending. */
+    private static $wpml_topology_reconciliation_pending = false;
+
+    /** @var bool WPML topology reconciliation is currently mutating cache state. */
+    private static $wpml_topology_reconciliation_running = false;
+
     /** @var string Source that requested the late WPML public-topology comparison. */
     private static $wpml_topology_reconciliation_source = '';
 
