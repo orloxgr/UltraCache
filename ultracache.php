@@ -30,7 +30,13 @@ if (!defined('ULTRACACHE_PATH')) {
     define('ULTRACACHE_PATH', plugin_dir_path(__FILE__));
 }
 if (!defined('ULTRACACHE_URL')) {
-    define('ULTRACACHE_URL', plugin_dir_url(__FILE__));
+    $ultracache_plugin_url = plugin_dir_url(__FILE__);
+    $ultracache_public_scheme = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_SCHEME));
+    if (in_array($ultracache_public_scheme, array('http', 'https'), true)) {
+        $ultracache_plugin_url = set_url_scheme($ultracache_plugin_url, $ultracache_public_scheme);
+    }
+    define('ULTRACACHE_URL', $ultracache_plugin_url);
+    unset($ultracache_plugin_url, $ultracache_public_scheme);
 }
 
 require_once ULTRACACHE_PATH . 'includes/core/functions.php';
