@@ -4022,9 +4022,29 @@
 			const likelyBlockedJavaScriptResources = failedJavaScriptResources.filter((item) => item && item.likelyClientBlocked);
 			if (failedJavaScriptResources.length) {
 				const likelyClientBlocked = likelyBlockedJavaScriptResources.length > 0;
-				const failureMessage = likelyClientBlocked
+				const failureResourceLabels = failedJavaScriptResources
+					.map((item) => {
+						const source = String(item && item.source ? item.source : '').trim();
+						if (source) {
+							return source;
+						}
+						const detail = String(item && item.detail ? item.detail : '').trim();
+						if (detail) {
+							return detail;
+						}
+						return String(item && item.message ? item.message : '').trim();
+					})
+					.filter(Boolean)
+					.filter((value, index, values) => values.indexOf(value) === index);
+				const visibleFailureResourceLabels = failureResourceLabels.slice(0, 3);
+				const hiddenFailureResourceCount = Math.max(0, failureResourceLabels.length - visibleFailureResourceLabels.length);
+				const failureResourceDetail = visibleFailureResourceLabels.length
+					? (' Failed JS: ' + visibleFailureResourceLabels.join(' | ') + (hiddenFailureResourceCount ? ' | +' + hiddenFailureResourceCount + ' more' : ''))
+					: '';
+				const baseFailureMessage = likelyClientBlocked
 					? __('Runtime Scan could not complete because JavaScript resources appear to be blocked by your browser or an extension. Please disable any ad blocker or content-blocking extension for this site and try again.', 'ultracache')
 					: __('Runtime Scan could not complete because one or more JavaScript resources failed to load. Fix the failed JavaScript resource, or disable any browser/content blocker affecting this site, and try again.', 'ultracache');
+				const failureMessage = baseFailureMessage + failureResourceDetail;
 				setRuntimeStatus(failureMessage);
 				pushToast({ type: 'error', text: failureMessage });
 				return {
