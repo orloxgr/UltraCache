@@ -3270,44 +3270,6 @@
 
 
 
-		function runtimeJsScanResourceLooksLikeJavaScript(item) {
-			const source = String(item && item.source ? item.source : '').trim();
-			const detail = String(item && item.detail ? item.detail : '').trim().toLowerCase();
-			if (/^(?:script|pendingScript)(?:#|\s|$)/i.test(detail)) {
-				return true;
-			}
-			try {
-				const pathname = new URL(source, window.location.origin).pathname || '';
-				return /\.(?:m?js)$/i.test(pathname);
-			} catch (error) {
-				return /\.(?:m?js)(?:[?#]|$)/i.test(source);
-			}
-		}
-
-		function runtimeJsScanResourceLikelyClientBlocked(item) {
-			const source = String(item && item.source ? item.source : '').toLowerCase();
-			const message = String(item && item.message ? item.message : '').toLowerCase();
-			const detail = String(item && item.detail ? item.detail : '').toLowerCase();
-			const text = source + ' ' + message + ' ' + detail;
-			if (text.indexOf('err_blocked_by_client') !== -1 || text.indexOf('blocked by client') !== -1) {
-				return true;
-			}
-			return [
-				'googletagmanager.com',
-				'google-analytics.com',
-				'woocommerce-google-analytics-integration',
-				'connect.facebook.net',
-				'fbevents.js',
-				'mailchimp-for-woocommerce',
-				'pixel-tracking',
-				'analytics.tiktok.com',
-				'clarity.ms',
-				'hotjar.com',
-				'doubleclick.net',
-				'googleadservices.com'
-			].some((needle) => text.indexOf(needle) !== -1);
-		}
-
 		function browserRuntimeJsScanSupportsCredentialless() {
 			return !!(window.isSecureContext && typeof window.HTMLIFrameElement !== 'undefined' && 'credentialless' in window.HTMLIFrameElement.prototype);
 		}
@@ -4011,67 +3973,12 @@
 			}
 
 			const allErrors = Array.isArray(rawReport.errors) ? rawReport.errors : [];
-			const resourceErrors = allErrors
-				.filter((item) => item && String(item.kind || '').toLowerCase() === 'resource-error')
-				.map((item) => Object.assign({}, item, {
-					isJavaScript: runtimeJsScanResourceLooksLikeJavaScript(item),
-					likelyClientBlocked: runtimeJsScanResourceLikelyClientBlocked(item),
-				}));
 			const runtimeErrors = allErrors.filter((item) => item && String(item.kind || '').toLowerCase() !== 'resource-error');
-			const failedJavaScriptResources = resourceErrors.filter((item) => item && item.isJavaScript);
-			const likelyBlockedJavaScriptResources = failedJavaScriptResources.filter((item) => item && item.likelyClientBlocked);
-			if (failedJavaScriptResources.length) {
-				const likelyClientBlocked = likelyBlockedJavaScriptResources.length > 0;
-				const failureResourceLabels = failedJavaScriptResources
-					.map((item) => {
-						const source = String(item && item.source ? item.source : '').trim();
-						if (source) {
-							return source;
-						}
-						const detail = String(item && item.detail ? item.detail : '').trim();
-						if (detail) {
-							return detail;
-						}
-						return String(item && item.message ? item.message : '').trim();
-					})
-					.filter(Boolean)
-					.filter((value, index, values) => values.indexOf(value) === index);
-				const visibleFailureResourceLabels = failureResourceLabels.slice(0, 3);
-				const hiddenFailureResourceCount = Math.max(0, failureResourceLabels.length - visibleFailureResourceLabels.length);
-				const failureResourceDetail = visibleFailureResourceLabels.length
-					? (' Failed JS: ' + visibleFailureResourceLabels.join(' | ') + (hiddenFailureResourceCount ? ' | +' + hiddenFailureResourceCount + ' more' : ''))
-					: '';
-				const baseFailureMessage = likelyClientBlocked
-					? __('Runtime Scan could not complete because JavaScript resources appear to be blocked by your browser or an extension. Please disable any ad blocker or content-blocking extension for this site and try again.', 'ultracache')
-					: __('Runtime Scan could not complete because one or more JavaScript resources failed to load. Fix the failed JavaScript resource, or disable any browser/content blocker affecting this site, and try again.', 'ultracache');
-				const failureMessage = baseFailureMessage + failureResourceDetail;
-				setRuntimeStatus(failureMessage);
-				pushToast({ type: 'error', text: failureMessage });
-				return {
-					available: false,
-					source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
-					runtimeErrorCount: runtimeErrors.length,
-					resourceErrorCount: resourceErrors.length,
-					blockedResourceCount: likelyBlockedJavaScriptResources.length,
-					errors: runtimeErrors,
-					resourceErrors: resourceErrors,
-					blockedResources: likelyBlockedJavaScriptResources,
-					scripts: Array.isArray(rawReport.scripts) ? rawReport.scripts : [],
-					scanContext: scanContext,
-					scannedUrl: sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl),
-					failureReason: likelyClientBlocked ? 'client-script-blocked' : 'javascript-resource-load-failed',
-					scanContaminated: true,
-					message: failureMessage,
-					rawReport: rawReport,
-				};
-			}
 			const result = {
 				available: true,
 				source: useVisibleFrame ? 'browser-runtime-debug-frame' : 'browser-runtime-iframe',
 				runtimeErrorCount: runtimeErrors.length,
-				resourceErrorCount: resourceErrors.length,
 				errors: runtimeErrors,
-				resourceErrors: resourceErrors,
 				scripts: Array.isArray(rawReport.scripts) ? rawReport.scripts : [],
 				scanContext: scanContext,
 				scannedUrl: sanitizeRuntimeJsScanDisplayUrl(rawReport.url || resolvedScanUrl || scanUrl),

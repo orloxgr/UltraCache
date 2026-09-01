@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache - Cache and Speed Optimization
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 3.13.16
+ * Version: 3.13.17
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '3.13.16');
+    define('ULTRACACHE_VERSION', '3.13.17');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);

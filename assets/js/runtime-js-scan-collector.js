@@ -480,32 +480,6 @@
 		}
 	}
 
-	function getResourceUrl(target) {
-		try {
-			if (!target || !target.getAttribute) {
-				return '';
-			}
-			return String(target.getAttribute('src') || target.getAttribute('href') || target.currentSrc || target.src || target.href || '');
-		} catch (e) {
-			return '';
-		}
-	}
-
-	function describeResourceTarget(target) {
-		try {
-			if (!target) {
-				return '';
-			}
-			var tag = target.tagName ? String(target.tagName).toLowerCase() : 'resource';
-			var id = target.id ? ('#' + target.id) : '';
-			var rel = target.rel ? (' rel=' + target.rel) : '';
-			var type = target.type ? (' type=' + target.type) : '';
-			return tag + id + rel + type;
-		} catch (e) {
-			return '';
-		}
-	}
-
 	function collectScripts() {
 		var list = [];
 		try {
@@ -1008,11 +982,7 @@
 		window.__ultracacheRuntimeJsScan.debug.eventError = true;
 		var target = event.target || event.srcElement || null;
 		if (target && target !== window && (target.tagName || target.getAttribute)) {
-			var resourceUrl = getResourceUrl(target);
-			if (resourceUrl) {
-				addError('resource-error', 'Resource failed to load', resourceUrl, 0, 0, describeResourceTarget(target));
-				return;
-			}
+			return;
 		}
 		var detail = event.error ? asText(event.error && event.error.stack ? event.error.stack : event.error) : '';
 		addError('error', event.message || 'Script error', event.filename || '', event.lineno || 0, event.colno || 0, detail);
