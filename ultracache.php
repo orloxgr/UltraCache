@@ -3,7 +3,7 @@
  * Plugin Name: UltraCache - Cache and Speed Optimization
  * Plugin URI: https://github.com/orloxgr/ultracache
  * Description: WordPress page cache, object cache, media optimization, Varnish purge tools, warm-up, and performance diagnostics.
- * Version: 3.13.13
+ * Version: 3.13.14
  * Author: Byron Iniotakis
  * Requires at least: 6.9
  * Requires PHP: 8.1
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('ULTRACACHE_VERSION')) {
-    define('ULTRACACHE_VERSION', '3.13.13');
+    define('ULTRACACHE_VERSION', '3.13.14');
 }
 if (!defined('ULTRACACHE_FILE')) {
     define('ULTRACACHE_FILE', __FILE__);
@@ -190,13 +190,7 @@ class Ultra_Cache_WP
     /** @var bool Coalesced WooCommerce routing-contract synchronization is pending. */
     private static $woocommerce_endpoint_contract_sync_pending = false;
 
-    /** @var bool A late WPML public-topology comparison is pending. */
-    private static $wpml_topology_reconciliation_pending = false;
-
-    /** @var bool WPML topology reconciliation is currently mutating cache state. */
-    private static $wpml_topology_reconciliation_running = false;
-
-    /** @var string Source that requested the late WPML topology comparison. */
+    /** @var string Source that requested the late WPML public-topology comparison. */
     private static $wpml_topology_reconciliation_source = '';
 
     /** @var bool A late provider-neutral multilingual topology comparison is pending. */
